@@ -1,0 +1,134 @@
+import React, { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { base44 } from "@/api/base44Client";
+import { Plus, Search, Filter } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AnimatePresence } from "framer-motion";
+import TaskCard from "../components/tasks/TaskCard";
+import AddTaskDialog from "../components/tasks/AddTaskDialog";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+
+export default function Tasks() {
+  const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const queryClient = useQueryClient();
+
+  const { data: tasks = [], isLoading } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => base44.entities.Task.list("-created_date"),
+  });
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
+
+  const handleStatusChange = async (task, newStatus) => {
+    const data = { status: newStatus };
+    if (newStatus === "done") data.completed_date = new Date().toISOString();
+    await base44.entities.Task.update(task.id, data);
+    refresh();
+  };
+
+  const handleDelete = async (task) => {
+    await base44.entities.Task.delete(task.id);
+    refresh();
+  };
+
+  const filtered = tasks.filter((t) => {
+    if (search && !t.title?.toLowerCase().includes(search.toLowerCase())) return false;
+    if (statusFilter !== "all" && t.status !== statusFilter) return false;
+    if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
+    if (categoryFilter !== "all" && t.category !== categoryFilter) return false;
+    return true;
+  });
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
+          <p className="text-sm text-gray-400 mt-0.5">{tasks.length} total · {tasks.filter(t => t.status === "done").length} completed</p>
+        </div>
+        <Button onClick={() => setShowAdd(true)} className="bg-gray-900 hover:bg-gray-800 rounded-xl gap-2">
+          <Plus className="h-4 w-4" /> New Task
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="Search tasks..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 rounded-xl border-gray-200"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-32 rounded-xl"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="todo">To Do</SelectItem>
+            <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="done">Done</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+          <SelectTrigger className="w-32 rounded-xl"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Priority</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger className="w-36 rounded-xl"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Categories</SelectItem>
+            <SelectItem value="work">Work</SelectItem>
+            <SelectItem value="personal">Personal</SelectItem>
+            <SelectItem value="health">Health</SelectItem>
+            <SelectItem value="learning">Learning</SelectItem>
+            <SelectItem value="creative">Creative</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Task List */}
+      <div className="space-y-2">
+        {isLoading && (
+          <div className="text-center py-12 text-gray-400 text-sm">Loading tasks...</div>
+        )}
+        <AnimatePresence>
+          {filtered.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              onStatusChange={handleStatusChange}
+              onDelete={handleDelete}
+              onStartFocus={(t) => {
+                window.location.href = createPageUrl("Focus") + `?taskId=${t.id}&taskTitle=${encodeURIComponent(t.title)}`;
+              }}
+            />
+          ))}
+        </AnimatePresence>
+        {!isLoading && filtered.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-gray-400 text-sm">No tasks found</p>
+            <Button variant="ghost" onClick={() => setShowAdd(true)} className="mt-2 text-amber-600 hover:text-amber-700">
+              Create your first task
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <AddTaskDialog open={showAdd} onOpenChange={setShowAdd} onCreated={refresh} />
+    </div>
+  );
+}
