@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import {
   format, isSameDay, addMonths, subMonths, addYears, subYears,
-  addWeeks, subWeeks, startOfWeek, endOfWeek
+  addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth
 } from "date-fns";
 import { ChevronLeft, ChevronRight, Upload, CheckCircle2, Circle, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
