@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { LayoutDashboard, CheckSquare, Timer, BarChart3, Settings, Menu, X, TrendingUp } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Timer, BarChart3, Settings, Menu, X, TrendingUp, TrendingUpIcon } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const navItems = [
