@@ -137,13 +137,40 @@ export default function Dashboard() {
           ))}
         </div>
 
-        <button
-          onClick={() => setShowImport(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:border-amber-300 hover:text-amber-600 transition-all shadow-sm"
-        >
-          <Upload className="h-3.5 w-3.5" />
-          Import Activities
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowAddEvent(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-xl shadow-sm transition-all hover:opacity-90"
+            style={{ backgroundColor: accentColor }}
+          >
+            <CalendarDays className="h-3.5 w-3.5" />
+            Add Event
+          </button>
+          <button
+            onClick={() => setShowAddTask(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all shadow-sm"
+          >
+            <ListTodo className="h-3.5 w-3.5" />
+            Add Task
+          </button>
+          <div className="relative group">
+            <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all shadow-sm">
+              <Upload className="h-3.5 w-3.5" />
+              Import
+              <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50 min-w-[160px] hidden group-hover:block">
+              <button onClick={() => setShowImport(true)} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+                <CalendarDays className="h-3.5 w-3.5 text-gray-400" />
+                Import Calendar
+              </button>
+              <button onClick={() => setShowImportTasks(true)} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+                <ListTodo className="h-3.5 w-3.5 text-gray-400" />
+                Import Tasks
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <ImportActivitiesDialog
