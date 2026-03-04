@@ -149,13 +149,18 @@ export default function Settings() {
           <div className="h-8 w-16 rounded-lg" style={{ backgroundColor: secondaryColor, opacity: 0.9 }} />
         </div>
 
-        <Row label="Primary Color" description="Main accent — buttons, highlights, active states">
-          <ColorPicker selected={primaryColor} onChange={setPrimaryColor} />
-        </Row>
-
-        <Row label="Secondary Color" description="Supporting color — badges, tags, secondary elements">
-          <ColorPicker selected={secondaryColor} onChange={setSecondaryColor} />
-        </Row>
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Primary Color</p>
+            <p className="text-xs text-gray-400 mt-0.5">Main accent — buttons, highlights, active states</p>
+            <ColorPicker selected={primaryColor} onChange={setPrimaryColor} />
+          </div>
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-sm font-medium text-gray-800">Secondary Color</p>
+            <p className="text-xs text-gray-400 mt-0.5">Supporting color — badges, tags, secondary elements</p>
+            <ColorPicker selected={secondaryColor} onChange={setSecondaryColor} />
+          </div>
+        </div>
       </Section>
 
       {/* Calendar */}
