@@ -174,6 +174,7 @@ export function DailyView({ selectedDate, setSelectedDate, tasks, toggleStatus }
 export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks }) {
   const year = getYear(currentMonth);
   const months = Array.from({ length: 12 }, (_, i) => new Date(year, i, 1));
+  const accentColor = accent();
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
@@ -188,7 +189,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
         const isCurrentDisplayMonth = getMonth(monthDate) === getMonth(currentMonth);
 
         return (
-          <div key={monthDate.toISOString()} className={`rounded-xl border p-3 ${isCurrentDisplayMonth ? "border-amber-200 bg-amber-50/30" : "border-gray-100 bg-white"}`}>
+          <div key={monthDate.toISOString()} className="rounded-xl border p-3 bg-white" style={isCurrentDisplayMonth ? { borderColor: accentColor + "66", backgroundColor: accentColor + "08" } : { borderColor: "#f3f4f6" }}>
             <p className="text-xs font-bold text-gray-700 mb-2 text-center">{format(monthDate, "MMM")}</p>
             <div className="grid grid-cols-7 mb-1">
               {["S","M","T","W","T","F","S"].map((h, i) => (
@@ -205,13 +206,12 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
                   <button
                     key={idx}
                     onClick={() => setSelectedDate(date)}
-                    className={`relative flex flex-col items-center justify-center h-5 w-full rounded text-[9px] font-medium transition-all ${
-                      !inMonth ? "opacity-20" : ""
-                    } ${todayFlag ? "bg-amber-500 text-white" : isSelected ? "bg-gray-900 text-white" : "hover:bg-gray-100 text-gray-700"}`}
+                    className={`relative flex flex-col items-center justify-center h-5 w-full rounded text-[9px] font-medium transition-all ${!inMonth ? "opacity-20" : "hover:bg-gray-100"}`}
+                    style={todayFlag ? { backgroundColor: accentColor, color: "#fff" } : isSelected ? { backgroundColor: "#111827", color: "#fff" } : { color: "#374151" }}
                   >
                     {format(date, "d")}
                     {dayTasks.length > 0 && inMonth && !isSelected && !todayFlag && (
-                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-amber-400" />
+                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full" style={{ backgroundColor: accentColor }} />
                     )}
                   </button>
                 );
