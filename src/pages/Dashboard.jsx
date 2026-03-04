@@ -173,11 +173,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <ImportActivitiesDialog
-        open={showImport}
-        onOpenChange={setShowImport}
-        onImported={refresh}
-      />
+      <ImportActivitiesDialog open={showImport} onOpenChange={setShowImport} onImported={refresh} />
+      <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={refresh} />
+      <AddEventDialog open={showAddEvent} onOpenChange={setShowAddEvent} defaultDate={format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} />
+      <AddTaskDialog2 open={showAddTask} onOpenChange={setShowAddTask} onAdded={refresh} />
 
       {/* Calendar Card */}
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
