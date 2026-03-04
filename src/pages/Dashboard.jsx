@@ -70,13 +70,43 @@ export default function Dashboard() {
     return "";
   };
 
-  // Tasks for selected date (for task panel below calendar)
+  // Tasks filtered based on current view
   const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
-  const selectedTasks = tasks.filter((t) => {
-    if (t.due_date === selectedDateStr) return true;
-    if (!t.due_date && isSameDay(selectedDate, new Date())) return true;
-    return false;
-  });
+  const selectedTasks = (() => {
+    if (view === "Daily") {
+      return tasks.filter((t) => {
+        if (t.due_date === selectedDateStr) return true;
+        if (!t.due_date && isSameDay(selectedDate, new Date())) return true;
+        return false;
+      });
+    }
+    if (view === "Weekly") {
+      const ws = startOfWeek(selectedDate, { weekStartsOn: 0 });
+      const we = endOfWeek(selectedDate, { weekStartsOn: 0 });
+      return tasks.filter((t) => {
+        if (!t.due_date) return isSameDay(new Date(), selectedDate) || (new Date() >= ws && new Date() <= we);
+        const d = new Date(t.due_date + "T00:00:00");
+        return d >= ws && d <= we;
+      });
+    }
+    if (view === "Monthly") {
+      const ms = startOfMonth(currentMonth);
+      const me = endOfMonth(currentMonth);
+      return tasks.filter((t) => {
+        if (!t.due_date) return isSameDay(new Date(), selectedDate);
+        const d = new Date(t.due_date + "T00:00:00");
+        return d >= ms && d <= me;
+      });
+    }
+    if (view === "Yearly") {
+      const year = currentMonth.getFullYear();
+      return tasks.filter((t) => {
+        if (!t.due_date) return false;
+        return new Date(t.due_date + "T00:00:00").getFullYear() === year;
+      });
+    }
+    return [];
+  })();
 
   const showNavArrows = view !== "Daily"; // Daily has its own nav inside
 
