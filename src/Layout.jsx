@@ -9,6 +9,7 @@ const navItems = [
   { name: "Tasks", icon: CheckSquare, page: "Tasks" },
   { name: "Focus", icon: Timer, page: "Focus" },
   { name: "Analytics", icon: BarChart3, page: "Analytics" },
+  { name: "Markets", icon: TrendingUp, page: "Markets" },
   { name: "Settings", icon: Settings, page: "Settings" },
 ];
 
