@@ -66,6 +66,23 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      {/* Top bar */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowImport(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:border-amber-300 hover:text-amber-600 transition-all shadow-sm"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          Import Activities
+        </button>
+      </div>
+
+      <ImportActivitiesDialog
+        open={showImport}
+        onOpenChange={setShowImport}
+        onImported={refresh}
+      />
+
       {/* Calendar Card */}
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
         {/* Calendar Header */}
