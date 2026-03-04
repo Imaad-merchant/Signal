@@ -75,6 +75,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
 export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks }) {
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const accentColor = accent();
 
   return (
     <div className="overflow-x-auto">
@@ -86,12 +87,14 @@ export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks 
             <button
               key={date.toISOString()}
               onClick={() => setSelectedDate(date)}
-              className={`py-3 flex flex-col items-center gap-1 transition-all hover:bg-gray-50 ${isSelected ? "bg-amber-50" : ""}`}
+              className="py-3 flex flex-col items-center gap-1 transition-all hover:bg-white/60"
+              style={isSelected ? { backgroundColor: accentColor + "18" } : {}}
             >
               <span className="text-xs font-semibold text-gray-400 uppercase">{format(date, "EEE")}</span>
-              <span className={`h-8 w-8 flex items-center justify-center rounded-full text-sm font-bold ${
-                todayFlag ? "bg-amber-500 text-white" : isSelected ? "bg-gray-900 text-white" : "text-gray-700"
-              }`}>{format(date, "d")}</span>
+              <span
+                className="h-8 w-8 flex items-center justify-center rounded-full text-sm font-bold"
+                style={todayFlag ? { backgroundColor: accentColor, color: "#fff" } : isSelected ? { backgroundColor: "#111827", color: "#fff" } : { color: "#374151" }}
+              >{format(date, "d")}</span>
             </button>
           );
         })}
@@ -104,7 +107,8 @@ export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks 
             <button
               key={date.toISOString()}
               onClick={() => setSelectedDate(date)}
-              className={`min-h-[160px] p-2 text-left align-top transition-all hover:bg-gray-50 ${isSelected ? "bg-amber-50" : ""}`}
+              className="min-h-[160px] p-2 text-left align-top transition-all hover:bg-white/60"
+              style={isSelected ? { backgroundColor: accentColor + "18" } : {}}
             >
               <div className="space-y-1">
                 {dayTasks.length === 0 && <p className="text-[10px] text-gray-300 text-center mt-4">—</p>}
