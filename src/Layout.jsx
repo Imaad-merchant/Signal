@@ -31,7 +31,7 @@ export default function Layout({ children, currentPageName }) {
       <aside className="hidden lg:flex fixed left-0 top-0 bottom-0 w-56 flex-col border-r border-gray-100 bg-white z-40">
         <div className="p-6">
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-amber-500 flex items-center justify-center">
+            <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: secondaryColor }}>
               <Timer className="h-4 w-4 text-white" />
             </div>
             <span className="font-bold text-gray-900 tracking-tight">Pulse</span>
