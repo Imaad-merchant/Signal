@@ -5,9 +5,12 @@ import {
   format, isSameDay, addMonths, subMonths, addYears, subYears,
   addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Upload, CheckCircle2, Circle, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, Upload, CheckCircle2, Circle, Clock, Plus, ListTodo, CalendarDays } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
+import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
+import AddEventDialog from "../components/dashboard/AddEventDialog";
+import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 
 const VIEWS = ["Daily", "Weekly", "Monthly", "Yearly"];
