@@ -204,11 +204,17 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Tasks for Selected Date — hidden for Daily since it's inline */}
+      {/* Tasks panel — hidden for Daily since it's inline */}
       {view !== "Daily" && (
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-6">
           <h3 className="text-base font-semibold text-gray-900 mb-1">
-            {isSameDay(selectedDate, new Date()) ? "Today" : format(selectedDate, "EEEE, MMMM d")}
+            {view === "Weekly"
+              ? `Week of ${format(startOfWeek(selectedDate, { weekStartsOn: 0 }), "MMM d")}`
+              : view === "Monthly"
+              ? format(currentMonth, "MMMM yyyy")
+              : view === "Yearly"
+              ? `${currentMonth.getFullYear()} Tasks`
+              : isSameDay(selectedDate, new Date()) ? "Today" : format(selectedDate, "EEEE, MMMM d")}
           </h3>
           <p className="text-xs text-gray-400 mb-5">
             {selectedTasks.filter(t => t.status === "done").length}/{selectedTasks.length} tasks completed
