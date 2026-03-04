@@ -29,6 +29,9 @@ export default function Dashboard() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showImport, setShowImport] = useState(false);
+  const [showImportTasks, setShowImportTasks] = useState(false);
+  const [showAddEvent, setShowAddEvent] = useState(false);
+  const [showAddTask, setShowAddTask] = useState(false);
   const [view, setView] = useState("Monthly");
   const accentColor = localStorage.getItem("pulse_secondary") || "#f59e0b";
 
