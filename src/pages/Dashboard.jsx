@@ -121,8 +121,9 @@ export default function Dashboard() {
             <button
               key={v}
               onClick={() => setView(v)}
+              style={view === v ? { backgroundColor: accentColor, color: "#fff" } : {}}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
-                view === v ? "bg-gray-900 text-white" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
+                view === v ? "" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
               }`}
             >
               {v}
