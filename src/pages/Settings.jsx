@@ -138,7 +138,7 @@ export default function Settings() {
           </div>
           <div className="border-t border-gray-100 pt-4">
             <p className="text-sm font-medium text-gray-800">Secondary Color</p>
-            <p className="text-xs text-gray-400 mt-0.5">Supporting color — badges, tags, secondary elements</p>
+            <p className="text-xs text-gray-400 mt-0.5">Accent color — active nav, logo, highlights</p>
             <ColorPicker selected={secondaryColor} onChange={setSecondaryColor} />
           </div>
         </div>
