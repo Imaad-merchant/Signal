@@ -133,7 +133,7 @@ export default function Settings() {
         <div className="space-y-4">
           <div>
             <p className="text-sm font-medium text-gray-800">Primary Color</p>
-            <p className="text-xs text-gray-400 mt-0.5">Main accent — buttons, highlights, active states</p>
+            <p className="text-xs text-gray-400 mt-0.5">App background color</p>
             <ColorPicker selected={primaryColor} onChange={setPrimaryColor} />
           </div>
           <div className="border-t border-gray-100 pt-4">
