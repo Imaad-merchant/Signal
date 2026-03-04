@@ -14,15 +14,17 @@ const navItems = [
 
 export default function Layout({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const primaryColor = localStorage.getItem("pulse_primary") || "#fafafa";
+  const secondaryColor = localStorage.getItem("pulse_secondary") || "#f59e0b";
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className="min-h-screen" style={{ backgroundColor: primaryColor }}>
       <style>{`
         :root {
-          --primary: #f59e0b;
+          --accent: ${secondaryColor};
         }
         * { -webkit-font-smoothing: antialiased; }
-        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: ${primaryColor}; }
       `}</style>
 
       {/* Desktop Sidebar */}
