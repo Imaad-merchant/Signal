@@ -165,7 +165,10 @@ Return only items that have a clear date.`,
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-base font-semibold">Import Activities</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+            <Upload className="h-4 w-4" style={{ color: localStorage.getItem("pulse_secondary") || "#f59e0b" }} />
+            Import Calendar
+          </DialogTitle>
         </DialogHeader>
 
         {/* DONE */}
