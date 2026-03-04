@@ -235,7 +235,7 @@ export default function Dashboard() {
                   exit={{ opacity: 0 }}
                   onClick={() => toggleStatus(task)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:shadow-sm ${
-                    task.status === "done" ? "bg-gray-50 border-gray-100 opacity-60" : "bg-white border-gray-100 hover:border-gray-200"
+                    task.status === "done" ? "bg-white/60 border-gray-100 opacity-60" : "bg-white border-gray-100 hover:border-gray-200"
                   }`}
                 >
                   {task.status === "done" ? (
