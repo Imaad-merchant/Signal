@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, isSameMonth, isSameDay, addMonths, subMonths } from "date-fns";
-import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Clock } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, Circle, Clock, Upload } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { base44 as b44 } from "@/api/base44Client";
+import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 
 const priorityDots = { high: "bg-rose-500", medium: "bg-amber-400", low: "bg-emerald-500" };
 const categoryColors = {
