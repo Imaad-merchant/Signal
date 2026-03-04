@@ -64,7 +64,7 @@ export default function Layout({ children, currentPageName }) {
       {/* Mobile Header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 h-14 bg-white/80 backdrop-blur-xl border-b border-gray-100 flex items-center justify-between px-4 z-50">
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-amber-500 flex items-center justify-center">
+          <div className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: secondaryColor }}>
             <Timer className="h-3.5 w-3.5 text-white" />
           </div>
           <span className="font-bold text-gray-900 text-sm">Pulse</span>
