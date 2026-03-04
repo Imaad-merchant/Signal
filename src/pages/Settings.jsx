@@ -38,75 +38,56 @@ function Toggle({ checked, onChange }) {
 }
 
 function ColorPicker({ selected, onChange }) {
-  // Generate a full spectrum of colors across the color wheel
-  const hues = Array.from({ length: 36 }, (_, i) => i * 10);
-  const swatches = [
-    // Full hue spectrum at full saturation
-    ...hues.map(h => ({ h, s: 90, l: 55 })),
-    // Lighter pastel row
-    ...hues.map(h => ({ h, s: 70, l: 75 })),
-    // Darker rich row
-    ...hues.map(h => ({ h, s: 85, l: 35 })),
-    // Neutrals
-    { h: 0, s: 0, l: 10 },
-    { h: 0, s: 0, l: 30 },
-    { h: 0, s: 0, l: 50 },
-    { h: 0, s: 0, l: 70 },
-    { h: 0, s: 0, l: 90 },
-    { h: 220, s: 15, l: 45 },
-    { h: 220, s: 15, l: 60 },
-  ];
-
-  const toHex = ({ h, s, l }) => {
-    const ll = l / 100, ss = s / 100;
-    const a = ss * Math.min(ll, 1 - ll);
-    const f = n => {
-      const k = (n + h / 30) % 12;
-      const color = ll - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-      return Math.round(255 * color).toString(16).padStart(2, "0");
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-  };
+  const [open, setOpen] = useState(false);
 
   return (
-    <div className="w-full mt-3">
-      <div className="flex flex-wrap gap-1.5">
-        {swatches.map((s, i) => {
-          const hex = toHex(s);
-          const isSelected = selected === hex;
-          return (
-            <button
-              key={i}
-              onClick={() => onChange(hex)}
-              title={hex}
-              style={{ backgroundColor: hex }}
-              className={`h-6 w-6 rounded-full transition-all flex items-center justify-center ring-offset-1 ${
-                isSelected ? "ring-2 ring-gray-700 scale-110" : "hover:scale-110"
-              }`}
-            >
-              {isSelected && <Check className="h-3 w-3 text-white drop-shadow" />}
-            </button>
-          );
-        })}
-      </div>
-      {/* Custom hex input */}
-      <div className="flex items-center gap-2 mt-3">
-        <div className="h-6 w-6 rounded-full border border-gray-200 shrink-0" style={{ backgroundColor: selected }} />
-        <input
-          type="text"
-          value={selected}
-          onChange={e => /^#[0-9a-fA-F]{0,6}$/.test(e.target.value) && onChange(e.target.value)}
-          className="text-xs font-mono border border-gray-200 rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-gray-300"
-          placeholder="#000000"
-        />
-        <input
-          type="color"
-          value={selected}
-          onChange={e => onChange(e.target.value)}
-          className="h-7 w-10 rounded cursor-pointer border border-gray-200"
-          title="Open color picker"
-        />
-      </div>
+    <div className="relative">
+      {/* Trigger */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white hover:border-gray-300 transition-all text-sm"
+      >
+        <span className="h-5 w-5 rounded-full border border-gray-200 shrink-0" style={{ backgroundColor: selected }} />
+        <span className="font-mono text-xs text-gray-600">{selected}</span>
+        <svg className="h-3.5 w-3.5 text-gray-400 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute right-0 mt-2 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl p-4 w-64">
+          {/* Native color wheel */}
+          <div className="flex items-center gap-3 mb-3">
+            <input
+              type="color"
+              value={selected}
+              onChange={e => onChange(e.target.value)}
+              className="h-10 w-10 rounded-lg cursor-pointer border border-gray-200"
+            />
+            <input
+              type="text"
+              value={selected}
+              onChange={e => /^#[0-9a-fA-F]{0,6}$/.test(e.target.value) && onChange(e.target.value)}
+              className="text-xs font-mono border border-gray-200 rounded-lg px-2 py-1.5 flex-1 focus:outline-none focus:ring-1 focus:ring-gray-300"
+              placeholder="#000000"
+            />
+          </div>
+          {/* Quick presets */}
+          <p className="text-[10px] text-gray-400 mb-2 font-medium uppercase tracking-wide">Quick picks</p>
+          <div className="flex flex-wrap gap-1.5">
+            {["#ef4444","#f97316","#f59e0b","#eab308","#84cc16","#22c55e","#10b981","#14b8a6","#06b6d4","#0ea5e9","#3b82f6","#6366f1","#8b5cf6","#a855f7","#d946ef","#ec4899","#f43f5e","#64748b","#374151","#111827"].map(hex => (
+              <button
+                key={hex}
+                onClick={() => { onChange(hex); setOpen(false); }}
+                style={{ backgroundColor: hex }}
+                className={`h-6 w-6 rounded-full transition-all hover:scale-110 flex items-center justify-center ring-offset-1 ${selected === hex ? "ring-2 ring-gray-700" : ""}`}
+              >
+                {selected === hex && <Check className="h-3 w-3 text-white" />}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setOpen(false)} className="mt-3 w-full text-xs text-gray-500 hover:text-gray-800 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">Done</button>
+        </div>
+      )}
     </div>
   );
 }
