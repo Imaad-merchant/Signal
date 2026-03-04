@@ -68,7 +68,7 @@ export default function Layout({ children, currentPageName }) {
           <div className="h-7 w-7 rounded-lg flex items-center justify-center" style={{ backgroundColor: secondaryColor }}>
             <Timer className="h-3.5 w-3.5 text-white" />
           </div>
-          <span className="font-bold text-gray-900 text-sm">Pulse</span>
+          <span className="font-bold text-gray-900 text-sm">Signal</span>
         </div>
         <button onClick={() => setMobileOpen(!mobileOpen)} className="p-2 rounded-lg hover:bg-gray-100">
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
