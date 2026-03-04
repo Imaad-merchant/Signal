@@ -25,6 +25,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
   const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+  const accentColor = accent();
 
   const calDays = [];
   let day = calStart;
@@ -47,13 +48,13 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
             <button
               key={idx}
               onClick={() => setSelectedDate(date)}
-              className={`min-h-[90px] p-2 border-b border-r border-gray-50 text-left transition-all ${
-                isSelected ? "bg-amber-50" : todayFlag ? "bg-amber-50/40" : "hover:bg-gray-50"
-              } ${!isCurrentMonth ? "opacity-40" : ""}`}
+              className={`min-h-[90px] p-2 border-b border-r border-gray-50 text-left transition-all hover:bg-white/60 ${!isCurrentMonth ? "opacity-40" : ""}`}
+              style={isSelected ? { backgroundColor: accentColor + "18" } : todayFlag ? { backgroundColor: accentColor + "10" } : {}}
             >
-              <div className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium mb-1.5 ${
-                todayFlag ? "bg-amber-500 text-white" : isSelected ? "bg-gray-900 text-white" : "text-gray-700"
-              }`}>{format(date, "d")}</div>
+              <div
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium mb-1.5"
+                style={todayFlag ? { backgroundColor: accentColor, color: "#fff" } : isSelected ? { backgroundColor: "#111827", color: "#fff" } : { color: "#374151" }}
+              >{format(date, "d")}</div>
               <div className="space-y-0.5">
                 {dayTasks.slice(0, 3).map((task) => (
                   <div key={task.id} className={`text-[10px] font-medium px-1.5 py-0.5 rounded truncate ${
