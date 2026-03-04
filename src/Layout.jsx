@@ -34,7 +34,7 @@ export default function Layout({ children, currentPageName }) {
             <div className="h-8 w-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: secondaryColor }}>
               <Timer className="h-4 w-4 text-white" />
             </div>
-            <span className="font-bold text-gray-900 tracking-tight">Pulse</span>
+            <span className="font-bold text-gray-900 tracking-tight">Signal</span>
           </div>
         </div>
         <nav className="flex-1 px-3 space-y-0.5">
