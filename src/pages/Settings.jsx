@@ -1,19 +1,23 @@
-import React, { useState, useEffect } from "react";
-import { Palette, Bell, User, Moon, Sun, Monitor, Check } from "lucide-react";
+import React, { useState } from "react";
+import { Check } from "lucide-react";
 
-const ACCENT_COLORS = [
-  { name: "Amber", value: "amber", bg: "bg-amber-500", ring: "ring-amber-500" },
-  { name: "Blue", value: "blue", bg: "bg-blue-500", ring: "ring-blue-500" },
-  { name: "Violet", value: "violet", bg: "bg-violet-500", ring: "ring-violet-500" },
-  { name: "Rose", value: "rose", bg: "bg-rose-500", ring: "ring-rose-500" },
-  { name: "Emerald", value: "emerald", bg: "bg-emerald-500", ring: "ring-emerald-500" },
-  { name: "Sky", value: "sky", bg: "bg-sky-500", ring: "ring-sky-500" },
-];
-
-const THEMES = [
-  { name: "Light", value: "light", icon: Sun },
-  { name: "Dark", value: "dark", icon: Moon },
-  { name: "System", value: "system", icon: Monitor },
+const COLORS = [
+  { name: "Amber", value: "#f59e0b" },
+  { name: "Blue", value: "#3b82f6" },
+  { name: "Violet", value: "#8b5cf6" },
+  { name: "Rose", value: "#f43f5e" },
+  { name: "Emerald", value: "#10b981" },
+  { name: "Sky", value: "#0ea5e9" },
+  { name: "Orange", value: "#f97316" },
+  { name: "Pink", value: "#ec4899" },
+  { name: "Teal", value: "#14b8a6" },
+  { name: "Indigo", value: "#6366f1" },
+  { name: "Lime", value: "#84cc16" },
+  { name: "Cyan", value: "#06b6d4" },
+  { name: "Red", value: "#ef4444" },
+  { name: "Yellow", value: "#eab308" },
+  { name: "Fuchsia", value: "#d946ef" },
+  { name: "Slate", value: "#64748b" },
 ];
 
 const WEEK_STARTS = ["Sunday", "Monday"];
@@ -29,7 +33,7 @@ function Section({ title, children }) {
 
 function Row({ label, description, children }) {
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex items-start justify-between gap-4">
       <div>
         <p className="text-sm font-medium text-gray-800">{label}</p>
         {description && <p className="text-xs text-gray-400 mt-0.5">{description}</p>}
@@ -50,16 +54,36 @@ function Toggle({ checked, onChange }) {
   );
 }
 
+function ColorPicker({ selected, onChange }) {
+  return (
+    <div className="flex flex-wrap gap-2 justify-end max-w-xs">
+      {COLORS.map((c) => (
+        <button
+          key={c.value}
+          onClick={() => onChange(c.value)}
+          title={c.name}
+          style={{ backgroundColor: c.value }}
+          className={`h-7 w-7 rounded-full transition-all ring-offset-2 flex items-center justify-center ${
+            selected === c.value ? "ring-2 ring-gray-700" : "hover:scale-110"
+          }`}
+        >
+          {selected === c.value && <Check className="h-3 w-3 text-white" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function Settings() {
-  const [accent, setAccent] = useState(() => localStorage.getItem("pulse_accent") || "amber");
-  const [theme, setTheme] = useState(() => localStorage.getItem("pulse_theme") || "light");
+  const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem("pulse_primary") || "#f59e0b");
+  const [secondaryColor, setSecondaryColor] = useState(() => localStorage.getItem("pulse_secondary") || "#3b82f6");
   const [weekStart, setWeekStart] = useState(() => localStorage.getItem("pulse_week_start") || "Sunday");
   const [notifications, setNotifications] = useState(() => localStorage.getItem("pulse_notifications") !== "false");
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => {
-    localStorage.setItem("pulse_accent", accent);
-    localStorage.setItem("pulse_theme", theme);
+    localStorage.setItem("pulse_primary", primaryColor);
+    localStorage.setItem("pulse_secondary", secondaryColor);
     localStorage.setItem("pulse_week_start", weekStart);
     localStorage.setItem("pulse_notifications", notifications);
     setSaved(true);
@@ -75,42 +99,25 @@ export default function Settings() {
 
       {/* Appearance */}
       <Section title="Appearance">
-        {/* Theme */}
-        <Row label="Theme" description="Choose your preferred color scheme">
-          <div className="flex gap-2">
-            {THEMES.map(({ name, value, icon: Icon }) => (
-              <button
-                key={value}
-                onClick={() => setTheme(value)}
-                className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
-                  theme === value
-                    ? "border-gray-900 bg-gray-900 text-white"
-                    : "border-gray-200 text-gray-500 hover:border-gray-300"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {name}
-              </button>
-            ))}
+        {/* Preview */}
+        <div className="flex gap-3 p-4 rounded-xl bg-gray-50 border border-gray-100">
+          <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: primaryColor }}>
+            <span className="text-white text-xs font-bold">P</span>
           </div>
+          <div className="flex-1 space-y-1.5">
+            <div className="h-2.5 rounded-full w-3/4" style={{ backgroundColor: primaryColor, opacity: 0.8 }} />
+            <div className="h-2 rounded-full w-1/2" style={{ backgroundColor: secondaryColor, opacity: 0.6 }} />
+            <div className="h-2 rounded-full w-2/3 bg-gray-200" />
+          </div>
+          <div className="h-8 w-16 rounded-lg" style={{ backgroundColor: secondaryColor, opacity: 0.9 }} />
+        </div>
+
+        <Row label="Primary Color" description="Main accent — buttons, highlights, active states">
+          <ColorPicker selected={primaryColor} onChange={setPrimaryColor} />
         </Row>
 
-        {/* Accent color */}
-        <Row label="Accent Color" description="Used for highlights and active states">
-          <div className="flex gap-2">
-            {ACCENT_COLORS.map((c) => (
-              <button
-                key={c.value}
-                onClick={() => setAccent(c.value)}
-                title={c.name}
-                className={`h-7 w-7 rounded-full ${c.bg} transition-all ring-offset-2 ${
-                  accent === c.value ? `ring-2 ${c.ring}` : ""
-                }`}
-              >
-                {accent === c.value && <Check className="h-3 w-3 text-white mx-auto" />}
-              </button>
-            ))}
-          </div>
+        <Row label="Secondary Color" description="Supporting color — badges, tags, secondary elements">
+          <ColorPicker selected={secondaryColor} onChange={setSecondaryColor} />
         </Row>
       </Section>
 
