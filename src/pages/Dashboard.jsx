@@ -239,7 +239,7 @@ export default function Dashboard() {
                   }`}
                 >
                   {task.status === "done" ? (
-                    <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+                    <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: accentColor }} />
                   ) : (
                     <Circle className="h-5 w-5 text-gray-300 shrink-0" />
                   )}
