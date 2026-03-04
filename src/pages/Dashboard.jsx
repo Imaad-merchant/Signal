@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showImport, setShowImport] = useState(false);
   const [view, setView] = useState("Monthly");
+  const accentColor = localStorage.getItem("pulse_secondary") || "#f59e0b";
 
   const { data: tasks = [] } = useQuery({
     queryKey: ["tasks"],
