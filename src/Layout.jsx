@@ -44,10 +44,11 @@ export default function Layout({ children, currentPageName }) {
               <Link
                 key={item.page}
                 to={createPageUrl(item.page)}
+                style={isActive ? { backgroundColor: secondaryColor, color: "#fff" } : {}}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                   isActive
-                    ? "bg-gray-900 text-white"
-                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+                    ? ""
+                    : "text-gray-500 hover:text-gray-900 hover:bg-white/60"
                 }`}
               >
                 <item.icon className="h-4 w-4" />
