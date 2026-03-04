@@ -130,13 +130,14 @@ export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks 
 export function DailyView({ selectedDate, setSelectedDate, tasks, toggleStatus }) {
   const dayTasks = getTasksForDate(tasks, selectedDate);
   const todayFlag = isSameDay(selectedDate, new Date());
+  const accentColor = accent();
 
   return (
     <div className="p-6">
       <div className="flex items-center gap-4 mb-6">
         <button onClick={() => setSelectedDate(addDays(selectedDate, -1))} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">◀</button>
         <div className="flex-1 text-center">
-          <p className={`text-2xl font-bold ${todayFlag ? "text-amber-500" : "text-gray-900"}`}>{format(selectedDate, "EEEE")}</p>
+          <p className="text-2xl font-bold" style={{ color: todayFlag ? accentColor : "#111827" }}>{format(selectedDate, "EEEE")}</p>
           <p className="text-sm text-gray-400">{format(selectedDate, "MMMM d, yyyy")}</p>
         </div>
         <button onClick={() => setSelectedDate(addDays(selectedDate, 1))} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">▶</button>
