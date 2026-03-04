@@ -12,6 +12,7 @@ const categoryColors = {
 };
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const accent = () => localStorage.getItem("pulse_secondary") || "#f59e0b";
 
 function getTasksForDate(tasks, date) {
   const dateStr = format(date, "yyyy-MM-dd");
