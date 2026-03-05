@@ -8,7 +8,7 @@ import {
 } from "date-fns";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { ChevronLeft, ChevronRight, Plus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
