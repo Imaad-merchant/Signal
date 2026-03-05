@@ -21,6 +21,8 @@ const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly
 
 const DAY_HEADERS_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
 
+function getTheme() { return localStorage.getItem("pulse_theme") || "#4285f4"; }
+
 function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChange }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
