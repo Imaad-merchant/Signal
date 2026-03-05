@@ -275,7 +275,23 @@ export default function Dashboard() {
                   return (
                     <div key={cat.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 group">
                       <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
-                      <span className="text-sm text-gray-300 flex-1">{cat.label}</span>
+                      {editingCatKey === cat.key ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingCatName}
+                          onChange={e => setEditingCatName(e.target.value)}
+                          onBlur={() => renameCategory(cat.key)}
+                          onKeyDown={e => { if (e.key === "Enter") renameCategory(cat.key); if (e.key === "Escape") setEditingCatKey(null); }}
+                          className="flex-1 bg-[#1e1f20] border border-white/20 rounded px-1.5 py-0.5 text-xs text-gray-200 focus:outline-none"
+                        />
+                      ) : (
+                        <span
+                          className="text-sm text-gray-300 flex-1 cursor-text"
+                          onDoubleClick={() => { setEditingCatKey(cat.key); setEditingCatName(cat.label); }}
+                          title="Double-click to rename"
+                        >{cat.label}</span>
+                      )}
                       <button
                         onClick={() => toggleCategory(cat.key)}
                         className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 relative ${enabled ? "bg-blue-600" : "bg-white/10"}`}
