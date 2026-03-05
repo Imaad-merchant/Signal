@@ -248,6 +248,10 @@ export default function Dashboard() {
                   <ListTodo className="h-3.5 w-3.5 text-gray-400" />
                   <span className="text-sm text-gray-300">Import Tasks</span>
                 </button>
+                <button onClick={() => setShowAIAssistant(true)} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 w-full text-left">
+                  <Sparkles className="h-3.5 w-3.5 text-blue-400" />
+                  <span className="text-sm text-gray-300">AI Assistant</span>
+                </button>
               </div>
             </div>
           </motion.aside>
