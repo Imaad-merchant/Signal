@@ -83,6 +83,7 @@ export default function Dashboard() {
   const [view, setView] = useState("Month");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
 
   const CATEGORIES = [
     { label: "Work",     color: "#4285f4", key: "work" },
