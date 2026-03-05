@@ -224,7 +224,7 @@ export default function Dashboard() {
                 {CATEGORIES.map((cat) => {
                   const enabled = enabledCategories[cat.key];
                   return (
-                    <div key={cat.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
+                    <div key={cat.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 group">
                       <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
                       <span className="text-sm text-gray-300 flex-1">{cat.label}</span>
                       <button
@@ -232,7 +232,14 @@ export default function Dashboard() {
                         className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 relative ${enabled ? "bg-blue-600" : "bg-white/10"}`}
                         title={enabled ? "Hide" : "Show"}
                       >
-                        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${enabled ? "left-4.5 translate-x-0" : "left-0.5"}`} style={{ left: enabled ? "calc(100% - 14px)" : "2px" }} />
+                        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all`} style={{ left: enabled ? "calc(100% - 14px)" : "2px" }} />
+                      </button>
+                      <button
+                        onClick={() => deleteCategory(cat.key)}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-red-400 transition-all"
+                        title="Delete category"
+                      >
+                        <X className="h-3 w-3" />
                       </button>
                     </div>
                   );
