@@ -397,45 +397,47 @@ export default function Dashboard() {
         </div>
 
         {/* Calendar Body */}
-        <div className="flex-1 overflow-auto">
-          {internalView === "Monthly" && (
-            <MonthlyView
-              currentMonth={currentMonth}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              tasks={filteredTasks}
-              onUpdated={refresh}
-              categories={categories}
-            />
-          )}
-          {internalView === "Weekly" && (
-            <WeeklyView
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              tasks={filteredTasks}
-              onUpdated={refresh}
-              categories={categories}
-            />
-          )}
-          {internalView === "Daily" && (
-            <DailyView
-              selectedDate={selectedDate}
-              tasks={filteredTasks}
-              toggleStatus={toggleStatus}
-              onUpdated={refresh}
-              categories={categories}
-            />
-          )}
-          {internalView === "Yearly" && (
-            <YearlyView
-              currentMonth={currentMonth}
-              selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
-              tasks={filteredTasks}
-              dark
-            />
-          )}
-        </div>
+         <div className="flex-1 overflow-auto">
+           {internalView === "Monthly" && (
+             <MonthlyView
+               currentMonth={currentMonth}
+               selectedDate={selectedDate}
+               setSelectedDate={setSelectedDate}
+               tasks={filteredTasks}
+               onUpdated={refresh}
+               categories={categories}
+               onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+             />
+           )}
+           {internalView === "Weekly" && (
+             <WeeklyView
+               selectedDate={selectedDate}
+               setSelectedDate={setSelectedDate}
+               tasks={filteredTasks}
+               onUpdated={refresh}
+               categories={categories}
+               onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+             />
+           )}
+           {internalView === "Daily" && (
+             <DailyView
+               selectedDate={selectedDate}
+               tasks={filteredTasks}
+               toggleStatus={toggleStatus}
+               onUpdated={refresh}
+               categories={categories}
+             />
+           )}
+           {internalView === "Yearly" && (
+             <YearlyView
+               currentMonth={currentMonth}
+               selectedDate={selectedDate}
+               setSelectedDate={setSelectedDate}
+               tasks={filteredTasks}
+               dark
+             />
+           )}
+         </div>
       </div>
 
       <AIAssistantDialog open={showAIAssistant} onOpenChange={setShowAIAssistant} onUpdated={refresh} />
