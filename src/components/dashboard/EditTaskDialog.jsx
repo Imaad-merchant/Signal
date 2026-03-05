@@ -55,9 +55,13 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-100">Edit Task</h2>
-          <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {saveStatus === "saving" && <span className="flex items-center gap-1 text-xs text-gray-500"><Loader2 className="h-3 w-3 animate-spin" />Saving…</span>}
+            {saveStatus === "saved" && <span className="flex items-center gap-1 text-xs text-green-500"><Check className="h-3 w-3" />Saved</span>}
+            <button onClick={onClose} className="p-1 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Title */}
