@@ -445,6 +445,7 @@ export default function Dashboard() {
       <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={refresh} />
       <AddEventDialog open={showAddEvent} onOpenChange={setShowAddEvent} defaultDate={format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} />
       <AddTaskDialog2 open={showAddTask} onOpenChange={setShowAddTask} onAdded={refresh} />
+      <TaskDetailModal task={selectedTask} open={showTaskDetail} onOpenChange={setShowTaskDetail} />
     </div>
   );
 }
