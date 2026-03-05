@@ -203,27 +203,24 @@ export default function Dashboard() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 flex-shrink-0">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
-            <Menu className="h-5 w-5" />
+        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/10 flex-shrink-0 min-w-0">
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-1.5 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0">
+            <Menu className="h-4 w-4" />
           </button>
 
-          <div className="flex items-center gap-2">
-            <Calendar className="h-6 w-6 text-blue-400" />
-            <span className="text-lg font-semibold text-gray-100 hidden sm:block">Calendar</span>
-          </div>
+          <Calendar className="h-5 w-5 text-blue-400 flex-shrink-0" />
 
-          <button onClick={navigateToday} className="ml-2 px-4 py-1.5 rounded border border-white/20 text-sm text-gray-300 hover:bg-white/10 transition-colors font-medium">
+          <button onClick={navigateToday} className="px-3 py-1 rounded border border-white/20 text-xs text-gray-300 hover:bg-white/10 transition-colors font-medium flex-shrink-0">
             Today
           </button>
-          <button onClick={navigatePrev} className="p-1.5 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
-            <ChevronLeft className="h-5 w-5" />
+          <button onClick={navigatePrev} className="p-1 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0">
+            <ChevronLeft className="h-4 w-4" />
           </button>
-          <button onClick={navigateNext} className="p-1.5 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
-            <ChevronRight className="h-5 w-5" />
+          <button onClick={navigateNext} className="p-1 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0">
+            <ChevronRight className="h-4 w-4" />
           </button>
 
-          <h2 className="text-lg font-medium text-gray-100 ml-1">{headerLabel()}</h2>
+          <h2 className="text-sm font-medium text-gray-100 truncate min-w-0">{headerLabel()}</h2>
 
           <div className="ml-auto flex items-center gap-1.5">
             {/* View switcher */}
