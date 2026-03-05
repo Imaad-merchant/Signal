@@ -89,6 +89,8 @@ export default function Dashboard() {
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState("#4285f4");
+  const [editingCatKey, setEditingCatKey] = useState(null);
+  const [editingCatName, setEditingCatName] = useState("");
 
   const DEFAULT_CATEGORIES = [
     { label: "Work",     color: "#4285f4", key: "work" },
