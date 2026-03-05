@@ -99,11 +99,17 @@ export default function Dashboard() {
     { label: "Learning", color: "#f4b400", key: "learning" },
     { label: "Creative", color: "#db4437", key: "creative" },
   ];
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
-  const [enabledCategories, setEnabledCategories] = useState(
-    () => Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, true]))
-  );
-  const toggleCategory = (key) => setEnabledCategories(prev => ({ ...prev, [key]: !prev[key] }));
+  const [categories, setCategories] = useState(() => {
+    try { const s = localStorage.getItem("pulse_categories"); return s ? JSON.parse(s) : DEFAULT_CATEGORIES; } catch { return DEFAULT_CATEGORIES; }
+  });
+  const [enabledCategories, setEnabledCategories] = useState(() => {
+    try { const s = localStorage.getItem("pulse_enabled_categories"); return s ? JSON.parse(s) : Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, true])); } catch { return Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, true])); }
+  });
+
+  const saveCategories = (cats) => { setCategories(cats); localStorage.setItem("pulse_categories", JSON.stringify(cats)); };
+  const saveEnabledCategories = (enabled) => { setEnabledCategories(enabled); localStorage.setItem("pulse_enabled_categories", JSON.stringify(enabled)); };
+
+  const toggleCategory = (key) => { const next = { ...enabledCategories, [key]: !enabledCategories[key] }; saveEnabledCategories(next); };
   const deleteCategory = (key) => {
     setCategories(prev => prev.filter(c => c.key !== key));
     setEnabledCategories(prev => { const next = { ...prev }; delete next[key]; return next; });
