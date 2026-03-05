@@ -268,7 +268,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
             className="rounded-xl p-3 border transition-all"
             style={{
               backgroundColor: isCurrentDisplayMonth ? "#2d2e30" : "#252627",
-              borderColor: isCurrentDisplayMonth ? "#4285f4" : "rgba(255,255,255,0.08)",
+              borderColor: isCurrentDisplayMonth ? getTheme() : "rgba(255,255,255,0.08)",
             }}
           >
             <p className="text-xs font-bold text-gray-300 mb-2 text-center">{format(monthDate, "MMMM")}</p>
