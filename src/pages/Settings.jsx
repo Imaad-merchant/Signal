@@ -124,29 +124,19 @@ export default function Settings() {
       {/* Appearance */}
       <Section title="Appearance">
         {/* Preview */}
-        <div className="flex gap-3 p-4 rounded-xl bg-gray-50 border border-gray-100">
-          <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: primaryColor }}>
-            <span className="text-white text-xs font-bold">P</span>
-          </div>
+        <div className="flex gap-3 p-4 rounded-xl bg-gray-50 border border-gray-100 items-center">
+          <div className="h-10 w-10 rounded-full flex-shrink-0" style={{ backgroundColor: themeColor }} />
           <div className="flex-1 space-y-1.5">
-            <div className="h-2.5 rounded-full w-3/4" style={{ backgroundColor: primaryColor, opacity: 0.8 }} />
-            <div className="h-2 rounded-full w-1/2" style={{ backgroundColor: secondaryColor, opacity: 0.6 }} />
-            <div className="h-2 rounded-full w-2/3 bg-gray-200" />
+            <div className="h-2.5 rounded-full w-3/4" style={{ backgroundColor: themeColor, opacity: 0.9 }} />
+            <div className="h-2 rounded-full w-1/2" style={{ backgroundColor: themeColor, opacity: 0.5 }} />
+            <div className="h-2 rounded-full w-2/3" style={{ backgroundColor: themeColor, opacity: 0.25 }} />
           </div>
-          <div className="h-8 w-16 rounded-lg" style={{ backgroundColor: secondaryColor, opacity: 0.9 }} />
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <p className="text-sm font-medium text-gray-800">Primary Color</p>
-            <p className="text-xs text-gray-400 mt-0.5">App background color</p>
-            <ColorPicker selected={primaryColor} onChange={setPrimaryColor} />
-          </div>
-          <div className="border-t border-gray-100 pt-4">
-            <p className="text-sm font-medium text-gray-800">Secondary Color</p>
-            <p className="text-xs text-gray-400 mt-0.5">Accent color — active nav, logo, highlights</p>
-            <ColorPicker selected={secondaryColor} onChange={setSecondaryColor} />
-          </div>
+        <div>
+          <p className="text-sm font-medium text-gray-800">Theme Color</p>
+          <p className="text-xs text-gray-400 mt-0.5 mb-2">Used for highlights, active states, and accents throughout the app</p>
+          <ColorPicker selected={themeColor} onChange={setThemeColor} />
         </div>
       </Section>
 
