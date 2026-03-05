@@ -1,4 +1,6 @@
 import React, { useState, useCallback } from "react";
+
+function getTheme() { return localStorage.getItem("pulse_theme") || "#4285f4"; }
 import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear } from "date-fns";
 import { CheckCircle2, Circle, Clock } from "lucide-react";
 import TaskContextMenu from "./TaskContextMenu";
