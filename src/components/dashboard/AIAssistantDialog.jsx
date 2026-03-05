@@ -71,47 +71,19 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
       currentTasks.map((t) => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
-    const prompt = `You are a smart calendar & task management AI assistant. Today's date is ${today}.
+    const conversationHistory = newMessages.slice(1).map(m => ({
+      role: m.role,
+      content: m.content,
+      imageUrls: m.imageUrls || [],
+    }));
 
-The user's current tasks (as JSON):
-${tasksJson}
-
-The user says: "${input}"
-
-Your job is to figure out what the user wants and return BOTH:
-1. A friendly conversational reply explaining what you did or will do.
-2. A list of actions to perform on the tasks.
-
-Valid actions:
-- create: { action: "create", title, due_date (YYYY-MM-DD), category (work|personal|health|learning|creative), priority (low|medium|high), description? }
-- update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
-- delete: { action: "delete", id }
-
-Return your response as JSON with this structure:
-{
-  "reply": "Your friendly message here",
-  "actions": [ ...actions ]
-}
-
-If there are images, analyze them for schedule/task information and extract events from them.
-Only return valid JSON. No markdown code blocks.`;
-
-    const result = await base44.integrations.Core.InvokeLLM({
-      prompt,
-      file_urls: uploadedUrls.length > 0 ? uploadedUrls : undefined,
-      response_json_schema: {
-        type: "object",
-        properties: {
-          reply: { type: "string" },
-          actions: {
-            type: "array",
-            items: { type: "object" },
-          },
-        },
-        required: ["reply", "actions"],
-      },
+    const response = await base44.functions.invoke('aiAssistant', {
+      messages: conversationHistory,
+      tasks: currentTasks,
+      imageUrls: uploadedUrls,
     });
 
+    const result = response.data;
     const reply = result?.reply || "Done!";
     const actions = result?.actions || [];
 
