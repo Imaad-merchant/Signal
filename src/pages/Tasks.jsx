@@ -19,9 +19,15 @@ export default function Tasks() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const queryClient = useQueryClient();
 
+  const { data: user } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => base44.auth.me(),
+  });
+
   const { data: tasks = [], isLoading } = useQuery({
-    queryKey: ["tasks"],
-    queryFn: () => base44.entities.Task.list("-created_date"),
+    queryKey: ["tasks", user?.email],
+    queryFn: () => base44.entities.Task.filter({ created_by: user.email }, "-created_date"),
+    enabled: !!user,
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
