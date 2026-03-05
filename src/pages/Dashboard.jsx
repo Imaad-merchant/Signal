@@ -163,15 +163,33 @@ export default function Dashboard() {
             style={{ width: 240 }}
           >
             {/* Create button */}
-            <div className="p-4 pt-5">
+            <div className="p-4 pt-5 relative">
               <button
-                onClick={() => setShowAddEvent(true)}
+                onClick={() => setCreateMenuOpen(o => !o)}
                 className="flex items-center gap-3 w-full px-4 py-3 bg-[#2d2e30] hover:bg-[#3c3d3f] rounded-2xl text-sm font-medium text-gray-200 transition-all shadow-md"
               >
                 <Plus className="h-5 w-5 text-gray-300" />
                 Create
-                <ChevronDown className="h-3.5 w-3.5 text-gray-400 ml-auto" />
+                <ChevronDown className={`h-3.5 w-3.5 text-gray-400 ml-auto transition-transform ${createMenuOpen ? "rotate-180" : ""}`} />
               </button>
+              {createMenuOpen && (
+                <div className="absolute left-4 right-4 top-full mt-1 bg-[#2d2e30] border border-white/10 rounded-xl shadow-xl z-50 overflow-hidden">
+                  <button
+                    onClick={() => { setShowAddEvent(true); setCreateMenuOpen(false); }}
+                    className="flex items-center gap-3 w-full px-4 py-3 hover:bg-white/10 text-sm text-gray-200 transition-colors"
+                  >
+                    <CalendarDays className="h-4 w-4 text-blue-400" />
+                    New Event
+                  </button>
+                  <button
+                    onClick={() => { setShowAddTask(true); setCreateMenuOpen(false); }}
+                    className="flex items-center gap-3 w-full px-4 py-3 hover:bg-white/10 text-sm text-gray-200 transition-colors"
+                  >
+                    <ListTodo className="h-4 w-4 text-amber-400" />
+                    New Task
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Mini calendar */}
