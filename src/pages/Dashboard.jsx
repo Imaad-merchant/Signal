@@ -87,17 +87,22 @@ export default function Dashboard() {
   const [importMenuOpen, setImportMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
 
-  const CATEGORIES = [
+  const DEFAULT_CATEGORIES = [
     { label: "Work",     color: "#4285f4", key: "work" },
     { label: "Personal", color: "#a142f4", key: "personal" },
     { label: "Health",   color: "#0f9d58", key: "health" },
     { label: "Learning", color: "#f4b400", key: "learning" },
     { label: "Creative", color: "#db4437", key: "creative" },
   ];
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
   const [enabledCategories, setEnabledCategories] = useState(
-    () => Object.fromEntries(CATEGORIES.map(c => [c.key, true]))
+    () => Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, true]))
   );
   const toggleCategory = (key) => setEnabledCategories(prev => ({ ...prev, [key]: !prev[key] }));
+  const deleteCategory = (key) => {
+    setCategories(prev => prev.filter(c => c.key !== key));
+    setEnabledCategories(prev => { const next = { ...prev }; delete next[key]; return next; });
+  };
 
   const internalView = VIEW_MAP[view];
 
