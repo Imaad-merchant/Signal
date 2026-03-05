@@ -175,22 +175,35 @@ export default function Dashboard() {
               onMonthChange={setCurrentMonth}
             />
 
-            {/* My calendars */}
+            {/* Categories */}
             <div className="px-3 mt-2">
               <div className="flex items-center justify-between py-2 px-2">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">My Calendars</span>
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Categories</span>
+                <button
+                  onClick={() => setShowAddEvent(true)}
+                  className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
+                  title="Add event"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
               </div>
-              <div className="space-y-1 pl-1">
-                {[
-                  { label: "Tasks", color: "#4285f4" },
-                  { label: "Work", color: "#0f9d58" },
-                  { label: "Personal", color: "#a142f4" },
-                ].map((cal) => (
-                  <div key={cal.label} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
-                    <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cal.color }} />
-                    <span className="text-sm text-gray-300">{cal.label}</span>
-                  </div>
-                ))}
+              <div className="space-y-0.5 pl-1">
+                {CATEGORIES.map((cat) => {
+                  const enabled = enabledCategories[cat.key];
+                  return (
+                    <div key={cat.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
+                      <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
+                      <span className="text-sm text-gray-300 flex-1">{cat.label}</span>
+                      <button
+                        onClick={() => toggleCategory(cat.key)}
+                        className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 relative ${enabled ? "bg-blue-600" : "bg-white/10"}`}
+                        title={enabled ? "Hide" : "Show"}
+                      >
+                        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${enabled ? "left-4.5 translate-x-0" : "left-0.5"}`} style={{ left: enabled ? "calc(100% - 14px)" : "2px" }} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
