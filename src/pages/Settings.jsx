@@ -64,25 +64,6 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Appearance */}
-      <Section title="Appearance">
-        {/* Preview */}
-        <div className="flex gap-3 p-4 rounded-xl bg-gray-50 border border-gray-100 items-center">
-          <div className="h-10 w-10 rounded-full flex-shrink-0" style={{ backgroundColor: themeColor }} />
-          <div className="flex-1 space-y-1.5">
-            <div className="h-2.5 rounded-full w-3/4" style={{ backgroundColor: themeColor, opacity: 0.9 }} />
-            <div className="h-2 rounded-full w-1/2" style={{ backgroundColor: themeColor, opacity: 0.5 }} />
-            <div className="h-2 rounded-full w-2/3" style={{ backgroundColor: themeColor, opacity: 0.25 }} />
-          </div>
-        </div>
-
-        <div>
-          <p className="text-sm font-medium text-gray-800">Theme Color</p>
-          <p className="text-xs text-gray-400 mt-0.5 mb-2">Used for highlights, active states, and accents throughout the app</p>
-          <ColorPicker selected={themeColor} onChange={setThemeColor} />
-        </div>
-      </Section>
-
       {/* Calendar */}
       <Section title="Calendar">
         <Row label="Week Starts On" description="First day of the week in calendar views">
