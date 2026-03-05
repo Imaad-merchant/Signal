@@ -220,7 +220,7 @@ export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated }) {
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-white/10 text-left transition-all hover:bg-white/5 bg-[#2d2e30]"
               >
                 {task.status === "done"
-                  ? <CheckCircle2 className="h-5 w-5 text-blue-500 shrink-0" />
+                  ? <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: getTheme() }} />
                   : <Circle className="h-5 w-5 text-gray-600 shrink-0" />}
                 <div className="h-3 w-1 rounded-full shrink-0" style={{ backgroundColor: task.status === "done" ? "#555" : c.bg }} />
                 <div className="flex-1 min-w-0">
