@@ -31,10 +31,11 @@ Your job is to understand what the user wants and return BOTH a friendly reply A
 
 Valid actions:
 - create: { action: "create", title, due_date (YYYY-MM-DD), category (${categoryEnum}), priority (low|medium|high), description? }
+- create_category: { action: "create_category", label, color (hex code like #FF5733), key }
 - update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
 - delete: { action: "delete", id }
 
-IMPORTANT: When the user groups events or tells you to assign them to a specific category, use that exact category. Match the user's intent precisely.
+IMPORTANT: When the user asks for a new category with a specific color, create it with create_category action FIRST. Extract the color from user's description (e.g., "green" -> #0f9d58, "blue" -> #4285f4, etc.). Use common hex colors.
 
 Always respond with valid JSON only (no markdown blocks):
 {
