@@ -97,7 +97,7 @@ function useDragDrop(onUpdated) {
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
-export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [] }) {
+export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
