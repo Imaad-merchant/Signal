@@ -83,6 +83,8 @@ export default function Dashboard() {
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [showTaskDetail, setShowTaskDetail] = useState(false);
   const [view, setView] = useState("Month");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
