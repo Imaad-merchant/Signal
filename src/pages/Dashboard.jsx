@@ -15,6 +15,7 @@ import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
 import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
+import TaskDetailModal from "../components/dashboard/TaskDetailModal";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
