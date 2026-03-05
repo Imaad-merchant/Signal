@@ -170,7 +170,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
 export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, categories = [] }) {
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const { openMenu, menuEl } = useContextMenu(onUpdated);
+  const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
   const { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate } = useDragDrop(onUpdated);
 
   return (
