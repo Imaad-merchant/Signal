@@ -6,7 +6,9 @@ import {
   addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
   addDays, isSameMonth
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Upload, Plus, ListTodo, CalendarDays, Search, Menu, Grid3X3, AlignJustify, Calendar, ChevronDown } from "lucide-react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { ChevronLeft, ChevronRight, Plus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
