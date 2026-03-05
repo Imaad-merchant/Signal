@@ -84,6 +84,20 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
 
+  const CATEGORIES = [
+    { label: "Work",     color: "#4285f4", key: "work" },
+    { label: "Personal", color: "#a142f4", key: "personal" },
+    { label: "Health",   color: "#0f9d58", key: "health" },
+    { label: "Learning", color: "#f4b400", key: "learning" },
+    { label: "Creative", color: "#db4437", key: "creative" },
+  ];
+  const [enabledCategories, setEnabledCategories] = useState(
+    () => Object.fromEntries(CATEGORIES.map(c => [c.key, true]))
+  );
+  const toggleCategory = (key) => setEnabledCategories(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const filteredTasks = tasks.filter(t => enabledCategories[t.category ?? "work"] !== false);
+
   const internalView = VIEW_MAP[view];
 
   const { data: tasks = [] } = useQuery({
