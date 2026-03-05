@@ -284,8 +284,9 @@ export default function Dashboard() {
                 <button
                   key={v}
                   onClick={() => setView(v)}
+                  style={view === v ? { backgroundColor: getTheme(), color: "#fff" } : {}}
                   className={`px-2.5 py-1.5 text-xs font-medium transition-all ${
-                    view === v ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200 hover:bg-white/10"
+                    view === v ? "" : "text-gray-400 hover:text-gray-200 hover:bg-white/10"
                   }`}
                 >
                   {v}
