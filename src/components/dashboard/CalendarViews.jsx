@@ -238,7 +238,7 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, ca
 export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated, categories = [] }) {
   const dayTasks = getTasksForDate(tasks, selectedDate);
   const todayFlag = isSameDay(selectedDate, new Date());
-  const { openMenu, menuEl } = useContextMenu(onUpdated);
+  const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
 
   return (
     <>
