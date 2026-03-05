@@ -128,7 +128,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-[#1e1f20] text-gray-100 -m-4 sm:-m-6 lg:-m-8 overflow-hidden">
+    <div className="flex h-screen bg-[#1e1f20] text-gray-100 overflow-hidden">
 
       {/* Left Sidebar */}
       <AnimatePresence>
