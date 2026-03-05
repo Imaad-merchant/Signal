@@ -170,6 +170,7 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated }) 
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const { openMenu, menuEl } = useContextMenu(onUpdated);
+  const { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate } = useDragDrop(onUpdated);
 
   return (
     <>
@@ -206,16 +207,21 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated }) 
           {weekDays.map((date) => {
             const dayTasks = getTasksForDate(tasks, date);
             const isSelected = isSameDay(date, selectedDate);
+            const dateStr = format(date, "yyyy-MM-dd");
+            const isDragOver = dragOverDate === dateStr;
             return (
               <div
                 key={date.toISOString()}
                 onClick={() => setSelectedDate(date)}
-                className={`p-2 min-h-[300px] cursor-pointer hover:bg-white/5 transition-colors ${isSelected ? "bg-white/5" : ""}`}
+                onDragOver={(e) => onDragOver(e, dateStr)}
+                onDrop={(e) => onDrop(e, dateStr)}
+                onDragLeave={onDragLeave}
+                className={`p-2 min-h-[300px] cursor-pointer transition-colors ${isDragOver ? "bg-blue-500/20" : isSelected ? "bg-white/5" : "hover:bg-white/5"}`}
               >
                 <div className="space-y-1">
                   {dayTasks.length === 0 && <p className="text-[10px] text-gray-600 text-center mt-6">—</p>}
                   {dayTasks.map((task) => (
-                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} />
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} />
                   ))}
                 </div>
               </div>
