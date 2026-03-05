@@ -224,7 +224,7 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, ca
                 <div className="space-y-1">
                   {dayTasks.length === 0 && <p className="text-[10px] text-gray-600 text-center mt-6">—</p>}
                   {dayTasks.map((task) => (
-                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} />
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
                   ))}
                 </div>
               </div>
