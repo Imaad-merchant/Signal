@@ -53,6 +53,7 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
       role: "user",
       content: input,
       images: attachedImages.map((i) => i.preview),
+      imageUrls: uploadedUrls,
     };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
