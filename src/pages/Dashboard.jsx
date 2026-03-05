@@ -288,7 +288,7 @@ export default function Dashboard() {
               currentMonth={currentMonth}
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
-              tasks={tasks}
+              tasks={filteredTasks}
               onUpdated={refresh}
             />
           )}
@@ -296,14 +296,14 @@ export default function Dashboard() {
             <WeeklyView
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
-              tasks={tasks}
+              tasks={filteredTasks}
               onUpdated={refresh}
             />
           )}
           {internalView === "Daily" && (
             <DailyView
               selectedDate={selectedDate}
-              tasks={tasks}
+              tasks={filteredTasks}
               toggleStatus={toggleStatus}
               onUpdated={refresh}
             />
@@ -313,7 +313,7 @@ export default function Dashboard() {
               currentMonth={currentMonth}
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
-              tasks={tasks}
+              tasks={filteredTasks}
               dark
             />
           )}
