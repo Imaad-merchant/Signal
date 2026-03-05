@@ -38,70 +38,13 @@ function Toggle({ checked, onChange }) {
   );
 }
 
-function ColorPicker({ selected, onChange }) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div className="relative">
-      {/* Trigger */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-200 bg-white hover:border-gray-300 transition-all text-sm"
-      >
-        <span className="h-5 w-5 rounded-full border border-gray-200 shrink-0" style={{ backgroundColor: selected }} />
-        <span className="font-mono text-xs text-gray-600">{selected}</span>
-        <svg className="h-3.5 w-3.5 text-gray-400 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-      </button>
-
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute right-0 mt-2 z-50 bg-white border border-gray-200 rounded-2xl shadow-xl p-4 w-64">
-          {/* Native color wheel */}
-          <div className="flex items-center gap-3 mb-3">
-            <input
-              type="color"
-              value={selected}
-              onChange={e => onChange(e.target.value)}
-              className="h-10 w-10 rounded-lg cursor-pointer border border-gray-200"
-            />
-            <input
-              type="text"
-              value={selected}
-              onChange={e => /^#[0-9a-fA-F]{0,6}$/.test(e.target.value) && onChange(e.target.value)}
-              className="text-xs font-mono border border-gray-200 rounded-lg px-2 py-1.5 flex-1 focus:outline-none focus:ring-1 focus:ring-gray-300"
-              placeholder="#000000"
-            />
-          </div>
-          {/* Quick presets */}
-          <p className="text-[10px] text-gray-400 mb-2 font-medium uppercase tracking-wide">Quick picks</p>
-          <div className="flex flex-wrap gap-1.5">
-            {["#ef4444","#f97316","#f59e0b","#eab308","#84cc16","#22c55e","#10b981","#14b8a6","#06b6d4","#0ea5e9","#3b82f6","#6366f1","#8b5cf6","#a855f7","#d946ef","#ec4899","#f43f5e","#64748b","#374151","#111827","#ffffff"].map(hex => (
-              <button
-                key={hex}
-                onClick={() => { onChange(hex); setOpen(false); }}
-                style={{ backgroundColor: hex }}
-                className={`h-6 w-6 rounded-full transition-all hover:scale-110 flex items-center justify-center ring-offset-1 ${selected === hex ? "ring-2 ring-gray-700" : ""}`}
-              >
-                {selected === hex && <Check className="h-3 w-3 text-white" />}
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setOpen(false)} className="mt-3 w-full text-xs text-gray-500 hover:text-gray-800 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">Done</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Settings() {
   const navigate = useNavigate();
-  const [themeColor, setThemeColor] = useState(() => localStorage.getItem("pulse_theme") || "#4285f4");
   const [weekStart, setWeekStart] = useState(() => localStorage.getItem("pulse_week_start") || "Sunday");
   const [notifications, setNotifications] = useState(() => localStorage.getItem("pulse_notifications") !== "false");
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => {
-    localStorage.setItem("pulse_theme", themeColor);
     localStorage.setItem("pulse_week_start", weekStart);
     localStorage.setItem("pulse_notifications", notifications);
     window.dispatchEvent(new Event("focus"));
