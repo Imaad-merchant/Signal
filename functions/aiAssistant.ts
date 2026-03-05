@@ -9,24 +9,32 @@ Deno.serve(async (req) => {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { messages, tasks, imageUrls } = await req.json();
+    const { messages, tasks, imageUrls, categories } = await req.json();
 
     const today = new Date().toISOString().slice(0, 10);
     const tasksJson = JSON.stringify(
       (tasks || []).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority, description: t.description }))
     );
 
+    // Build category list for the AI
+    const categoryList = (categories || []).map(c => `${c.label} (${c.key})`).join(", ") || "work, personal, health, learning, creative";
+    const categoryEnum = (categories || []).map(c => c.key).join("|") || "work|personal|health|learning|creative";
+
     const systemPrompt = `You are a smart, friendly calendar & task management AI assistant. Today's date is ${today}.
 
 The user's current tasks (JSON):
 ${tasksJson}
 
+Available categories: ${categoryList}
+
 Your job is to understand what the user wants and return BOTH a friendly reply AND a list of actions.
 
 Valid actions:
-- create: { action: "create", title, due_date (YYYY-MM-DD), category (work|personal|health|learning|creative), priority (low|medium|high), description? }
+- create: { action: "create", title, due_date (YYYY-MM-DD), category (${categoryEnum}), priority (low|medium|high), description? }
 - update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
 - delete: { action: "delete", id }
+
+IMPORTANT: When the user groups events or tells you to assign them to a specific category, use that exact category. Match the user's intent precisely.
 
 Always respond with valid JSON only (no markdown blocks):
 {
