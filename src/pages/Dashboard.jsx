@@ -106,6 +106,15 @@ export default function Dashboard() {
     setCategories(prev => prev.filter(c => c.key !== key));
     setEnabledCategories(prev => { const next = { ...prev }; delete next[key]; return next; });
   };
+  const addCategory = () => {
+    if (!newCatName.trim()) return;
+    const key = newCatName.trim().toLowerCase().replace(/\s+/g, "_") + "_" + Date.now();
+    setCategories(prev => [...prev, { label: newCatName.trim(), color: newCatColor, key }]);
+    setEnabledCategories(prev => ({ ...prev, [key]: true }));
+    setNewCatName("");
+    setNewCatColor("#4285f4");
+    setShowAddCategory(false);
+  };
 
   const internalView = VIEW_MAP[view];
 
