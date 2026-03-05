@@ -211,7 +211,7 @@ For each event also assign a short category like "work", "school", "health", "so
                 </div>
                 <div className="text-center">
                   <p className="text-sm font-medium text-gray-700">Drop your file here</p>
-                  <p className="text-xs text-gray-400 mt-0.5">or click to browse · images, PDF, CSV</p>
+                  <p className="text-xs text-gray-400 mt-0.5">or click to browse · images, PDF, CSV, text, Word docs</p>
                 </div>
                 <input
                   ref={inputRef}
