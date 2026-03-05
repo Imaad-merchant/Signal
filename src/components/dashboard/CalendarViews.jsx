@@ -202,7 +202,7 @@ export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated }) {
           <div className="text-4xl font-thin text-gray-200 mb-1">{format(selectedDate, "d")}</div>
           <div className="text-lg font-medium text-gray-300">{format(selectedDate, "EEEE")}</div>
           <div className="text-sm text-gray-500">{format(selectedDate, "MMMM yyyy")}</div>
-          {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-medium">Today</div>}
+          {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: getTheme() + "33", color: getTheme() }}>Today</div>}
         </div>
         <div className="space-y-2">
           {dayTasks.length === 0 && (
