@@ -101,10 +101,10 @@ For each event also assign a short category like "work", "school", "health", "so
       }
     });
 
-    const tasks = result?.tasks || [];
+    const tasks = (result?.tasks || []).filter(t => t.title && t.due_date);
     if (tasks.length === 0) {
       setStatus("error");
-      setErrorMsg("No events found. Make sure the image is clear and shows a calendar or schedule with dates.");
+      setErrorMsg("No events with dates found. Make sure the document contains event names with dates (e.g. 'March 5 - Meeting').");
       return;
     }
 
