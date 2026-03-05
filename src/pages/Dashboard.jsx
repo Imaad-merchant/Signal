@@ -96,8 +96,6 @@ export default function Dashboard() {
   );
   const toggleCategory = (key) => setEnabledCategories(prev => ({ ...prev, [key]: !prev[key] }));
 
-  const filteredTasks = tasks.filter(t => enabledCategories[t.category ?? "work"] !== false);
-
   const internalView = VIEW_MAP[view];
 
   const { data: tasks = [] } = useQuery({
