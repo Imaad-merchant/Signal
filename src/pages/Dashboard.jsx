@@ -402,6 +402,7 @@ export default function Dashboard() {
               setSelectedDate={setSelectedDate}
               tasks={filteredTasks}
               onUpdated={refresh}
+              categories={categories}
             />
           )}
           {internalView === "Weekly" && (
@@ -410,6 +411,7 @@ export default function Dashboard() {
               setSelectedDate={setSelectedDate}
               tasks={filteredTasks}
               onUpdated={refresh}
+              categories={categories}
             />
           )}
           {internalView === "Daily" && (
@@ -418,6 +420,7 @@ export default function Dashboard() {
               tasks={filteredTasks}
               toggleStatus={toggleStatus}
               onUpdated={refresh}
+              categories={categories}
             />
           )}
           {internalView === "Yearly" && (
