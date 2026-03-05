@@ -345,6 +345,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      <AIAssistantDialog open={showAIAssistant} onOpenChange={setShowAIAssistant} onUpdated={refresh} />
       <ImportActivitiesDialog open={showImport} onOpenChange={setShowImport} onImported={refresh} />
       <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={refresh} />
       <AddEventDialog open={showAddEvent} onOpenChange={setShowAddEvent} defaultDate={format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} />
