@@ -168,7 +168,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
 }
 
 // ── WEEKLY VIEW ───────────────────────────────────────────────────────────────
-export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, categories = [] }) {
+export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick }) {
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
