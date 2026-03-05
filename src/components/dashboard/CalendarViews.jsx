@@ -45,14 +45,15 @@ function useContextMenu(onUpdated, categories) {
   return { openMenu, menuEl };
 }
 
-function TaskPill({ task, onContextMenu, onDragStart }) {
+function TaskPill({ task, onContextMenu, onDragStart, onTaskClick }) {
   const c = categoryColors[task.category] || defaultColor;
   return (
     <div
       draggable
       onDragStart={(e) => { e.stopPropagation(); onDragStart(task); }}
       onContextMenu={(e) => onContextMenu(e, task)}
-      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-grab active:cursor-grabbing select-none"
+      onClick={(e) => { e.stopPropagation(); onTaskClick?.(task); }}
+      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-grab active:cursor-grabbing select-none hover:opacity-80 transition-opacity"
       style={{
         backgroundColor: task.status === "done" ? "#3c3d3f" : c.bg,
         color: task.status === "done" ? "#888" : c.text,
