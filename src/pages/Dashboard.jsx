@@ -86,6 +86,9 @@ export default function Dashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatColor, setNewCatColor] = useState("#4285f4");
 
   const DEFAULT_CATEGORIES = [
     { label: "Work",     color: "#4285f4", key: "work" },
