@@ -98,7 +98,13 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
     // Execute actions
     let actionCount = 0;
     for (const act of actions) {
-      if (act.action === "create") {
+      if (act.action === "create_category") {
+        const { action, label, color, key } = act;
+        if (label && color && key) {
+          await base44.entities.Category.create({ label, color, key });
+          actionCount++;
+        }
+      } else if (act.action === "create") {
         const { action, ...data } = act;
         await base44.entities.Task.create({ status: "todo", priority: "medium", ...data });
         actionCount++;
