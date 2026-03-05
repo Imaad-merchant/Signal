@@ -262,25 +262,23 @@ export default function Dashboard() {
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
               tasks={tasks}
-              dark
+              onUpdated={refresh}
             />
           )}
           {internalView === "Weekly" && (
             <WeeklyView
-              currentMonth={currentMonth}
               selectedDate={selectedDate}
               setSelectedDate={setSelectedDate}
               tasks={tasks}
-              dark
+              onUpdated={refresh}
             />
           )}
           {internalView === "Daily" && (
             <DailyView
               selectedDate={selectedDate}
-              setSelectedDate={setSelectedDate}
               tasks={tasks}
               toggleStatus={toggleStatus}
-              dark
+              onUpdated={refresh}
             />
           )}
           {internalView === "Yearly" && (
