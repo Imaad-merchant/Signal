@@ -108,6 +108,11 @@ export default function Dashboard() {
     setCategories(prev => prev.filter(c => c.key !== key));
     setEnabledCategories(prev => { const next = { ...prev }; delete next[key]; return next; });
   };
+  const renameCategory = (key) => {
+    if (!editingCatName.trim()) return;
+    setCategories(prev => prev.map(c => c.key === key ? { ...c, label: editingCatName.trim() } : c));
+    setEditingCatKey(null);
+  };
   const addCategory = () => {
     if (!newCatName.trim()) return;
     const key = newCatName.trim().toLowerCase().replace(/\s+/g, "_") + "_" + Date.now();
