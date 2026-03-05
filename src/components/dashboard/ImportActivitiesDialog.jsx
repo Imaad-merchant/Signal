@@ -98,7 +98,7 @@ Group similar events under the same category name.`,
     const tasks = result?.tasks || [];
     if (tasks.length === 0) {
       setStatus("error");
-      setErrorMsg("No tasks with dates found. Try a clearer image or list.");
+      setErrorMsg("No events found. Make sure the image is clear and shows a calendar or schedule with dates.");
       return;
     }
 
