@@ -84,6 +84,16 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
     const raw = completion.choices[0].message.content;
     const parsed = JSON.parse(raw);
 
+    // Process create_category actions FIRST, so they're available for task assignments
+    if (parsed.actions?.length > 0) {
+      const createCategoryActions = parsed.actions.filter(a => a.action === "create_category");
+      for (const act of createCategoryActions) {
+        if (act.label && act.color && act.key) {
+          await base44.asServiceRole.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+        }
+      }
+    }
+
     return Response.json(parsed);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
