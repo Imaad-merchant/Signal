@@ -12,6 +12,7 @@ import { ChevronLeft, ChevronRight, Plus, ListTodo, CalendarDays, Menu, Calendar
 import { AnimatePresence, motion } from "framer-motion";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
+import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
 import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
