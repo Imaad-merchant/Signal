@@ -16,8 +16,10 @@ Deno.serve(async (req) => {
       (tasks || []).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority, description: t.description }))
     );
 
-    // Build category list for the AI
-    const categoryList = (categories || []).map(c => `${c.label} (${c.key})`).join(", ") || "work, personal, health, learning, creative";
+    // Build category list for the AI with colors
+    const categoryList = (categories || [])
+      .map(c => `${c.label} (${c.key}, color: ${c.color})`)
+      .join("; ") || "work, personal, health, learning, creative";
     const categoryEnum = (categories || []).map(c => c.key).join("|") || "work|personal|health|learning|creative";
 
     const systemPrompt = `You are a smart, friendly calendar & task management AI assistant. Today's date is ${today}.
