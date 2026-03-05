@@ -151,7 +151,7 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated }) 
                   className="h-9 w-9 flex items-center justify-center rounded-full text-base font-medium"
                   style={
                     todayFlag
-                      ? { backgroundColor: "#4285f4", color: "#fff" }
+                      ? { backgroundColor: getTheme(), color: "#fff" }
                       : isSelected
                       ? { backgroundColor: "#3c3d3f", color: "#fff" }
                       : { color: "#e8eaed" }
