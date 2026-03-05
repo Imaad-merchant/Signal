@@ -57,7 +57,6 @@ function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChan
             <button
               key={idx}
               onClick={() => setSelectedDate(date)}
-              style={isToday ? { backgroundColor: getTheme(), color: "#fff" } : {}}
               className={`h-6 w-6 mx-auto flex items-center justify-center rounded-full text-[11px] font-medium transition-all
                 ${!inMonth ? "opacity-25" : "hover:bg-white/10"}
                 ${isSelected && !isToday ? "bg-white/20 text-white" : ""}
