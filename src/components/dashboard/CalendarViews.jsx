@@ -21,8 +21,8 @@ function getTasksForDate(tasks, date) {
   return tasks.filter((t) => t.due_date === dateStr);
 }
 
-function useContextMenu(onUpdated) {
-  const [menu, setMenu] = useState(null); // { task, x, y }
+function useContextMenu(onUpdated, categories) {
+  const [menu, setMenu] = useState(null);
 
   const openMenu = useCallback((e, task) => {
     e.preventDefault();
@@ -38,6 +38,7 @@ function useContextMenu(onUpdated) {
       position={menu.position}
       onClose={closeMenu}
       onUpdated={() => { onUpdated(); closeMenu(); }}
+      categories={categories}
     />
   ) : null;
 
