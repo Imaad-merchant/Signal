@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { format } from "date-fns";
 import FocusTimer from "../components/focus/FocusTimer";
-import { Clock, Zap } from "lucide-react";
+import { Clock, Zap, ArrowLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 
 export default function Focus() {
