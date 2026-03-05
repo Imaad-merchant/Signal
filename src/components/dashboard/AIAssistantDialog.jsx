@@ -78,10 +78,17 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
       imageUrls: m.imageUrls || [],
     }));
 
+    // Fetch categories
+    let categories = [];
+    try {
+      categories = await base44.entities.Category.list();
+    } catch (_) {}
+
     const response = await base44.functions.invoke('aiAssistant', {
       messages: conversationHistory,
       tasks: currentTasks,
       imageUrls: uploadedUrls,
+      categories,
     });
 
     const result = response.data;
