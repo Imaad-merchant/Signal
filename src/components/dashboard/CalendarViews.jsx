@@ -44,12 +44,14 @@ function useContextMenu(onUpdated) {
   return { openMenu, menuEl };
 }
 
-function TaskPill({ task, onContextMenu }) {
+function TaskPill({ task, onContextMenu, onDragStart }) {
   const c = categoryColors[task.category] || defaultColor;
   return (
     <div
+      draggable
+      onDragStart={(e) => { e.stopPropagation(); onDragStart(task); }}
       onContextMenu={(e) => onContextMenu(e, task)}
-      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-pointer select-none"
+      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-grab active:cursor-grabbing select-none"
       style={{
         backgroundColor: task.status === "done" ? "#3c3d3f" : c.bg,
         color: task.status === "done" ? "#888" : c.text,
@@ -59,6 +61,37 @@ function TaskPill({ task, onContextMenu }) {
       {task.title}
     </div>
   );
+}
+
+function useDragDrop(onUpdated) {
+  const draggingTask = useRef(null);
+  const [dragOverDate, setDragOverDate] = useState(null);
+
+  const onDragStart = useCallback((task) => {
+    draggingTask.current = task;
+  }, []);
+
+  const onDragOver = useCallback((e, dateStr) => {
+    e.preventDefault();
+    setDragOverDate(dateStr);
+  }, []);
+
+  const onDrop = useCallback(async (e, dateStr) => {
+    e.preventDefault();
+    setDragOverDate(null);
+    if (!draggingTask.current) return;
+    const task = draggingTask.current;
+    draggingTask.current = null;
+    if (task.due_date === dateStr) return;
+    await base44.entities.Task.update(task.id, { due_date: dateStr });
+    onUpdated();
+  }, [onUpdated]);
+
+  const onDragLeave = useCallback(() => {
+    setDragOverDate(null);
+  }, []);
+
+  return { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate };
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
