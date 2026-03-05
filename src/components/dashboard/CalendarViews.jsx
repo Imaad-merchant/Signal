@@ -151,7 +151,7 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated }) 
                   className="h-9 w-9 flex items-center justify-center rounded-full text-base font-medium"
                   style={
                     todayFlag
-                      ? { backgroundColor: getTheme(), color: "#fff" }
+                      ? { backgroundColor: "#4285f4", color: "#fff" }
                       : isSelected
                       ? { backgroundColor: "#3c3d3f", color: "#fff" }
                       : { color: "#e8eaed" }
@@ -202,7 +202,7 @@ export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated }) {
           <div className="text-4xl font-thin text-gray-200 mb-1">{format(selectedDate, "d")}</div>
           <div className="text-lg font-medium text-gray-300">{format(selectedDate, "EEEE")}</div>
           <div className="text-sm text-gray-500">{format(selectedDate, "MMMM yyyy")}</div>
-          {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: getTheme() + "33", color: getTheme() }}>Today</div>}
+          {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: "#4285f4" + "33", color: "#4285f4" }}>Today</div>}
         </div>
         <div className="space-y-2">
           {dayTasks.length === 0 && (
@@ -220,7 +220,7 @@ export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated }) {
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-white/10 text-left transition-all hover:bg-white/5 bg-[#2d2e30]"
               >
                 {task.status === "done"
-                  ? <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: getTheme() }} />
+                  ? <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: "#4285f4" }} />
                   : <Circle className="h-5 w-5 text-gray-600 shrink-0" />}
                 <div className="h-3 w-1 rounded-full shrink-0" style={{ backgroundColor: task.status === "done" ? "#555" : c.bg }} />
                 <div className="flex-1 min-w-0">
@@ -268,7 +268,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
             className="rounded-xl p-3 border transition-all"
             style={{
               backgroundColor: isCurrentDisplayMonth ? "#2d2e30" : "#252627",
-              borderColor: isCurrentDisplayMonth ? getTheme() : "rgba(255,255,255,0.08)",
+              borderColor: isCurrentDisplayMonth ? "#4285f4" : "rgba(255,255,255,0.08)",
             }}
           >
             <p className="text-xs font-bold text-gray-300 mb-2 text-center">{format(monthDate, "MMMM")}</p>
@@ -290,7 +290,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
                     className={`relative flex flex-col items-center justify-center h-5 w-full rounded text-[9px] font-medium transition-all ${!inMonth ? "opacity-20" : "hover:bg-white/10"}`}
                     style={
                       todayFlag
-                        ? { backgroundColor: getTheme(), color: "#fff" }
+                        ? { backgroundColor: "#4285f4", color: "#fff" }
                         : isSelected
                         ? { backgroundColor: "rgba(255,255,255,0.15)", color: "#fff" }
                         : { color: "#bdc1c6" }
@@ -298,7 +298,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
                   >
                     {format(date, "d")}
                     {dayTasks.length > 0 && inMonth && !isSelected && !todayFlag && (
-                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full" style={{ backgroundColor: getTheme() }} />
+                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full" style={{ backgroundColor: "#4285f4" }} />
                     )}
                   </button>
                 );
