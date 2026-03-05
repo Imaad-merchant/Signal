@@ -225,13 +225,43 @@ export default function Dashboard() {
               <div className="flex items-center justify-between py-2 px-2">
                 <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Categories</span>
                 <button
-                  onClick={() => setShowAddEvent(true)}
+                  onClick={() => setShowAddCategory(o => !o)}
                   className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
-                  title="Add event"
+                  title="Add category"
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
               </div>
+
+              {showAddCategory && (
+                <div className="mx-2 mb-2 p-2 bg-[#2d2e30] rounded-xl border border-white/10 space-y-2">
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Category name"
+                    value={newCatName}
+                    onChange={e => setNewCatName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") addCategory(); if (e.key === "Escape") setShowAddCategory(false); }}
+                    className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-2 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/20"
+                  />
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-500">Color</label>
+                    <input
+                      type="color"
+                      value={newCatColor}
+                      onChange={e => setNewCatColor(e.target.value)}
+                      className="h-6 w-10 rounded cursor-pointer bg-transparent border-0"
+                    />
+                    <button
+                      onClick={addCategory}
+                      className="ml-auto text-xs bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg transition-colors"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-0.5 pl-1">
                 {CATEGORIES.map((cat) => {
                   const enabled = enabledCategories[cat.key];
