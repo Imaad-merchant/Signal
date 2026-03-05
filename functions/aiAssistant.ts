@@ -37,6 +37,8 @@ Valid actions:
 - update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
 - delete: { action: "delete", id }
 
+IMPORTANT FOR CATEGORY CHANGES: When the user asks to change tasks to a specific category (e.g., "change these to ACCT" or "make them green for accounting"), find the matching tasks and use the update action to set their category field to the correct category key (e.g., "acct", "busi"). Use the existing categories provided - don't create new ones unless explicitly asked.
+
 IMPORTANT: When the user asks for a new category with a specific color, create it with create_category action FIRST. Extract the color from user's description (e.g., "green" -> #0f9d58, "blue" -> #4285f4, etc.). Use common hex colors.
 
 Always respond with valid JSON only (no markdown blocks):
