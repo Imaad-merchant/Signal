@@ -98,9 +98,15 @@ export default function Dashboard() {
 
   const internalView = VIEW_MAP[view];
 
+  const { data: user } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => base44.auth.me(),
+  });
+
   const { data: tasks = [] } = useQuery({
-    queryKey: ["tasks"],
-    queryFn: () => base44.entities.Task.list("-created_date"),
+    queryKey: ["tasks", user?.email],
+    queryFn: () => base44.entities.Task.filter({ created_by: user.email }, "-created_date"),
+    enabled: !!user,
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
