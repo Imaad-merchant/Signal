@@ -100,7 +100,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                     className="h-7 w-7 flex items-center justify-center rounded-full text-sm font-medium"
                     style={
                       todayFlag
-                        ? { backgroundColor: getTheme(), color: "#fff" }
+                        ? { backgroundColor: "#4285f4", color: "#fff" }
                         : isSelected
                         ? { backgroundColor: "#3c3d3f", color: "#fff" }
                         : { color: "#e8eaed" }
