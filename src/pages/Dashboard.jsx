@@ -290,13 +290,7 @@ export default function Dashboard() {
               ))}
             </div>
 
-            <button
-              onClick={() => setShowAddTask(true)}
-              className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors"
-              title="Add Task"
-            >
-              <ListTodo className="h-5 w-5" />
-            </button>
+
             <Link to={createPageUrl("Tasks")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
               <CheckSquare className="h-5 w-5" />
             </Link>
