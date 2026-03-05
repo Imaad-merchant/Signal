@@ -247,11 +247,11 @@ Year to use if not shown: ${new Date().getFullYear()}`,
 
             <Button
               onClick={handleExtract}
-              disabled={!file || status !== "idle"}
+              disabled={!file || (status !== "idle" && status !== "error")}
               className="w-full bg-gray-900 hover:bg-gray-800 rounded-xl h-10 gap-2"
             >
-              {status !== "idle" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              {status === "idle" ? "Analyze File" : "Processing..."}
+              {(status === "uploading" || status === "extracting") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {(status === "uploading" || status === "extracting") ? "Processing..." : "Analyze File"}
             </Button>
           </div>
         )}
