@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from "react";
-
+import React, { useState, useCallback, useRef } from "react";
 
 import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear } from "date-fns";
 import { CheckCircle2, Circle, Clock } from "lucide-react";
 import TaskContextMenu from "./TaskContextMenu";
+import { base44 } from "@/api/base44Client";
 
 const categoryColors = {
   work:     { bg: "#4285f4", text: "#fff" },
