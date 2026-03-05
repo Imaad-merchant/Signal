@@ -225,28 +225,14 @@ export default function Dashboard() {
 
           <h2 className="text-lg font-medium text-gray-100 ml-1">{headerLabel()}</h2>
 
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={() => setShowAddTask(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm text-gray-300 hover:bg-white/10 transition-colors border border-white/10"
-            >
-              <ListTodo className="h-4 w-4" />
-              <span className="hidden sm:inline">Add Task</span>
-            </button>
-            <Link to={createPageUrl("Tasks")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
-              <CheckSquare className="h-5 w-5" />
-            </Link>
-            <Link to={createPageUrl("Settings")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
-              <Settings className="h-5 w-5" />
-            </Link>
-
+          <div className="ml-auto flex items-center gap-1.5">
             {/* View switcher */}
             <div className="flex items-center bg-[#2d2e30] rounded-lg border border-white/10 overflow-hidden">
               {VIEWS.map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
-                  className={`px-3 py-1.5 text-sm font-medium transition-all ${
+                  className={`px-2.5 py-1.5 text-xs font-medium transition-all ${
                     view === v ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200 hover:bg-white/10"
                   }`}
                 >
@@ -254,6 +240,20 @@ export default function Dashboard() {
                 </button>
               ))}
             </div>
+
+            <button
+              onClick={() => setShowAddTask(true)}
+              className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors"
+              title="Add Task"
+            >
+              <ListTodo className="h-5 w-5" />
+            </button>
+            <Link to={createPageUrl("Tasks")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
+              <CheckSquare className="h-5 w-5" />
+            </Link>
+            <Link to={createPageUrl("Settings")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
+              <Settings className="h-5 w-5" />
+            </Link>
           </div>
         </div>
 
