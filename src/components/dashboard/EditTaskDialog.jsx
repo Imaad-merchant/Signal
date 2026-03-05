@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
-import { X } from "lucide-react";
+import { X, Check, Loader2 } from "lucide-react";
 
 const PRIORITIES = ["low", "medium", "high"];
 const STATUSES = ["todo", "in_progress", "done"];
@@ -15,21 +15,31 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
     due_date: task.due_date || "",
     estimated_minutes: task.estimated_minutes || "",
   });
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved
+  const debounceRef = useRef(null);
+  const isFirstRender = useRef(true);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleSave = async () => {
-    if (!form.title.trim()) return;
-    setSaving(true);
+  const doSave = async (data) => {
+    if (!data.title.trim()) return;
+    setSaveStatus("saving");
     const payload = {
-      ...form,
-      estimated_minutes: form.estimated_minutes ? Number(form.estimated_minutes) : undefined,
+      ...data,
+      estimated_minutes: data.estimated_minutes ? Number(data.estimated_minutes) : undefined,
     };
     await base44.entities.Task.update(task.id, payload);
     onUpdated();
-    onClose();
+    setSaveStatus("saved");
+    setTimeout(() => setSaveStatus("idle"), 2000);
   };
+
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSave(form), 800);
+    return () => clearTimeout(debounceRef.current);
+  }, [form]);
 
   const handleDelete = async () => {
     await base44.entities.Task.delete(task.id);
