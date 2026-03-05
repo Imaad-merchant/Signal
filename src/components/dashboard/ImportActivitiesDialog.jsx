@@ -58,12 +58,19 @@ export default function ImportActivitiesDialog({ open, onOpenChange, onImported 
     setStatus("extracting");
 
     const result = await base44.integrations.Core.InvokeLLM({
-      prompt: `Analyze this file which contains a list of activities, tasks or events with dates.
-Extract ALL activities and their associated dates.
-For each item also determine what TYPE/CATEGORY it belongs to based on its content — be specific and natural, e.g. "school", "home", "work", "health", "fitness", "family", "social", "errands", "finance", "learning", etc.
-Group similar events under the same category name.
-Use the current year ${new Date().getFullYear()} if no year is specified.
-Return only items that have a clear date.`,
+      prompt: `You are analyzing a calendar image or schedule document. Extract EVERY single event/activity visible.
+
+CRITICAL INSTRUCTIONS FOR CALENDAR IMAGES:
+- Look at the grid carefully. Each cell corresponds to a specific day number shown in that cell.
+- Read the day number (1-31) directly from each calendar cell and assign the event to THAT exact date.
+- Do NOT guess or shift dates — use the exact number shown in the calendar grid cell.
+- If the calendar shows a month/year (e.g. "March 2026"), use that. Otherwise use ${new Date().getFullYear()}.
+- Multi-day events (spanning multiple cells) should be recorded once with their start date.
+- Return dates in YYYY-MM-DD format exactly.
+- Extract ALL visible events, do not skip any.
+
+For each event, also assign a category based on its content (e.g. "school", "work", "health", "social", "finance", "learning", "creative", "personal").
+Group similar events under the same category name.`,
       file_urls: [file_url],
       response_json_schema: {
         type: "object",
