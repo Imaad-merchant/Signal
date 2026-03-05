@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState, useCallback } from "react";
 import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear } from "date-fns";
 import { CheckCircle2, Circle, Clock } from "lucide-react";
+import TaskContextMenu from "./TaskContextMenu";
 
 const categoryColors = {
   work:     { bg: "#4285f4", text: "#fff" },
@@ -18,11 +19,35 @@ function getTasksForDate(tasks, date) {
   return tasks.filter((t) => t.due_date === dateStr);
 }
 
-function TaskPill({ task }) {
+function useContextMenu(onUpdated) {
+  const [menu, setMenu] = useState(null); // { task, x, y }
+
+  const openMenu = useCallback((e, task) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ task, position: { x: e.clientX, y: e.clientY } });
+  }, []);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const menuEl = menu ? (
+    <TaskContextMenu
+      task={menu.task}
+      position={menu.position}
+      onClose={closeMenu}
+      onUpdated={() => { onUpdated(); closeMenu(); }}
+    />
+  ) : null;
+
+  return { openMenu, menuEl };
+}
+
+function TaskPill({ task, onContextMenu }) {
   const c = categoryColors[task.category] || defaultColor;
   return (
     <div
-      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-default"
+      onContextMenu={(e) => onContextMenu(e, task)}
+      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-pointer select-none"
       style={{
         backgroundColor: task.status === "done" ? "#3c3d3f" : c.bg,
         color: task.status === "done" ? "#888" : c.text,
@@ -35,7 +60,7 @@ function TaskPill({ task }) {
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
-export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks }) {
+export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
@@ -45,30 +70,83 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
   let day = calStart;
   while (day <= calEnd) { calDays.push(day); day = addDays(day, 1); }
 
+  const { openMenu, menuEl } = useContextMenu(onUpdated);
+
   return (
-    <div className="h-full flex flex-col">
-      {/* Day headers */}
-      <div className="grid grid-cols-7 border-b border-white/10">
-        {DAY_HEADERS.map((d) => (
-          <div key={d} className="py-2 text-center text-[11px] font-semibold text-gray-500 tracking-wider">{d}</div>
-        ))}
+    <>
+      {menuEl}
+      <div className="h-full flex flex-col">
+        <div className="grid grid-cols-7 border-b border-white/10">
+          {DAY_HEADERS.map((d) => (
+            <div key={d} className="py-2 text-center text-[11px] font-semibold text-gray-500 tracking-wider">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${calDays.length / 7}, minmax(100px, 1fr))` }}>
+          {calDays.map((date, idx) => {
+            const dayTasks = getTasksForDate(tasks, date);
+            const isCurrentMonth = isSameMonth(date, currentMonth);
+            const isSelected = isSameDay(date, selectedDate);
+            const todayFlag = isSameDay(date, new Date());
+            return (
+              <div
+                key={idx}
+                onClick={() => setSelectedDate(date)}
+                className={`p-1.5 border-b border-r border-white/10 cursor-pointer hover:bg-white/5 transition-colors ${!isCurrentMonth ? "opacity-40" : ""}`}
+              >
+                <div className="flex justify-end mb-1">
+                  <span
+                    className="h-7 w-7 flex items-center justify-center rounded-full text-sm font-medium"
+                    style={
+                      todayFlag
+                        ? { backgroundColor: "#4285f4", color: "#fff" }
+                        : isSelected
+                        ? { backgroundColor: "#3c3d3f", color: "#fff" }
+                        : { color: "#e8eaed" }
+                    }
+                  >
+                    {format(date, "d")}
+                  </span>
+                </div>
+                <div className="space-y-0.5">
+                  {dayTasks.slice(0, 3).map((task) => (
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} />
+                  ))}
+                  {dayTasks.length > 3 && (
+                    <div className="text-[10px] text-gray-500 px-1">{dayTasks.length - 3} more</div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
-      {/* Days grid */}
-      <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${calDays.length / 7}, minmax(100px, 1fr))` }}>
-        {calDays.map((date, idx) => {
-          const dayTasks = getTasksForDate(tasks, date);
-          const isCurrentMonth = isSameMonth(date, currentMonth);
-          const isSelected = isSameDay(date, selectedDate);
-          const todayFlag = isSameDay(date, new Date());
-          return (
-            <div
-              key={idx}
-              onClick={() => setSelectedDate(date)}
-              className={`p-1.5 border-b border-r border-white/10 cursor-pointer hover:bg-white/5 transition-colors ${!isCurrentMonth ? "opacity-40" : ""}`}
-            >
-              <div className="flex justify-end mb-1">
+    </>
+  );
+}
+
+// ── WEEKLY VIEW ───────────────────────────────────────────────────────────────
+export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated }) {
+  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
+  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const { openMenu, menuEl } = useContextMenu(onUpdated);
+
+  return (
+    <>
+      {menuEl}
+      <div className="h-full flex flex-col">
+        <div className="grid grid-cols-7 border-b border-white/10">
+          {weekDays.map((date) => {
+            const todayFlag = isSameDay(date, new Date());
+            const isSelected = isSameDay(date, selectedDate);
+            return (
+              <button
+                key={date.toISOString()}
+                onClick={() => setSelectedDate(date)}
+                className="py-3 flex flex-col items-center gap-1 hover:bg-white/5 transition-colors"
+              >
+                <span className="text-[11px] font-semibold text-gray-500 tracking-wider">{format(date, "EEE").toUpperCase()}</span>
                 <span
-                  className="h-7 w-7 flex items-center justify-center rounded-full text-sm font-medium"
+                  className="h-9 w-9 flex items-center justify-center rounded-full text-base font-medium"
                   style={
                     todayFlag
                       ? { backgroundColor: "#4285f4", color: "#fff" }
@@ -77,139 +155,91 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                       : { color: "#e8eaed" }
                   }
                 >
-                  {idx < 7 ? format(date, "d") + "" : format(date, "d")}
+                  {format(date, "d")}
                 </span>
-              </div>
-              <div className="space-y-0.5">
-                {dayTasks.slice(0, 3).map((task) => (
-                  <TaskPill key={task.id} task={task} />
-                ))}
-                {dayTasks.length > 3 && (
-                  <div className="text-[10px] text-gray-500 px-1">{dayTasks.length - 3} more</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ── WEEKLY VIEW ───────────────────────────────────────────────────────────────
-export function WeeklyView({ selectedDate, setSelectedDate, tasks }) {
-  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-
-  return (
-    <div className="h-full flex flex-col">
-      {/* Week day headers */}
-      <div className="grid grid-cols-7 border-b border-white/10">
-        {weekDays.map((date) => {
-          const todayFlag = isSameDay(date, new Date());
-          const isSelected = isSameDay(date, selectedDate);
-          return (
-            <button
-              key={date.toISOString()}
-              onClick={() => setSelectedDate(date)}
-              className="py-3 flex flex-col items-center gap-1 hover:bg-white/5 transition-colors"
-            >
-              <span className="text-[11px] font-semibold text-gray-500 tracking-wider">{format(date, "EEE").toUpperCase()}</span>
-              <span
-                className="h-9 w-9 flex items-center justify-center rounded-full text-base font-medium"
-                style={
-                  todayFlag
-                    ? { backgroundColor: "#4285f4", color: "#fff" }
-                    : isSelected
-                    ? { backgroundColor: "#3c3d3f", color: "#fff" }
-                    : { color: "#e8eaed" }
-                }
+              </button>
+            );
+          })}
+        </div>
+        <div className="grid grid-cols-7 divide-x divide-white/10 flex-1">
+          {weekDays.map((date) => {
+            const dayTasks = getTasksForDate(tasks, date);
+            const isSelected = isSameDay(date, selectedDate);
+            return (
+              <div
+                key={date.toISOString()}
+                onClick={() => setSelectedDate(date)}
+                className={`p-2 min-h-[300px] cursor-pointer hover:bg-white/5 transition-colors ${isSelected ? "bg-white/5" : ""}`}
               >
-                {format(date, "d")}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Task columns */}
-      <div className="grid grid-cols-7 divide-x divide-white/10 flex-1">
-        {weekDays.map((date) => {
-          const dayTasks = getTasksForDate(tasks, date);
-          const isSelected = isSameDay(date, selectedDate);
-          return (
-            <div
-              key={date.toISOString()}
-              onClick={() => setSelectedDate(date)}
-              className={`p-2 min-h-[300px] cursor-pointer hover:bg-white/5 transition-colors ${isSelected ? "bg-white/5" : ""}`}
-            >
-              <div className="space-y-1">
-                {dayTasks.length === 0 && <p className="text-[10px] text-gray-600 text-center mt-6">—</p>}
-                {dayTasks.map((task) => (
-                  <TaskPill key={task.id} task={task} />
-                ))}
+                <div className="space-y-1">
+                  {dayTasks.length === 0 && <p className="text-[10px] text-gray-600 text-center mt-6">—</p>}
+                  {dayTasks.map((task) => (
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} />
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
 // ── DAILY VIEW ────────────────────────────────────────────────────────────────
-export function DailyView({ selectedDate, setSelectedDate, tasks, toggleStatus }) {
+export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated }) {
   const dayTasks = getTasksForDate(tasks, selectedDate);
   const todayFlag = isSameDay(selectedDate, new Date());
+  const { openMenu, menuEl } = useContextMenu(onUpdated);
 
   return (
-    <div className="p-8 max-w-2xl mx-auto">
-      <div className="text-center mb-8">
-        <div className="text-4xl font-thin text-gray-200 mb-1">{format(selectedDate, "d")}</div>
-        <div className="text-lg font-medium text-gray-300">{format(selectedDate, "EEEE")}</div>
-        <div className="text-sm text-gray-500">{format(selectedDate, "MMMM yyyy")}</div>
-        {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-medium">Today</div>}
-      </div>
-
-      <div className="space-y-2">
-        {dayTasks.length === 0 && (
-          <div className="text-center py-12 text-gray-600">
-            <p className="text-sm">No tasks for this day</p>
-          </div>
-        )}
-        {dayTasks.map((task) => {
-          const c = categoryColors[task.category] || defaultColor;
-          return (
-            <button
-              key={task.id}
-              onClick={() => toggleStatus(task)}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-white/10 text-left transition-all hover:bg-white/5 bg-[#2d2e30]"
-            >
-              {task.status === "done"
-                ? <CheckCircle2 className="h-5 w-5 text-blue-500 shrink-0" />
-                : <Circle className="h-5 w-5 text-gray-600 shrink-0" />}
-              <div
-                className="h-3 w-1 rounded-full shrink-0"
-                style={{ backgroundColor: task.status === "done" ? "#555" : c.bg }}
-              />
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm font-medium ${task.status === "done" ? "line-through text-gray-600" : "text-gray-200"}`}>
-                  {task.title}
-                </p>
-                {task.description && (
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{task.description}</p>
+    <>
+      {menuEl}
+      <div className="p-8 max-w-2xl mx-auto">
+        <div className="text-center mb-8">
+          <div className="text-4xl font-thin text-gray-200 mb-1">{format(selectedDate, "d")}</div>
+          <div className="text-lg font-medium text-gray-300">{format(selectedDate, "EEEE")}</div>
+          <div className="text-sm text-gray-500">{format(selectedDate, "MMMM yyyy")}</div>
+          {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-medium">Today</div>}
+        </div>
+        <div className="space-y-2">
+          {dayTasks.length === 0 && (
+            <div className="text-center py-12 text-gray-600">
+              <p className="text-sm">No tasks for this day</p>
+            </div>
+          )}
+          {dayTasks.map((task) => {
+            const c = categoryColors[task.category] || defaultColor;
+            return (
+              <button
+                key={task.id}
+                onClick={() => toggleStatus(task)}
+                onContextMenu={(e) => openMenu(e, task)}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-white/10 text-left transition-all hover:bg-white/5 bg-[#2d2e30]"
+              >
+                {task.status === "done"
+                  ? <CheckCircle2 className="h-5 w-5 text-blue-500 shrink-0" />
+                  : <Circle className="h-5 w-5 text-gray-600 shrink-0" />}
+                <div className="h-3 w-1 rounded-full shrink-0" style={{ backgroundColor: task.status === "done" ? "#555" : c.bg }} />
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-medium ${task.status === "done" ? "line-through text-gray-600" : "text-gray-200"}`}>
+                    {task.title}
+                  </p>
+                  {task.description && (
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">{task.description}</p>
+                  )}
+                </div>
+                {task.estimated_minutes && (
+                  <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
+                    <Clock className="h-3 w-3" />{task.estimated_minutes}m
+                  </span>
                 )}
-              </div>
-              {task.estimated_minutes && (
-                <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
-                  <Clock className="h-3 w-3" />{task.estimated_minutes}m
-                </span>
-              )}
-            </button>
-          );
-        })}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
