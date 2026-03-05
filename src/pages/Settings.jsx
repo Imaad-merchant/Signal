@@ -95,18 +95,15 @@ function ColorPicker({ selected, onChange }) {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const [primaryColor, setPrimaryColor] = useState(() => localStorage.getItem("pulse_primary") || "#f59e0b");
-  const [secondaryColor, setSecondaryColor] = useState(() => localStorage.getItem("pulse_secondary") || "#3b82f6");
+  const [themeColor, setThemeColor] = useState(() => localStorage.getItem("pulse_theme") || "#4285f4");
   const [weekStart, setWeekStart] = useState(() => localStorage.getItem("pulse_week_start") || "Sunday");
   const [notifications, setNotifications] = useState(() => localStorage.getItem("pulse_notifications") !== "false");
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => {
-    localStorage.setItem("pulse_primary", primaryColor);
-    localStorage.setItem("pulse_secondary", secondaryColor);
+    localStorage.setItem("pulse_theme", themeColor);
     localStorage.setItem("pulse_week_start", weekStart);
     localStorage.setItem("pulse_notifications", notifications);
-    // Trigger layout to re-read colors in same tab
     window.dispatchEvent(new Event("focus"));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
