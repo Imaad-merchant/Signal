@@ -290,7 +290,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
                     className={`relative flex flex-col items-center justify-center h-5 w-full rounded text-[9px] font-medium transition-all ${!inMonth ? "opacity-20" : "hover:bg-white/10"}`}
                     style={
                       todayFlag
-                        ? { backgroundColor: "#4285f4", color: "#fff" }
+                        ? { backgroundColor: getTheme(), color: "#fff" }
                         : isSelected
                         ? { backgroundColor: "rgba(255,255,255,0.15)", color: "#fff" }
                         : { color: "#bdc1c6" }
@@ -298,7 +298,7 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
                   >
                     {format(date, "d")}
                     {dayTasks.length > 0 && inMonth && !isSelected && !todayFlag && (
-                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-blue-400" />
+                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full" style={{ backgroundColor: getTheme() }} />
                     )}
                   </button>
                 );
