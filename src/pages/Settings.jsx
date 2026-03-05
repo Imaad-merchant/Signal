@@ -106,6 +106,8 @@ export default function Settings() {
     localStorage.setItem("pulse_secondary", secondaryColor);
     localStorage.setItem("pulse_week_start", weekStart);
     localStorage.setItem("pulse_notifications", notifications);
+    // Trigger layout to re-read colors in same tab
+    window.dispatchEvent(new Event("focus"));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
