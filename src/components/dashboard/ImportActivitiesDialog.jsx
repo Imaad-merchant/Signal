@@ -58,33 +58,30 @@ export default function ImportActivitiesDialog({ open, onOpenChange, onImported 
     setStatus("extracting");
 
     const result = await base44.integrations.Core.InvokeLLM({
-      prompt: `You are a calendar/schedule extractor. Your job is to find EVERY event, task, or activity that has any kind of date associated with it in the provided document or image.
+      prompt: `You are a calendar/schedule extractor. Look at the provided image or document and extract EVERY visible event, task, or activity that has a date.
 
-The document could be:
-- A calendar screenshot (Google Calendar, Apple Calendar, etc.)
-- A text list like "March 5 - Meeting with team"
-- A table or spreadsheet with dates and event names
-- A PDF schedule or agenda
-- Any other format
+This could be a Google Calendar screenshot, Apple Calendar, a schedule document, a list, a table, or any other format.
 
-RULES:
-1. Extract EVERY event that has a date — do not skip anything.
-2. For calendar grid images: read the number in each cell carefully and assign the event to THAT exact date number. Do not shift dates.
-3. For text/list formats: parse the date from the text, even if it says things like "Monday March 9" or "3/9" or "March 9th".
-4. If a year is visible, use it. Otherwise use ${new Date().getFullYear()}.
-5. Output all dates in YYYY-MM-DD format.
-6. For multi-day events, use the start date.
-7. If there is no date at all for an event, skip it.
+For CALENDAR GRID images (like Google Calendar month view):
+- The month and year is shown at the top (e.g. "March 2026")
+- Each row is a week, each column is a day (Sun-Sat)
+- The number in each cell is the day of the month
+- Read the event name from inside the cell and assign it to that cell's date number
+- Example: if "Education Workshop" appears in the cell with number "2" in March 2026, the date is 2026-03-02
 
-For each event also assign a short category like "work", "school", "health", "social", "learning", "personal", etc.`,
+Extract ALL events you can see. Return them as a JSON list.
+
+For each event:
+- "title": the event name (full name, not truncated)
+- "due_date": the date in YYYY-MM-DD format
+- "suggested_category": one of: work, school, health, social, learning, personal
+- "description": any extra detail visible (optional)
+
+Year to use if not shown: ${new Date().getFullYear()}`,
       file_urls: [file_url],
       response_json_schema: {
         type: "object",
         properties: {
-          suggested_category_name: {
-            type: "string",
-            description: "A single short label for the overall type of schedule (e.g. 'School Schedule', 'Home Chores', 'Work Plan')"
-          },
           tasks: {
             type: "array",
             items: {
@@ -94,17 +91,19 @@ For each event also assign a short category like "work", "school", "health", "so
                 due_date: { type: "string" },
                 suggested_category: { type: "string" },
                 description: { type: "string" }
-              }
+              },
+              required: ["title", "due_date"]
             }
           }
-        }
+        },
+        required: ["tasks"]
       }
     });
 
     const tasks = (result?.tasks || []).filter(t => t.title && t.due_date);
     if (tasks.length === 0) {
       setStatus("error");
-      setErrorMsg("No events with dates found. Make sure the document contains event names with dates (e.g. 'March 5 - Meeting').");
+      setErrorMsg("No events with dates found. Try a clearer image or a different file.");
       return;
     }
 
