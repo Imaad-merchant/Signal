@@ -58,19 +58,25 @@ export default function ImportActivitiesDialog({ open, onOpenChange, onImported 
     setStatus("extracting");
 
     const result = await base44.integrations.Core.InvokeLLM({
-      prompt: `You are analyzing a calendar image or schedule document. Extract EVERY single event/activity visible.
+      prompt: `You are a calendar/schedule extractor. Your job is to find EVERY event, task, or activity that has any kind of date associated with it in the provided document or image.
 
-CRITICAL INSTRUCTIONS FOR CALENDAR IMAGES:
-- Look at the grid carefully. Each cell corresponds to a specific day number shown in that cell.
-- Read the day number (1-31) directly from each calendar cell and assign the event to THAT exact date.
-- Do NOT guess or shift dates — use the exact number shown in the calendar grid cell.
-- If the calendar shows a month/year (e.g. "March 2026"), use that. Otherwise use ${new Date().getFullYear()}.
-- Multi-day events (spanning multiple cells) should be recorded once with their start date.
-- Return dates in YYYY-MM-DD format exactly.
-- Extract ALL visible events, do not skip any.
+The document could be:
+- A calendar screenshot (Google Calendar, Apple Calendar, etc.)
+- A text list like "March 5 - Meeting with team"
+- A table or spreadsheet with dates and event names
+- A PDF schedule or agenda
+- Any other format
 
-For each event, also assign a category based on its content (e.g. "school", "work", "health", "social", "finance", "learning", "creative", "personal").
-Group similar events under the same category name.`,
+RULES:
+1. Extract EVERY event that has a date — do not skip anything.
+2. For calendar grid images: read the number in each cell carefully and assign the event to THAT exact date number. Do not shift dates.
+3. For text/list formats: parse the date from the text, even if it says things like "Monday March 9" or "3/9" or "March 9th".
+4. If a year is visible, use it. Otherwise use ${new Date().getFullYear()}.
+5. Output all dates in YYYY-MM-DD format.
+6. For multi-day events, use the start date.
+7. If there is no date at all for an event, skip it.
+
+For each event also assign a short category like "work", "school", "health", "social", "learning", "personal", etc.`,
       file_urls: [file_url],
       response_json_schema: {
         type: "object",
