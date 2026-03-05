@@ -216,7 +216,7 @@ For each event also assign a short category like "work", "school", "health", "so
                 <input
                   ref={inputRef}
                   type="file"
-                  accept="image/*,.pdf,.csv,.xlsx,.txt"
+                  accept="image/*,.pdf,.csv,.xlsx,.xls,.txt,.doc,.docx"
                   className="hidden"
                   onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
                 />
