@@ -60,7 +60,7 @@ function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChan
               className={`h-6 w-6 mx-auto flex items-center justify-center rounded-full text-[11px] font-medium transition-all
                 ${!inMonth ? "opacity-25" : "hover:bg-white/10"}
                 ${isSelected && !isToday ? "bg-white/20 text-white" : ""}
-                ${!isToday && inMonth ? "text-gray-300" : !isToday ? "text-gray-600" : ""}
+                ${isToday ? "bg-blue-500 text-white" : inMonth ? "text-gray-300" : "text-gray-600"}
               `}
             >
               {format(date, "d")}
