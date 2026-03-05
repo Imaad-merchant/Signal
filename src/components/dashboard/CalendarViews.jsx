@@ -152,7 +152,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                 </div>
                 <div className="space-y-0.5">
                   {dayTasks.slice(0, 3).map((task) => (
-                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} />
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} />
                   ))}
                   {dayTasks.length > 3 && (
                     <div className="text-[10px] text-gray-500 px-1">{dayTasks.length - 3} more</div>
