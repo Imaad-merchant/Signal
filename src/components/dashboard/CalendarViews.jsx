@@ -106,7 +106,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
   let day = calStart;
   while (day <= calEnd) { calDays.push(day); day = addDays(day, 1); }
 
-  const { openMenu, menuEl } = useContextMenu(onUpdated);
+  const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
   const { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate } = useDragDrop(onUpdated);
 
   return (
