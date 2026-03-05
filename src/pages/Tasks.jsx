@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { AnimatePresence } from "framer-motion";
 import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 
 export default function Tasks() {
@@ -17,6 +17,7 @@ export default function Tasks() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: user } = useQuery({
@@ -55,9 +56,14 @@ export default function Tasks() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
           <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
           <p className="text-sm text-gray-400 mt-0.5">{tasks.length} total · {tasks.filter(t => t.status === "done").length} completed</p>
+          </div>
         </div>
         <Button onClick={() => setShowAdd(true)} className="bg-gray-900 hover:bg-gray-800 rounded-xl gap-2">
           <Plus className="h-4 w-4" /> New Task
