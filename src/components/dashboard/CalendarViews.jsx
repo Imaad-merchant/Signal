@@ -106,6 +106,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
   while (day <= calEnd) { calDays.push(day); day = addDays(day, 1); }
 
   const { openMenu, menuEl } = useContextMenu(onUpdated);
+  const { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate } = useDragDrop(onUpdated);
 
   return (
     <>
@@ -122,11 +123,16 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
             const isCurrentMonth = isSameMonth(date, currentMonth);
             const isSelected = isSameDay(date, selectedDate);
             const todayFlag = isSameDay(date, new Date());
+            const dateStr = format(date, "yyyy-MM-dd");
+            const isDragOver = dragOverDate === dateStr;
             return (
               <div
                 key={idx}
                 onClick={() => setSelectedDate(date)}
-                className={`p-1.5 border-b border-r border-white/10 cursor-pointer hover:bg-white/5 transition-colors ${!isCurrentMonth ? "opacity-40" : ""}`}
+                onDragOver={(e) => onDragOver(e, dateStr)}
+                onDrop={(e) => onDrop(e, dateStr)}
+                onDragLeave={onDragLeave}
+                className={`p-1.5 border-b border-r border-white/10 cursor-pointer transition-colors ${!isCurrentMonth ? "opacity-40" : ""} ${isDragOver ? "bg-blue-500/20 border-blue-400/40" : "hover:bg-white/5"}`}
               >
                 <div className="flex justify-end mb-1">
                   <span
@@ -144,7 +150,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                 </div>
                 <div className="space-y-0.5">
                   {dayTasks.slice(0, 3).map((task) => (
-                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} />
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} />
                   ))}
                   {dayTasks.length > 3 && (
                     <div className="text-[10px] text-gray-500 px-1">{dayTasks.length - 3} more</div>
