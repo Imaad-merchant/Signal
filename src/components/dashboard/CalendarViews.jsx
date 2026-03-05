@@ -259,7 +259,8 @@ export function DailyView({ selectedDate, tasks, toggleStatus, onUpdated, catego
             </div>
           )}
           {dayTasks.map((task) => {
-            const c = categoryColors[task.category] || defaultColor;
+            const categoryMap = Object.fromEntries(categories.map(c => [c.key, { bg: c.color, text: "#fff" }]));
+            const c = categoryMap[task.category] || DEFAULT_CATEGORY_COLORS[task.category] || defaultColor;
             return (
               <button
                 key={task.id}
