@@ -120,6 +120,7 @@ export default function Dashboard() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
   const filteredTasks = tasks.filter(t => enabledCategories[t.category ?? "work"] !== false);
+  const CATEGORIES = categories;
 
   const toggleStatus = async (task) => {
     const newStatus = task.status === "done" ? "todo" : "done";
