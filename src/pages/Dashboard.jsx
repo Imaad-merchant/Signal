@@ -79,6 +79,7 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showImport, setShowImport] = useState(false);
   const [showImportTasks, setShowImportTasks] = useState(false);
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
   const [view, setView] = useState("Month");
