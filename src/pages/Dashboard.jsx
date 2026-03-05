@@ -233,6 +233,12 @@ export default function Dashboard() {
               <ListTodo className="h-4 w-4" />
               <span className="hidden sm:inline">Add Task</span>
             </button>
+            <Link to={createPageUrl("Tasks")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
+              <CheckSquare className="h-5 w-5" />
+            </Link>
+            <Link to={createPageUrl("Settings")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
+              <Settings className="h-5 w-5" />
+            </Link>
 
             {/* View switcher */}
             <div className="flex items-center bg-[#2d2e30] rounded-lg border border-white/10 overflow-hidden">
