@@ -5,7 +5,7 @@ import { CheckCircle2, Circle, Clock } from "lucide-react";
 import TaskContextMenu from "./TaskContextMenu";
 import { base44 } from "@/api/base44Client";
 
-const categoryColors = {
+const DEFAULT_CATEGORY_COLORS = {
   work:     { bg: "#4285f4", text: "#fff" },
   personal: { bg: "#a142f4", text: "#fff" },
   health:   { bg: "#0f9d58", text: "#fff" },
@@ -45,8 +45,9 @@ function useContextMenu(onUpdated, categories) {
   return { openMenu, menuEl };
 }
 
-function TaskPill({ task, onContextMenu, onDragStart, onTaskClick }) {
-  const c = categoryColors[task.category] || defaultColor;
+function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = [] }) {
+  const categoryMap = Object.fromEntries(categories.map(c => [c.key, { bg: c.color, text: "#fff" }]));
+  const c = categoryMap[task.category] || DEFAULT_CATEGORY_COLORS[task.category] || defaultColor;
   return (
     <div
       draggable
