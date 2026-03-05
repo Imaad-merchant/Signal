@@ -50,9 +50,9 @@
 import Analytics from './pages/Analytics';
 import Dashboard from './pages/Dashboard';
 import Focus from './pages/Focus';
+import Markets from './pages/Markets';
 import Settings from './pages/Settings';
 import Tasks from './pages/Tasks';
-import Markets from './pages/Markets';
 import __Layout from './Layout.jsx';
 
 
@@ -60,9 +60,9 @@ export const PAGES = {
     "Analytics": Analytics,
     "Dashboard": Dashboard,
     "Focus": Focus,
+    "Markets": Markets,
     "Settings": Settings,
     "Tasks": Tasks,
-    "Markets": Markets,
 }
 
 export const pagesConfig = {

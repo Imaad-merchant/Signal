@@ -3,26 +3,72 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import {
   format, isSameDay, addMonths, subMonths, addYears, subYears,
-  addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth
+  addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
+  addDays, isSameMonth
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Upload, CheckCircle2, Circle, Clock, Plus, ListTodo, CalendarDays } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { ChevronLeft, ChevronRight, Upload, Plus, ListTodo, CalendarDays, Search, Menu, Grid3X3, AlignJustify, Calendar, ChevronDown } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 
-const VIEWS = ["Daily", "Weekly", "Monthly", "Yearly"];
+const VIEWS = ["Day", "Week", "Month", "Year"];
+const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly" };
 
-const categoryColors = {
-  work: "bg-blue-100 text-blue-700",
-  personal: "bg-purple-100 text-purple-700",
-  health: "bg-green-100 text-green-700",
-  learning: "bg-amber-100 text-amber-700",
-  creative: "bg-pink-100 text-pink-700",
-};
-const priorityDots = { high: "bg-rose-500", medium: "bg-amber-400", low: "bg-emerald-500" };
+const DAY_HEADERS_SHORT = ["S", "M", "T", "W", "T", "F", "S"];
+
+function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChange }) {
+  const monthStart = startOfMonth(currentMonth);
+  const monthEnd = endOfMonth(currentMonth);
+  const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
+  const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+  const calDays = [];
+  let d = calStart;
+  while (d <= calEnd) { calDays.push(d); d = addDays(d, 1); }
+
+  return (
+    <div className="p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium text-gray-200">{format(currentMonth, "MMMM yyyy")}</span>
+        <div className="flex gap-0.5">
+          <button onClick={() => onMonthChange(subMonths(currentMonth, 1))} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => onMonthChange(addMonths(currentMonth, 1))} className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 mb-1">
+        {DAY_HEADERS_SHORT.map((h, i) => (
+          <div key={i} className="text-center text-[10px] font-semibold text-gray-500 py-0.5">{h}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-y-0.5">
+        {calDays.map((date, idx) => {
+          const inMonth = isSameMonth(date, currentMonth);
+          const isSelected = isSameDay(date, selectedDate);
+          const isToday = isSameDay(date, new Date());
+          return (
+            <button
+              key={idx}
+              onClick={() => setSelectedDate(date)}
+              className={`h-6 w-6 mx-auto flex items-center justify-center rounded-full text-[11px] font-medium transition-all
+                ${!inMonth ? "opacity-25" : "hover:bg-white/10"}
+                ${isSelected && !isToday ? "bg-white/20 text-white" : ""}
+                ${isToday ? "bg-blue-500 text-white" : inMonth ? "text-gray-300" : "text-gray-600"}
+              `}
+            >
+              {format(date, "d")}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
@@ -32,8 +78,11 @@ export default function Dashboard() {
   const [showImportTasks, setShowImportTasks] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
-  const [view, setView] = useState("Monthly");
-  const accentColor = localStorage.getItem("pulse_secondary") || "#f59e0b";
+  const [view, setView] = useState("Month");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
+
+  const internalView = VIEW_MAP[view];
 
   const { data: tasks = [] } = useQuery({
     queryKey: ["tasks"],
@@ -50,126 +99,194 @@ export default function Dashboard() {
     refresh();
   };
 
-  // Navigation helpers per view
   const navigatePrev = () => {
-    if (view === "Monthly") setCurrentMonth(subMonths(currentMonth, 1));
-    else if (view === "Yearly") setCurrentMonth(subYears(currentMonth, 1));
-    else if (view === "Weekly") setSelectedDate(d => subWeeks(d, 1));
-    // Daily handled inside DailyView
+    if (view === "Month") setCurrentMonth(subMonths(currentMonth, 1));
+    else if (view === "Year") setCurrentMonth(subYears(currentMonth, 1));
+    else if (view === "Week") setSelectedDate(d => subWeeks(d, 1));
+    else if (view === "Day") setSelectedDate(d => addDays(d, -1));
   };
   const navigateNext = () => {
-    if (view === "Monthly") setCurrentMonth(addMonths(currentMonth, 1));
-    else if (view === "Yearly") setCurrentMonth(addYears(currentMonth, 1));
-    else if (view === "Weekly") setSelectedDate(d => addWeeks(d, 1));
+    if (view === "Month") setCurrentMonth(addMonths(currentMonth, 1));
+    else if (view === "Year") setCurrentMonth(addYears(currentMonth, 1));
+    else if (view === "Week") setSelectedDate(d => addWeeks(d, 1));
+    else if (view === "Day") setSelectedDate(d => addDays(d, 1));
   };
   const navigateToday = () => { setCurrentMonth(new Date()); setSelectedDate(new Date()); };
 
-  // Header label per view
   const headerLabel = () => {
-    if (view === "Yearly") return format(currentMonth, "yyyy");
-    if (view === "Monthly") return format(currentMonth, "MMMM yyyy");
-    if (view === "Weekly") {
+    if (view === "Year") return format(currentMonth, "yyyy");
+    if (view === "Month") return format(currentMonth, "MMMM yyyy");
+    if (view === "Week") {
       const ws = startOfWeek(selectedDate, { weekStartsOn: 0 });
       const we = endOfWeek(selectedDate, { weekStartsOn: 0 });
       return `${format(ws, "MMM d")} – ${format(we, "MMM d, yyyy")}`;
     }
-    if (view === "Daily") return format(selectedDate, "MMMM d, yyyy");
+    if (view === "Day") return format(selectedDate, "MMMM d, yyyy");
     return "";
   };
 
-  // Tasks filtered based on current view
-  const selectedDateStr = format(selectedDate, "yyyy-MM-dd");
-  const selectedTasks = (() => {
-    if (view === "Daily") {
-      return tasks.filter((t) => {
-        if (t.due_date === selectedDateStr) return true;
-        if (!t.due_date && isSameDay(selectedDate, new Date())) return true;
-        return false;
-      });
-    }
-    if (view === "Weekly") {
-      const ws = startOfWeek(selectedDate, { weekStartsOn: 0 });
-      const we = endOfWeek(selectedDate, { weekStartsOn: 0 });
-      return tasks.filter((t) => {
-        if (!t.due_date) return isSameDay(new Date(), selectedDate) || (new Date() >= ws && new Date() <= we);
-        const d = new Date(t.due_date + "T00:00:00");
-        return d >= ws && d <= we;
-      });
-    }
-    if (view === "Monthly") {
-      const ms = startOfMonth(currentMonth);
-      const me = endOfMonth(currentMonth);
-      return tasks.filter((t) => {
-        if (!t.due_date) return isSameDay(new Date(), selectedDate);
-        const d = new Date(t.due_date + "T00:00:00");
-        return d >= ms && d <= me;
-      });
-    }
-    if (view === "Yearly") {
-      const year = currentMonth.getFullYear();
-      return tasks.filter((t) => {
-        if (!t.due_date) return false;
-        return new Date(t.due_date + "T00:00:00").getFullYear() === year;
-      });
-    }
-    return [];
-  })();
-
-  const showNavArrows = view !== "Daily"; // Daily has its own nav inside
-
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
-      {/* Top bar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        {/* View switcher */}
-        <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1 shadow-sm">
-          {VIEWS.map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              style={view === v ? { backgroundColor: accentColor, color: "#fff" } : {}}
-              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
-                view === v ? "" : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
-              }`}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
+    <div className="flex h-screen bg-[#1e1f20] text-gray-100 -m-4 sm:-m-6 lg:-m-8 overflow-hidden">
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setShowAddEvent(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-xl shadow-sm transition-all hover:opacity-90"
-            style={{ backgroundColor: accentColor }}
+      {/* Left Sidebar */}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.aside
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 240, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-shrink-0 border-r border-white/10 flex flex-col overflow-hidden"
+            style={{ width: 240 }}
           >
-            <CalendarDays className="h-3.5 w-3.5" />
-            Add Event
-          </button>
-          <button
-            onClick={() => setShowAddTask(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all shadow-sm"
-          >
-            <ListTodo className="h-3.5 w-3.5" />
-            Add Task
-          </button>
-          <div className="relative group">
-            <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition-all shadow-sm">
-              <Upload className="h-3.5 w-3.5" />
-              Import
-              <svg className="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-            </button>
-            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50 min-w-[160px] hidden group-hover:block">
-              <button onClick={() => setShowImport(true)} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
-                <CalendarDays className="h-3.5 w-3.5 text-gray-400" />
-                Import Calendar
-              </button>
-              <button onClick={() => setShowImportTasks(true)} className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
-                <ListTodo className="h-3.5 w-3.5 text-gray-400" />
-                Import Tasks
+            {/* Create button */}
+            <div className="p-4 pt-5">
+              <button
+                onClick={() => setShowAddEvent(true)}
+                className="flex items-center gap-3 w-full px-4 py-3 bg-[#2d2e30] hover:bg-[#3c3d3f] rounded-2xl text-sm font-medium text-gray-200 transition-all shadow-md"
+              >
+                <Plus className="h-5 w-5 text-gray-300" />
+                Create
+                <ChevronDown className="h-3.5 w-3.5 text-gray-400 ml-auto" />
               </button>
             </div>
+
+            {/* Mini calendar */}
+            <MiniCalendar
+              currentMonth={currentMonth}
+              selectedDate={selectedDate}
+              setSelectedDate={(date) => { setSelectedDate(date); setCurrentMonth(date); }}
+              onMonthChange={setCurrentMonth}
+            />
+
+            {/* My calendars */}
+            <div className="px-3 mt-2">
+              <div className="flex items-center justify-between py-2 px-2">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">My Calendars</span>
+              </div>
+              <div className="space-y-1 pl-1">
+                {[
+                  { label: "Tasks", color: "#4285f4" },
+                  { label: "Work", color: "#0f9d58" },
+                  { label: "Personal", color: "#a142f4" },
+                ].map((cal) => (
+                  <div key={cal.label} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 cursor-pointer">
+                    <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cal.color }} />
+                    <span className="text-sm text-gray-300">{cal.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Import */}
+            <div className="px-3 mt-4">
+              <div className="flex items-center justify-between py-2 px-2">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Import</span>
+              </div>
+              <div className="space-y-1 pl-1">
+                <button onClick={() => setShowImport(true)} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 w-full text-left">
+                  <CalendarDays className="h-3.5 w-3.5 text-gray-400" />
+                  <span className="text-sm text-gray-300">Import Calendar</span>
+                </button>
+                <button onClick={() => setShowImportTasks(true)} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 w-full text-left">
+                  <ListTodo className="h-3.5 w-3.5 text-gray-400" />
+                  <span className="text-sm text-gray-300">Import Tasks</span>
+                </button>
+              </div>
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Bar */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 flex-shrink-0">
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
+            <Menu className="h-5 w-5" />
+          </button>
+
+          <div className="flex items-center gap-2">
+            <Calendar className="h-6 w-6 text-blue-400" />
+            <span className="text-lg font-semibold text-gray-100 hidden sm:block">Calendar</span>
           </div>
+
+          <button onClick={navigateToday} className="ml-2 px-4 py-1.5 rounded border border-white/20 text-sm text-gray-300 hover:bg-white/10 transition-colors font-medium">
+            Today
+          </button>
+          <button onClick={navigatePrev} className="p-1.5 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <button onClick={navigateNext} className="p-1.5 rounded-full hover:bg-white/10 text-gray-400 transition-colors">
+            <ChevronRight className="h-5 w-5" />
+          </button>
+
+          <h2 className="text-lg font-medium text-gray-100 ml-1">{headerLabel()}</h2>
+
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setShowAddTask(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-sm text-gray-300 hover:bg-white/10 transition-colors border border-white/10"
+            >
+              <ListTodo className="h-4 w-4" />
+              <span className="hidden sm:inline">Add Task</span>
+            </button>
+
+            {/* View switcher */}
+            <div className="flex items-center bg-[#2d2e30] rounded-lg border border-white/10 overflow-hidden">
+              {VIEWS.map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`px-3 py-1.5 text-sm font-medium transition-all ${
+                    view === v ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200 hover:bg-white/10"
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Calendar Body */}
+        <div className="flex-1 overflow-auto">
+          {internalView === "Monthly" && (
+            <MonthlyView
+              currentMonth={currentMonth}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              tasks={tasks}
+              dark
+            />
+          )}
+          {internalView === "Weekly" && (
+            <WeeklyView
+              currentMonth={currentMonth}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              tasks={tasks}
+              dark
+            />
+          )}
+          {internalView === "Daily" && (
+            <DailyView
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              tasks={tasks}
+              toggleStatus={toggleStatus}
+              dark
+            />
+          )}
+          {internalView === "Yearly" && (
+            <YearlyView
+              currentMonth={currentMonth}
+              selectedDate={selectedDate}
+              setSelectedDate={setSelectedDate}
+              tasks={tasks}
+              dark
+            />
+          )}
         </div>
       </div>
 
@@ -177,131 +294,6 @@ export default function Dashboard() {
       <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={refresh} />
       <AddEventDialog open={showAddEvent} onOpenChange={setShowAddEvent} defaultDate={format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} />
       <AddTaskDialog2 open={showAddTask} onOpenChange={setShowAddTask} onAdded={refresh} />
-
-      {/* Calendar Card */}
-      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-        {/* Calendar Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-          <h2 className="text-xl font-bold text-gray-900">{headerLabel()}</h2>
-          <div className="flex gap-1">
-            {showNavArrows && (
-              <button onClick={navigatePrev} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
-                <ChevronLeft className="h-5 w-5" />
-              </button>
-            )}
-            <button
-              onClick={navigateToday}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium text-gray-500 hover:bg-gray-100 transition-colors"
-            >
-              Today
-            </button>
-            {showNavArrows && (
-              <button onClick={navigateNext} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
-                <ChevronRight className="h-5 w-5" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* View Body */}
-        {view === "Monthly" && (
-          <MonthlyView
-            currentMonth={currentMonth}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            tasks={tasks}
-          />
-        )}
-        {view === "Weekly" && (
-          <WeeklyView
-            currentMonth={currentMonth}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            tasks={tasks}
-          />
-        )}
-        {view === "Daily" && (
-          <DailyView
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            tasks={tasks}
-            toggleStatus={toggleStatus}
-          />
-        )}
-        {view === "Yearly" && (
-          <YearlyView
-            currentMonth={currentMonth}
-            selectedDate={selectedDate}
-            setSelectedDate={setSelectedDate}
-            tasks={tasks}
-          />
-        )}
-      </div>
-
-      {/* Tasks panel — hidden for Daily since it's inline */}
-      {view !== "Daily" && (
-        <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-6">
-          <h3 className="text-base font-semibold text-gray-900 mb-1">
-            {view === "Weekly"
-              ? `Week of ${format(startOfWeek(selectedDate, { weekStartsOn: 0 }), "MMM d")}`
-              : view === "Monthly"
-              ? format(currentMonth, "MMMM yyyy")
-              : view === "Yearly"
-              ? `${currentMonth.getFullYear()} Tasks`
-              : isSameDay(selectedDate, new Date()) ? "Today" : format(selectedDate, "EEEE, MMMM d")}
-          </h3>
-          <p className="text-xs text-gray-400 mb-5">
-            {selectedTasks.filter(t => t.status === "done").length}/{selectedTasks.length} tasks completed
-          </p>
-          <div className="space-y-2">
-            <AnimatePresence>
-              {selectedTasks.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-8">No tasks for this day</p>
-              )}
-              {selectedTasks.map((task) => (
-                <motion.button
-                  key={task.id}
-                  layout
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  onClick={() => toggleStatus(task)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:shadow-sm ${
-                    task.status === "done" ? "bg-white/60 border-gray-100 opacity-60" : "bg-white border-gray-100 hover:border-gray-200"
-                  }`}
-                >
-                  {task.status === "done" ? (
-                    <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: accentColor }} />
-                  ) : (
-                    <Circle className="h-5 w-5 text-gray-300 shrink-0" />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${task.status === "done" ? "line-through text-gray-400" : "text-gray-800"}`}>
-                      {task.title}
-                    </p>
-                    {task.description && (
-                      <p className="text-xs text-gray-400 mt-0.5 truncate">{task.description}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {task.estimated_minutes && (
-                      <span className="flex items-center gap-1 text-xs text-gray-400">
-                        <Clock className="h-3.5 w-3.5" />{task.estimated_minutes}m
-                      </span>
-                    )}
-                    <div className={`h-2 w-2 rounded-full ${priorityDots[task.priority] || priorityDots.medium}`} />
-                    {task.category && (
-                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${categoryColors[task.category] || ""}`}>
-                        {task.category}
-                      </span>
-                    )}
-                  </div>
-                </motion.button>
-              ))}
-            </AnimatePresence>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

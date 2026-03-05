@@ -2,21 +2,36 @@ import React from "react";
 import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear } from "date-fns";
 import { CheckCircle2, Circle, Clock } from "lucide-react";
 
-const priorityDots = { high: "bg-rose-500", medium: "bg-amber-400", low: "bg-emerald-500" };
 const categoryColors = {
-  work: "bg-blue-100 text-blue-700",
-  personal: "bg-purple-100 text-purple-700",
-  health: "bg-green-100 text-green-700",
-  learning: "bg-amber-100 text-amber-700",
-  creative: "bg-pink-100 text-pink-700",
+  work:     { bg: "#4285f4", text: "#fff" },
+  personal: { bg: "#a142f4", text: "#fff" },
+  health:   { bg: "#0f9d58", text: "#fff" },
+  learning: { bg: "#f4b400", text: "#fff" },
+  creative: { bg: "#db4437", text: "#fff" },
 };
+const defaultColor = { bg: "#4285f4", text: "#fff" };
 
-const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const accent = () => localStorage.getItem("pulse_secondary") || "#f59e0b";
+const DAY_HEADERS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
 function getTasksForDate(tasks, date) {
   const dateStr = format(date, "yyyy-MM-dd");
   return tasks.filter((t) => t.due_date === dateStr);
+}
+
+function TaskPill({ task }) {
+  const c = categoryColors[task.category] || defaultColor;
+  return (
+    <div
+      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-default"
+      style={{
+        backgroundColor: task.status === "done" ? "#3c3d3f" : c.bg,
+        color: task.status === "done" ? "#888" : c.text,
+        textDecoration: task.status === "done" ? "line-through" : "none",
+      }}
+    >
+      {task.title}
+    </div>
+  );
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
@@ -25,61 +40,71 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
   const calEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
-  const accentColor = accent();
 
   const calDays = [];
   let day = calStart;
   while (day <= calEnd) { calDays.push(day); day = addDays(day, 1); }
 
   return (
-    <>
-      <div className="grid grid-cols-7 border-b border-gray-100">
+    <div className="h-full flex flex-col">
+      {/* Day headers */}
+      <div className="grid grid-cols-7 border-b border-white/10">
         {DAY_HEADERS.map((d) => (
-          <div key={d} className="py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider">{d}</div>
+          <div key={d} className="py-2 text-center text-[11px] font-semibold text-gray-500 tracking-wider">{d}</div>
         ))}
       </div>
-      <div className="grid grid-cols-7">
+      {/* Days grid */}
+      <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${calDays.length / 7}, minmax(100px, 1fr))` }}>
         {calDays.map((date, idx) => {
           const dayTasks = getTasksForDate(tasks, date);
           const isCurrentMonth = isSameMonth(date, currentMonth);
           const isSelected = isSameDay(date, selectedDate);
           const todayFlag = isSameDay(date, new Date());
           return (
-            <button
+            <div
               key={idx}
               onClick={() => setSelectedDate(date)}
-              className={`min-h-[90px] p-2 border-b border-r border-gray-50 text-left transition-all hover:bg-white/60 ${!isCurrentMonth ? "opacity-40" : ""}`}
-              style={isSelected ? { backgroundColor: accentColor + "18" } : todayFlag ? { backgroundColor: accentColor + "10" } : {}}
+              className={`p-1.5 border-b border-r border-white/10 cursor-pointer hover:bg-white/5 transition-colors ${!isCurrentMonth ? "opacity-40" : ""}`}
             >
-              <div
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-medium mb-1.5"
-                style={todayFlag ? { backgroundColor: accentColor, color: "#fff" } : isSelected ? { backgroundColor: "#111827", color: "#fff" } : { color: "#374151" }}
-              >{format(date, "d")}</div>
+              <div className="flex justify-end mb-1">
+                <span
+                  className="h-7 w-7 flex items-center justify-center rounded-full text-sm font-medium"
+                  style={
+                    todayFlag
+                      ? { backgroundColor: "#4285f4", color: "#fff" }
+                      : isSelected
+                      ? { backgroundColor: "#3c3d3f", color: "#fff" }
+                      : { color: "#e8eaed" }
+                  }
+                >
+                  {idx < 7 ? format(date, "d") + "" : format(date, "d")}
+                </span>
+              </div>
               <div className="space-y-0.5">
                 {dayTasks.slice(0, 3).map((task) => (
-                  <div key={task.id} className={`text-[10px] font-medium px-1.5 py-0.5 rounded truncate ${
-                    task.status === "done" ? "bg-gray-100 text-gray-400 line-through" : categoryColors[task.category] || "bg-gray-100 text-gray-600"
-                  }`}>{task.title}</div>
+                  <TaskPill key={task.id} task={task} />
                 ))}
-                {dayTasks.length > 3 && <div className="text-[10px] text-gray-400 px-1">+{dayTasks.length - 3} more</div>}
+                {dayTasks.length > 3 && (
+                  <div className="text-[10px] text-gray-500 px-1">{dayTasks.length - 3} more</div>
+                )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
-    </>
+    </div>
   );
 }
 
 // ── WEEKLY VIEW ───────────────────────────────────────────────────────────────
-export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks }) {
+export function WeeklyView({ selectedDate, setSelectedDate, tasks }) {
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const accentColor = accent();
 
   return (
-    <div className="overflow-x-auto">
-      <div className="grid grid-cols-7 border-b border-gray-100">
+    <div className="h-full flex flex-col">
+      {/* Week day headers */}
+      <div className="grid grid-cols-7 border-b border-white/10">
         {weekDays.map((date) => {
           const todayFlag = isSameDay(date, new Date());
           const isSelected = isSameDay(date, selectedDate);
@@ -87,38 +112,44 @@ export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks 
             <button
               key={date.toISOString()}
               onClick={() => setSelectedDate(date)}
-              className="py-3 flex flex-col items-center gap-1 transition-all hover:bg-white/60"
-              style={isSelected ? { backgroundColor: accentColor + "18" } : {}}
+              className="py-3 flex flex-col items-center gap-1 hover:bg-white/5 transition-colors"
             >
-              <span className="text-xs font-semibold text-gray-400 uppercase">{format(date, "EEE")}</span>
+              <span className="text-[11px] font-semibold text-gray-500 tracking-wider">{format(date, "EEE").toUpperCase()}</span>
               <span
-                className="h-8 w-8 flex items-center justify-center rounded-full text-sm font-bold"
-                style={todayFlag ? { backgroundColor: accentColor, color: "#fff" } : isSelected ? { backgroundColor: "#111827", color: "#fff" } : { color: "#374151" }}
-              >{format(date, "d")}</span>
+                className="h-9 w-9 flex items-center justify-center rounded-full text-base font-medium"
+                style={
+                  todayFlag
+                    ? { backgroundColor: "#4285f4", color: "#fff" }
+                    : isSelected
+                    ? { backgroundColor: "#3c3d3f", color: "#fff" }
+                    : { color: "#e8eaed" }
+                }
+              >
+                {format(date, "d")}
+              </span>
             </button>
           );
         })}
       </div>
-      <div className="grid grid-cols-7 divide-x divide-gray-50">
+
+      {/* Task columns */}
+      <div className="grid grid-cols-7 divide-x divide-white/10 flex-1">
         {weekDays.map((date) => {
           const dayTasks = getTasksForDate(tasks, date);
           const isSelected = isSameDay(date, selectedDate);
           return (
-            <button
+            <div
               key={date.toISOString()}
               onClick={() => setSelectedDate(date)}
-              className="min-h-[160px] p-2 text-left align-top transition-all hover:bg-white/60"
-              style={isSelected ? { backgroundColor: accentColor + "18" } : {}}
+              className={`p-2 min-h-[300px] cursor-pointer hover:bg-white/5 transition-colors ${isSelected ? "bg-white/5" : ""}`}
             >
               <div className="space-y-1">
-                {dayTasks.length === 0 && <p className="text-[10px] text-gray-300 text-center mt-4">—</p>}
+                {dayTasks.length === 0 && <p className="text-[10px] text-gray-600 text-center mt-6">—</p>}
                 {dayTasks.map((task) => (
-                  <div key={task.id} className={`text-[10px] font-medium px-1.5 py-0.5 rounded truncate ${
-                    task.status === "done" ? "bg-gray-100 text-gray-400 line-through" : categoryColors[task.category] || "bg-gray-100 text-gray-600"
-                  }`}>{task.title}</div>
+                  <TaskPill key={task.id} task={task} />
                 ))}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -130,41 +161,53 @@ export function WeeklyView({ currentMonth, selectedDate, setSelectedDate, tasks 
 export function DailyView({ selectedDate, setSelectedDate, tasks, toggleStatus }) {
   const dayTasks = getTasksForDate(tasks, selectedDate);
   const todayFlag = isSameDay(selectedDate, new Date());
-  const accentColor = accent();
 
   return (
-    <div className="p-6">
-      <div className="flex items-center gap-4 mb-6">
-        <button onClick={() => setSelectedDate(addDays(selectedDate, -1))} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">◀</button>
-        <div className="flex-1 text-center">
-          <p className="text-2xl font-bold" style={{ color: todayFlag ? accentColor : "#111827" }}>{format(selectedDate, "EEEE")}</p>
-          <p className="text-sm text-gray-400">{format(selectedDate, "MMMM d, yyyy")}</p>
-        </div>
-        <button onClick={() => setSelectedDate(addDays(selectedDate, 1))} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500">▶</button>
+    <div className="p-8 max-w-2xl mx-auto">
+      <div className="text-center mb-8">
+        <div className="text-4xl font-thin text-gray-200 mb-1">{format(selectedDate, "d")}</div>
+        <div className="text-lg font-medium text-gray-300">{format(selectedDate, "EEEE")}</div>
+        <div className="text-sm text-gray-500">{format(selectedDate, "MMMM yyyy")}</div>
+        {todayFlag && <div className="mt-2 inline-block px-3 py-0.5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-medium">Today</div>}
       </div>
+
       <div className="space-y-2">
-        {dayTasks.length === 0 && <p className="text-sm text-gray-400 text-center py-10">No tasks for this day</p>}
-        {dayTasks.map((task) => (
-          <button
-            key={task.id}
-            onClick={() => toggleStatus(task)}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:shadow-sm ${
-              task.status === "done" ? "bg-gray-50 border-gray-100 opacity-60" : "bg-white border-gray-100 hover:border-gray-200"
-            }`}
-          >
-            {task.status === "done" ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" /> : <Circle className="h-5 w-5 text-gray-300 shrink-0" />}
-            <div className="flex-1 min-w-0">
-              <p className={`text-sm font-medium ${task.status === "done" ? "line-through text-gray-400" : "text-gray-800"}`}>{task.title}</p>
-              {task.description && <p className="text-xs text-gray-400 mt-0.5 truncate">{task.description}</p>}
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
+        {dayTasks.length === 0 && (
+          <div className="text-center py-12 text-gray-600">
+            <p className="text-sm">No tasks for this day</p>
+          </div>
+        )}
+        {dayTasks.map((task) => {
+          const c = categoryColors[task.category] || defaultColor;
+          return (
+            <button
+              key={task.id}
+              onClick={() => toggleStatus(task)}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-white/10 text-left transition-all hover:bg-white/5 bg-[#2d2e30]"
+            >
+              {task.status === "done"
+                ? <CheckCircle2 className="h-5 w-5 text-blue-500 shrink-0" />
+                : <Circle className="h-5 w-5 text-gray-600 shrink-0" />}
+              <div
+                className="h-3 w-1 rounded-full shrink-0"
+                style={{ backgroundColor: task.status === "done" ? "#555" : c.bg }}
+              />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-medium ${task.status === "done" ? "line-through text-gray-600" : "text-gray-200"}`}>
+                  {task.title}
+                </p>
+                {task.description && (
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">{task.description}</p>
+                )}
+              </div>
               {task.estimated_minutes && (
-                <span className="flex items-center gap-1 text-xs text-gray-400"><Clock className="h-3.5 w-3.5" />{task.estimated_minutes}m</span>
+                <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
+                  <Clock className="h-3 w-3" />{task.estimated_minutes}m
+                </span>
               )}
-              <div className={`h-2 w-2 rounded-full ${priorityDots[task.priority] || priorityDots.medium}`} />
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -174,10 +217,9 @@ export function DailyView({ selectedDate, setSelectedDate, tasks, toggleStatus }
 export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks }) {
   const year = getYear(currentMonth);
   const months = Array.from({ length: 12 }, (_, i) => new Date(year, i, 1));
-  const accentColor = accent();
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-6">
       {months.map((monthDate) => {
         const mStart = startOfMonth(monthDate);
         const mEnd = endOfMonth(monthDate);
@@ -189,11 +231,18 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
         const isCurrentDisplayMonth = getMonth(monthDate) === getMonth(currentMonth);
 
         return (
-          <div key={monthDate.toISOString()} className="rounded-xl border p-3 bg-white" style={isCurrentDisplayMonth ? { borderColor: accentColor + "66", backgroundColor: accentColor + "08" } : { borderColor: "#f3f4f6" }}>
-            <p className="text-xs font-bold text-gray-700 mb-2 text-center">{format(monthDate, "MMM")}</p>
+          <div
+            key={monthDate.toISOString()}
+            className="rounded-xl p-3 border transition-all"
+            style={{
+              backgroundColor: isCurrentDisplayMonth ? "#2d2e30" : "#252627",
+              borderColor: isCurrentDisplayMonth ? "#4285f4" : "rgba(255,255,255,0.08)",
+            }}
+          >
+            <p className="text-xs font-bold text-gray-300 mb-2 text-center">{format(monthDate, "MMMM")}</p>
             <div className="grid grid-cols-7 mb-1">
               {["S","M","T","W","T","F","S"].map((h, i) => (
-                <div key={i} className="text-center text-[8px] text-gray-300 font-semibold">{h}</div>
+                <div key={i} className="text-center text-[8px] text-gray-600 font-semibold">{h}</div>
               ))}
             </div>
             <div className="grid grid-cols-7 gap-y-0.5">
@@ -206,12 +255,18 @@ export function YearlyView({ currentMonth, selectedDate, setSelectedDate, tasks 
                   <button
                     key={idx}
                     onClick={() => setSelectedDate(date)}
-                    className={`relative flex flex-col items-center justify-center h-5 w-full rounded text-[9px] font-medium transition-all ${!inMonth ? "opacity-20" : "hover:bg-gray-100"}`}
-                    style={todayFlag ? { backgroundColor: accentColor, color: "#fff" } : isSelected ? { backgroundColor: "#111827", color: "#fff" } : { color: "#374151" }}
+                    className={`relative flex flex-col items-center justify-center h-5 w-full rounded text-[9px] font-medium transition-all ${!inMonth ? "opacity-20" : "hover:bg-white/10"}`}
+                    style={
+                      todayFlag
+                        ? { backgroundColor: "#4285f4", color: "#fff" }
+                        : isSelected
+                        ? { backgroundColor: "rgba(255,255,255,0.15)", color: "#fff" }
+                        : { color: "#bdc1c6" }
+                    }
                   >
                     {format(date, "d")}
                     {dayTasks.length > 0 && inMonth && !isSelected && !todayFlag && (
-                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full" style={{ backgroundColor: accentColor }} />
+                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-blue-400" />
                     )}
                   </button>
                 );
