@@ -10,6 +10,7 @@ import WeeklyBreakdown from "../components/analytics/WeeklyBreakdown";
 import CategoryBreakdown from "../components/analytics/CategoryBreakdown";
 
 export default function Analytics() {
+  const navigate = useNavigate();
   const { data: tasks = [] } = useQuery({
     queryKey: ["tasks"],
     queryFn: () => base44.entities.Task.list("-created_date"),
@@ -53,9 +54,14 @@ export default function Analytics() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Track your productivity patterns</p>
+      <div className="flex items-center gap-3">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Track your productivity patterns</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

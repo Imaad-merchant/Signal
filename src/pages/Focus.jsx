@@ -15,6 +15,7 @@ export default function Focus() {
   const initialTask = taskId ? { id: taskId, title: decodeURIComponent(taskTitle || "") } : null;
   const [activeTask, setActiveTask] = useState(initialTask);
   const [showComplete, setShowComplete] = useState(false);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: sessions = [] } = useQuery({
@@ -43,9 +44,14 @@ export default function Focus() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Focus Mode</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Deep work, no distractions</p>
+      <div className="flex items-center gap-3 mb-8">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div className="flex-1 text-center pr-9">
+          <h1 className="text-2xl font-bold text-gray-900">Focus Mode</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Deep work, no distractions</p>
+        </div>
       </div>
 
       {showComplete ? (
