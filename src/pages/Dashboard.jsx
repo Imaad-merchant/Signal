@@ -111,19 +111,22 @@ export default function Dashboard() {
 
   const toggleCategory = (key) => { const next = { ...enabledCategories, [key]: !enabledCategories[key] }; saveEnabledCategories(next); };
   const deleteCategory = (key) => {
-    setCategories(prev => prev.filter(c => c.key !== key));
-    setEnabledCategories(prev => { const next = { ...prev }; delete next[key]; return next; });
+    const next = categories.filter(c => c.key !== key);
+    saveCategories(next);
+    const nextEnabled = { ...enabledCategories }; delete nextEnabled[key]; saveEnabledCategories(nextEnabled);
   };
   const renameCategory = (key) => {
     if (!editingCatName.trim()) return;
-    setCategories(prev => prev.map(c => c.key === key ? { ...c, label: editingCatName.trim() } : c));
+    const next = categories.map(c => c.key === key ? { ...c, label: editingCatName.trim() } : c);
+    saveCategories(next);
     setEditingCatKey(null);
   };
   const addCategory = () => {
     if (!newCatName.trim()) return;
     const key = newCatName.trim().toLowerCase().replace(/\s+/g, "_") + "_" + Date.now();
-    setCategories(prev => [...prev, { label: newCatName.trim(), color: newCatColor, key }]);
-    setEnabledCategories(prev => ({ ...prev, [key]: true }));
+    const next = [...categories, { label: newCatName.trim(), color: newCatColor, key }];
+    saveCategories(next);
+    saveEnabledCategories({ ...enabledCategories, [key]: true });
     setNewCatName("");
     setNewCatColor("#4285f4");
     setShowAddCategory(false);
