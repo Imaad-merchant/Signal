@@ -156,21 +156,12 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
           >
             Delete task
           </button>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || !form.title.trim()}
-              className="px-4 py-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            Done
+          </button>
         </div>
       </div>
     </div>
