@@ -79,10 +79,10 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o-mini",
       messages: oaiMessages,
       response_format: { type: "json_object" },
-      max_tokens: 2000,
+      max_tokens: 1000,
     });
 
     const raw = completion.choices[0].message.content;
