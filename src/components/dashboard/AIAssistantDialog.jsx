@@ -107,25 +107,34 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
 
     // Execute actions in parallel for speed
     let actionCount = 0;
-    const promises = actions.map(async (act) => {
-      if (act.action === "create_category") {
-        if (act.label && act.color && act.key) {
-          await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+
+    // Handle delete_all specially — fetch all tasks and delete in parallel
+    if (actions.some(a => a.action === "delete_all")) {
+      const user = await base44.auth.me();
+      const allTasks = await base44.entities.Task.filter({ created_by: user.email });
+      await Promise.all(allTasks.map(t => base44.entities.Task.delete(t.id)));
+      actionCount += allTasks.length;
+    } else {
+      const promises = actions.map(async (act) => {
+        if (act.action === "create_category") {
+          if (act.label && act.color && act.key) {
+            await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+            actionCount++;
+          }
+        } else if (act.action === "create") {
+          const { action, ...data } = act;
+          await base44.entities.Task.create({ status: "todo", priority: "medium", ...data });
+          actionCount++;
+        } else if (act.action === "update" && act.id) {
+          await base44.entities.Task.update(act.id, act.fields || {});
+          actionCount++;
+        } else if (act.action === "delete" && act.id) {
+          await base44.entities.Task.delete(act.id);
           actionCount++;
         }
-      } else if (act.action === "create") {
-        const { action, ...data } = act;
-        await base44.entities.Task.create({ status: "todo", priority: "medium", ...data });
-        actionCount++;
-      } else if (act.action === "update" && act.id) {
-        await base44.entities.Task.update(act.id, act.fields || {});
-        actionCount++;
-      } else if (act.action === "delete" && act.id) {
-        await base44.entities.Task.delete(act.id);
-        actionCount++;
-      }
-    });
-    await Promise.all(promises);
+      });
+      await Promise.all(promises);
+    }
 
     if (actionCount > 0) onUpdated();
 
