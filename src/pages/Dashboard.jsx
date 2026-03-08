@@ -453,16 +453,23 @@ export default function Dashboard() {
              </div>
            )}
            {internalView === "Monthly" && (
-             <MonthlyView
-               currentMonth={currentMonth}
-               selectedDate={selectedDate}
-               setSelectedDate={setSelectedDate}
-               tasks={filteredTasks}
-               onUpdated={refresh}
-               categories={categories}
-               onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
-             />
-           )}
+              isMobile
+                ? <AgendaView
+                    currentMonth={currentMonth}
+                    tasks={filteredTasks}
+                    categories={categories}
+                    onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+                  />
+                : <MonthlyView
+                    currentMonth={currentMonth}
+                    selectedDate={selectedDate}
+                    setSelectedDate={setSelectedDate}
+                    tasks={filteredTasks}
+                    onUpdated={refresh}
+                    categories={categories}
+                    onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+                  />
+            )}
            {internalView === "Weekly" && (
              <WeeklyView
                selectedDate={selectedDate}
