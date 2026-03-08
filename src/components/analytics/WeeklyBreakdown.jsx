@@ -24,9 +24,9 @@ export default function WeeklyBreakdown({ focusSessions }) {
   const CustomTooltip = ({ active, payload }) => {
     if (!active || !payload?.length) return null;
     return (
-      <div className="rounded-xl border border-gray-100 bg-white/95 backdrop-blur-sm p-3 shadow-lg">
-        <p className="text-xs font-medium text-gray-500">{payload[0]?.payload?.day}</p>
-        <p className="text-sm font-bold text-gray-900 mt-0.5">{payload[0]?.value}m focused</p>
+      <div className="rounded-xl border border-white/10 bg-[#2d2e30]/95 backdrop-blur-sm p-3 shadow-lg">
+        <p className="text-xs font-medium text-gray-400">{payload[0]?.payload?.day}</p>
+        <p className="text-sm font-bold text-gray-100 mt-0.5">{payload[0]?.value}m focused</p>
       </div>
     );
   };
