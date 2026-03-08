@@ -140,8 +140,8 @@ export default function Settings() {
       <div className="flex justify-end">
         <button
           onClick={handleSave}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${
-            saved ? "bg-emerald-500 text-white" : "bg-gray-900 text-white hover:bg-gray-800"
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all min-h-[44px] ${
+            saved ? "bg-emerald-500 text-white" : "bg-white text-gray-900 hover:bg-gray-100"
           }`}
         >
           {saved && <Check className="h-4 w-4" />}
