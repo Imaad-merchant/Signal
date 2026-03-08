@@ -15,8 +15,9 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState([]); // { file, preview, url }
   const [loading, setLoading] = useState(false);
-  const [undoStack, setUndoStack] = useState([]); // each entry: snapshot of tasks before action
-  const [redoStack, setRedoStack] = useState([]);
+  const [, forceUpdate] = useState(0);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
   const abortRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
