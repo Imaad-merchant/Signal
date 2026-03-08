@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Send, Image, X, Loader2, User, Bot } from "lucide-react";
+import { Sparkles, Send, Image, X, Loader2, User, Bot, Square } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import ReactMarkdown from "react-markdown";
 
