@@ -219,7 +219,7 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
               </button>
               <button
                 onClick={handleRedo}
-                disabled={redoStack.length === 0}
+                disabled={redoStackRef.current.length === 0}
                 title="Redo last action"
                 className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
