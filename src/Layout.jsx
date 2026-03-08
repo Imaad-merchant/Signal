@@ -16,10 +16,12 @@ export default function Layout({ children, currentPageName }) {
         * { -webkit-font-smoothing: antialiased; }
         body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #1e1f20; }
         :root { --pulse-theme: ${themeColor}; }
+        .safe-area-pb { padding-bottom: calc(env(safe-area-inset-bottom) + 4rem); }
       `}</style>
-      <main className={currentPageName === "Dashboard" ? "h-screen overflow-hidden" : "p-4 sm:p-6 lg:p-8"}>
+      <main className={currentPageName === "Dashboard" ? "h-screen overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}>
         {children}
       </main>
+      <MobileBottomTab currentPageName={currentPageName} />
     </div>
   );
 }

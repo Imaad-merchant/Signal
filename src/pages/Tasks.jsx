@@ -34,6 +34,10 @@ export default function Tasks() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
   const handleStatusChange = async (task, newStatus) => {
+    // Optimistic update
+    queryClient.setQueryData(["tasks", user?.email], (old = []) =>
+      old.map(t => t.id === task.id ? { ...t, status: newStatus, completed_date: newStatus === "done" ? new Date().toISOString() : t.completed_date } : t)
+    );
     const data = { status: newStatus };
     if (newStatus === "done") data.completed_date = new Date().toISOString();
     await base44.entities.Task.update(task.id, data);
