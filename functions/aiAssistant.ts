@@ -26,8 +26,8 @@ Deno.serve(async (req) => {
       sortedTasks.slice(0, 50).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
-    // Fetch all categories (some may have been created by service role)
-    const fetchedCategories = await base44.asServiceRole.entities.Category.list();
+    // Fetch all categories using service role to get ALL categories regardless of creator
+    const fetchedCategories = await base44.asServiceRole.entities.Category.filter({}, "-created_date", 100);
     const catList = fetchedCategories.length > 0 ? fetchedCategories : [];
     const categoryList = catList.length > 0
       ? catList.map(c => `  - Label: "${c.label}", Key: "${c.key}"`).join("\n")
