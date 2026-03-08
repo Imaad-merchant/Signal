@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
     const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
 
     // Always fetch tasks fresh from DB for the current user
-    const freshTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date", 50);
+    const freshTasks = await base44.asServiceRole.entities.Task.filter({ created_by: user.email }, "-due_date", 50);
 
     // Sort by due_date ascending
     const sortedTasks = freshTasks
