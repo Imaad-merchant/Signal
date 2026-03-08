@@ -32,9 +32,9 @@ export default function WeeklyBreakdown({ focusSessions }) {
   };
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6">
-      <h3 className="text-sm font-semibold text-gray-900 mb-1">Weekly Focus</h3>
-      <p className="text-xs text-gray-400 mb-5">Minutes focused per day this week</p>
+    <div className="rounded-2xl border border-white/10 bg-[#2d2e30] p-6">
+      <h3 className="text-sm font-semibold text-gray-100 mb-1">Weekly Focus</h3>
+      <p className="text-xs text-gray-500 mb-5">Minutes focused per day this week</p>
       <div className="h-44">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={weekDays} barCategoryGap="25%">
