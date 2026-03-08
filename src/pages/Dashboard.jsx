@@ -102,37 +102,56 @@ export default function Dashboard() {
     { label: "Learning", color: "#f4b400", key: "learning" },
     { label: "Creative", color: "#db4437", key: "creative" },
   ];
-  const [categories, setCategories] = useState(() => {
-    try { const s = localStorage.getItem("pulse_categories"); return s ? JSON.parse(s) : DEFAULT_CATEGORIES; } catch { return DEFAULT_CATEGORIES; }
-  });
+
   const [enabledCategories, setEnabledCategories] = useState(() => {
-    try { const s = localStorage.getItem("pulse_enabled_categories"); return s ? JSON.parse(s) : Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, true])); } catch { return Object.fromEntries(DEFAULT_CATEGORIES.map(c => [c.key, true])); }
+    try { const s = localStorage.getItem("pulse_enabled_categories"); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
 
-  const saveCategories = (cats) => { setCategories(cats); localStorage.setItem("pulse_categories", JSON.stringify(cats)); };
   const saveEnabledCategories = (enabled) => { setEnabledCategories(enabled); localStorage.setItem("pulse_enabled_categories", JSON.stringify(enabled)); };
 
+  // Load categories from DB
+  const { data: dbCategories = [], refetch: refetchCategories } = useQuery({
+    queryKey: ["categories", user?.email],
+    queryFn: async () => {
+      const cats = await base44.entities.Category.list();
+      // Seed defaults if none exist yet
+      if (cats.length === 0) {
+        await Promise.all(DEFAULT_CATEGORIES.map(c => base44.entities.Category.create(c)));
+        return DEFAULT_CATEGORIES;
+      }
+      return cats;
+    },
+    enabled: !!user,
+    staleTime: 0,
+  });
+  const categories = dbCategories;
+
   const toggleCategory = (key) => { const next = { ...enabledCategories, [key]: !enabledCategories[key] }; saveEnabledCategories(next); };
-  const deleteCategory = (key) => {
-    const next = categories.filter(c => c.key !== key);
-    saveCategories(next);
+
+  const deleteCategory = async (key) => {
+    const cat = categories.find(c => c.key === key);
+    if (cat?.id) await base44.entities.Category.delete(cat.id);
     const nextEnabled = { ...enabledCategories }; delete nextEnabled[key]; saveEnabledCategories(nextEnabled);
+    refetchCategories();
   };
-  const renameCategory = (key) => {
+
+  const renameCategory = async (key) => {
     if (!editingCatName.trim()) return;
-    const next = categories.map(c => c.key === key ? { ...c, label: editingCatName.trim() } : c);
-    saveCategories(next);
+    const cat = categories.find(c => c.key === key);
+    if (cat?.id) await base44.entities.Category.update(cat.id, { label: editingCatName.trim() });
     setEditingCatKey(null);
+    refetchCategories();
   };
-  const addCategory = () => {
+
+  const addCategory = async () => {
     if (!newCatName.trim()) return;
     const key = newCatName.trim().toLowerCase().replace(/\s+/g, "_") + "_" + Date.now();
-    const next = [...categories, { label: newCatName.trim(), color: newCatColor, key }];
-    saveCategories(next);
+    await base44.entities.Category.create({ label: newCatName.trim(), color: newCatColor, key });
     saveEnabledCategories({ ...enabledCategories, [key]: true });
     setNewCatName("");
     setNewCatColor("#4285f4");
     setShowAddCategory(false);
+    refetchCategories();
   };
 
   const internalView = VIEW_MAP[view];
