@@ -28,6 +28,7 @@ Deno.serve(async (req) => {
 
     // Fetch all categories using service role to get ALL categories regardless of creator
     const fetchedCategories = await base44.asServiceRole.entities.Category.filter({}, "-created_date", 100);
+    console.log("Categories fetched:", JSON.stringify(fetchedCategories.map(c => ({label: c.label, key: c.key, created_by: c.created_by}))));
     const catList = fetchedCategories.length > 0 ? fetchedCategories : [];
     const categoryList = catList.length > 0
       ? catList.map(c => `  - Label: "${c.label}", Key: "${c.key}"`).join("\n")
