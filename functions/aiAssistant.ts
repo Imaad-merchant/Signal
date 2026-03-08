@@ -107,7 +107,15 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
     });
 
     const raw = completion.choices[0].message.content;
-    const parsed = JSON.parse(raw);
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      // If JSON parse fails, return a safe fallback with the raw text as reply
+      parsed = { reply: raw || "I couldn't process that. Please try again.", actions: [] };
+    }
+    if (!parsed.reply) parsed.reply = "Done!";
+    if (!Array.isArray(parsed.actions)) parsed.actions = [];
 
     // Process create_category actions FIRST, so they're available for task assignments
     if (parsed.actions?.length > 0) {
