@@ -73,7 +73,7 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
       const last = oaiMessages[oaiMessages.length - 1];
       if (last.role === "user") {
         const parts = typeof last.content === "string" ? [{ type: "text", text: last.content }] : [...last.content];
-        for (const url of imageUrls) parts.push({ type: "image_url", image_url: { url, detail: "high" } });
+        for (const url of imageUrls) parts.push({ type: "image_url", image_url: { url, detail: "low" } });
         oaiMessages[oaiMessages.length - 1] = { role: "user", content: parts };
       }
     }
