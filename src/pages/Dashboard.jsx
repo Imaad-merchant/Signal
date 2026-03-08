@@ -167,7 +167,10 @@ export default function Dashboard() {
     enabled: !!user,
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["categories"] });
+  };
 
   const filteredTasks = tasks.filter(t => enabledCategories[t.category ?? "work"] !== false);
   const CATEGORIES = categories;
