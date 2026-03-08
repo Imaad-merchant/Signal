@@ -396,13 +396,13 @@ export default function Dashboard() {
 
           <Calendar className="h-5 w-5 text-blue-400 flex-shrink-0" />
 
-          <button onClick={navigateToday} className="px-3 py-1 rounded border border-white/20 text-xs text-gray-300 hover:bg-white/10 transition-colors font-medium flex-shrink-0">
+          <button onClick={navigateToday} className="px-3 py-2 rounded border border-white/20 text-xs text-gray-300 hover:bg-white/10 transition-colors font-medium flex-shrink-0 min-h-[44px]">
             Today
           </button>
-          <button onClick={navigatePrev} className="p-1 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0">
+          <button onClick={navigatePrev} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <button onClick={navigateNext} className="p-1 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0">
+          <button onClick={navigateNext} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <ChevronRight className="h-4 w-4" />
           </button>
 
