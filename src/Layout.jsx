@@ -20,9 +20,18 @@ export default function Layout({ children, currentPageName }) {
         :root { --pulse-theme: ${themeColor}; }
         .safe-area-pb { padding-bottom: calc(env(safe-area-inset-bottom) + 4rem); }
       `}</style>
-      <main className={currentPageName === "Dashboard" ? "h-screen overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}>
-        {children}
-      </main>
+      <AnimatePresence mode="wait">
+        <motion.main
+          key={currentPageName}
+          initial={{ opacity: 0, x: 16 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -16 }}
+          transition={{ duration: 0.18, ease: "easeInOut" }}
+          className={currentPageName === "Dashboard" ? "h-screen overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}
+        >
+          {children}
+        </motion.main>
+      </AnimatePresence>
       <MobileBottomTab currentPageName={currentPageName} />
     </div>
   );
