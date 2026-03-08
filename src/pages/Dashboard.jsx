@@ -119,10 +119,6 @@ export default function Dashboard() {
     queryKey: ["categories", user?.email],
     queryFn: async () => {
       const cats = await base44.entities.Category.list();
-      if (cats.length === 0) {
-        await Promise.all(DEFAULT_CATEGORIES.map(c => base44.entities.Category.create(c)));
-        return DEFAULT_CATEGORIES;
-      }
       return cats;
     },
     enabled: !!user,
