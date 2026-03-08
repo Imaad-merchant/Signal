@@ -20,9 +20,9 @@ export default function CategoryBreakdown({ tasks }) {
 
   if (categoryData.length === 0) {
     return (
-      <div className="rounded-2xl border border-gray-100 bg-white p-6">
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">Tasks by Category</h3>
-        <p className="text-sm text-gray-400 text-center py-8">No tasks yet</p>
+      <div className="rounded-2xl border border-white/10 bg-[#2d2e30] p-6">
+        <h3 className="text-sm font-semibold text-gray-100 mb-4">Tasks by Category</h3>
+        <p className="text-sm text-gray-500 text-center py-8">No tasks yet</p>
       </div>
     );
   }
@@ -30,16 +30,16 @@ export default function CategoryBreakdown({ tasks }) {
   const CustomTooltip = ({ active, payload }) => {
     if (!active || !payload?.length) return null;
     return (
-      <div className="rounded-xl border border-gray-100 bg-white/95 backdrop-blur-sm p-3 shadow-lg">
-        <p className="text-xs font-medium capitalize">{payload[0].name}</p>
-        <p className="text-sm font-bold">{payload[0].value} tasks</p>
+      <div className="rounded-xl border border-white/10 bg-[#2d2e30]/95 backdrop-blur-sm p-3 shadow-lg">
+        <p className="text-xs font-medium capitalize text-gray-300">{payload[0].name}</p>
+        <p className="text-sm font-bold text-gray-100">{payload[0].value} tasks</p>
       </div>
     );
   };
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6">
-      <h3 className="text-sm font-semibold text-gray-900 mb-4">Tasks by Category</h3>
+    <div className="rounded-2xl border border-white/10 bg-[#2d2e30] p-6">
+      <h3 className="text-sm font-semibold text-gray-100 mb-4">Tasks by Category</h3>
       <div className="h-48">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
