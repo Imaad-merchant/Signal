@@ -76,12 +76,12 @@ export default function Settings() {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-white/10 text-gray-400 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center">
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-          <p className="text-sm text-gray-400 mt-1">Customize your Pulse experience</p>
+          <h1 className="text-2xl font-bold text-gray-100">Settings</h1>
+          <p className="text-sm text-gray-500 mt-1">Customize your Pulse experience</p>
         </div>
       </div>
 
