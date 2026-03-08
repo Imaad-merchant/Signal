@@ -39,8 +39,15 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
     setAttachedImages((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const handleStop = () => {
+    abortRef.current = true;
+    setLoading(false);
+    setMessages((prev) => [...prev, { role: "assistant", content: "Stopped." }]);
+  };
+
   const handleSend = async () => {
     if (!input.trim() && attachedImages.length === 0) return;
+    abortRef.current = false;
     setLoading(true);
 
     // Upload any images first
