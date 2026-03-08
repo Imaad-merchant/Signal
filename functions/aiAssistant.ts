@@ -75,9 +75,10 @@ Always respond with valid JSON only (no markdown blocks):
 CRITICAL FOR CALENDAR IMAGES: If an image of a calendar is attached, carefully read EVERY visible event on the calendar. Look at each cell/day and extract ALL event titles you can see, along with the exact date from the calendar grid. Create a task for each event with the correct due_date (YYYY-MM-DD). The calendar shown is for the year/month visible in the image header. Read truncated text as best you can and include it. Do not skip any events.
 
 CRITICAL FOR CATEGORY ASSIGNMENT:
-- When the user says a category name (e.g. "FA", "work", "health"), scan the available categories list and find the one whose label or key matches most closely. Use ONLY that existing key — do NOT create a new category.
-- If the user asks to move/change EXISTING tasks to a category, use the update action for each task ID from the current tasks list and set category to the matched existing key.
-- NEVER create a new category when an existing one matches. NEVER ignore a category instruction.
+- Match the user's words to the closest Label in the available categories list, then use that Label's exact Key (lowercase, as listed).
+- If the user says "FA", look for a Label like "FA" or "Financial Aid" etc., and use its Key exactly as written.
+- If the user asks to move/change EXISTING tasks to a category, use the update action for each task ID and set category to the matched exact Key.
+- NEVER use a modified, capitalized, or invented key. The key must come directly from the list above.
 
 Be proactive, helpful, and conversational. Keep replies concise.`;
 
