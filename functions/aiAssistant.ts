@@ -26,15 +26,8 @@ Deno.serve(async (req) => {
       sortedTasks.slice(0, 50).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
-    // Fetch categories — try user-scoped first, merge with service-role to catch all
-    const [userCats, allCats] = await Promise.all([
-      base44.entities.Category.filter({}, "-created_date", 100),
-      base44.asServiceRole.entities.Category.filter({}, "-created_date", 100),
-    ]);
-    // Merge and deduplicate by key
-    const catMap = new Map();
-    [...allCats, ...userCats].forEach(c => catMap.set(c.key, c));
-    const fetchedCategories = Array.from(catMap.values());
+    // Fetch all categories (user-scoped — all categories are created by the user)
+    const fetchedCategories = await base44.entities.Category.filter({}, "-created_date", 100);
     const catList = fetchedCategories.length > 0 ? fetchedCategories : [];
     const categoryList = catList.length > 0
       ? catList.map(c => `  - Label: "${c.label}", Key: "${c.key}"`).join("\n")
