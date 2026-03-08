@@ -84,7 +84,7 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
       model: "gpt-4o-mini",
       messages: oaiMessages,
       response_format: { type: "json_object" },
-      max_tokens: 1000,
+      max_tokens: 2000,
     });
 
     const raw = completion.choices[0].message.content;
