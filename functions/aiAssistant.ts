@@ -50,6 +50,9 @@ Always respond with valid JSON only (no markdown blocks):
 }
 
 CRITICAL FOR CALENDAR IMAGES: If an image of a calendar is attached, carefully read EVERY visible event on the calendar. Look at each cell/day and extract ALL event titles you can see, along with the exact date from the calendar grid. Create a task for each event with the correct due_date (YYYY-MM-DD). The calendar shown is for the year/month visible in the image header. Read truncated text as best you can and include it. Do not skip any events.
+
+CRITICAL FOR CATEGORY ASSIGNMENT FROM IMAGES: When the user uploads a calendar image and mentions a specific category (e.g. "put it under FA", "add to work", "these are personal"), you MUST assign ALL created tasks to that exact category key from the available categories list. Match the user's words to the closest category key available. If the user says "FA", find the category key that matches (e.g. "fa"). Do NOT use a default category — always use what the user specified.
+
 Be proactive, helpful, and conversational. Keep replies concise.`;
 
     // Build OpenAI messages
