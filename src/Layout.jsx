@@ -16,11 +16,20 @@ export default function Layout({ children, currentPageName }) {
     <div className="min-h-screen bg-[#1e1f20]">
       <style>{`
         * { -webkit-font-smoothing: antialiased; }
-        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #1e1f20; }
+        body {
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+          background-color: #1e1f20;
+          overscroll-behavior: none;
+        }
         :root { --pulse-theme: ${themeColor}; }
         .safe-area-pb { padding-bottom: calc(env(safe-area-inset-bottom) + 4rem); }
-        #root > div { padding-top: env(safe-area-inset-top); }
+        button, a, [role="button"], nav, label {
+          user-select: none;
+          -webkit-user-select: none;
+          -webkit-tap-highlight-color: transparent;
+        }
       `}</style>
+      <div style={{ paddingTop: "env(safe-area-inset-top)" }} />
       <AnimatePresence mode="wait">
         <motion.main
           key={currentPageName}

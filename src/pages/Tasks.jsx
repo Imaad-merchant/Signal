@@ -97,8 +97,24 @@ export default function Tasks() {
     return true;
   });
 
+  const pullProgress = Math.min(pullY / PULL_THRESHOLD, 1);
+  const showPullIndicator = pullY > 8 || refreshing;
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div
+      ref={scrollRef}
+      data-scroll-container
+      className="max-w-4xl mx-auto space-y-6"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* Pull-to-refresh indicator */}
+      {showPullIndicator && (
+        <div className="flex justify-center -mb-4 transition-all" style={{ height: refreshing ? PULL_THRESHOLD : pullY }}>
+          <Loader2 className={`h-5 w-5 text-blue-400 self-center ${refreshing ? "animate-spin" : ""}`} style={{ opacity: pullProgress }} />
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
