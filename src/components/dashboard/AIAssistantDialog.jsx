@@ -92,10 +92,14 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
         categories,
       });
     } catch (err) {
-      setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, something went wrong. Please try again." }]);
+      if (!abortRef.current) {
+        setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, something went wrong. Please try again." }]);
+      }
       setLoading(false);
       return;
     }
+
+    if (abortRef.current) return;
 
     const result = response.data;
     const reply = result?.reply || "Done!";
