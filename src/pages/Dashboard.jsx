@@ -432,7 +432,23 @@ export default function Dashboard() {
         </div>
 
         {/* Calendar Body */}
-         <div className="flex-1 overflow-auto">
+         <div
+           ref={calBodyRef}
+           data-scroll-container
+           className="flex-1 overflow-auto relative"
+           onTouchStart={handleCalTouchStart}
+           onTouchMove={handleCalTouchMove}
+           onTouchEnd={handleCalTouchEnd}
+         >
+           {(pullY > 8 || isRefreshing) && (
+             <div className="flex justify-center py-2 absolute top-0 left-0 right-0 pointer-events-none z-10"
+               style={{ height: isRefreshing ? PULL_THRESHOLD : pullY, opacity: Math.min(pullY / PULL_THRESHOLD, 1) }}>
+               <svg className={`h-5 w-5 text-blue-400 self-center ${isRefreshing ? "animate-spin" : ""}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
+               </svg>
+             </div>
+           )}
            {internalView === "Monthly" && (
              <MonthlyView
                currentMonth={currentMonth}
