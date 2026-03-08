@@ -54,7 +54,7 @@ Your job is to understand what the user wants and return BOTH a friendly reply A
 
 Valid actions:
 - create: { action: "create", title, due_date (YYYY-MM-DD), category (${categoryEnum}), priority (low|medium|high), description? }
-- create_category: { action: "create_category", label, color (hex code like #FF5733), key }
+- create_category: { action: "create_category", label, color (hex code like #FF5733), key (MUST be a simple lowercase slug like "cfps", "work", "health" — NO numbers, NO timestamps, NO underscores with numbers) }
 - update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
 - delete: { action: "delete", id }
 - delete_all: { action: "delete_all" } — use this when user wants to delete ALL tasks at once, instead of listing individual deletes
