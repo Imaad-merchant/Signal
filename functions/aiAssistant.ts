@@ -9,14 +9,17 @@ Deno.serve(async (req) => {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { messages, tasks, imageUrls } = await req.json();
+    const { messages, imageUrls } = await req.json();
 
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
     const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
 
-    // Sort by due_date ascending so earliest tasks are always visible, then slice to 50
-    const sortedTasks = (tasks || [])
+    // Always fetch tasks fresh from DB for the current user
+    const freshTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date", 50);
+
+    // Sort by due_date ascending
+    const sortedTasks = freshTasks
       .slice()
       .sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
     const tasksJson = JSON.stringify(
