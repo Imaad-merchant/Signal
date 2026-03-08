@@ -11,6 +11,8 @@ import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 
+const PULL_THRESHOLD = 70;
+
 export default function Tasks() {
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState("");
@@ -19,6 +21,44 @@ export default function Tasks() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const scrollRef = useRef(null);
+  const [pullY, setPullY] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const touchStartY = useRef(null);
+
+  // Reset on tab re-tap
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.page === "Tasks") {
+        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+        setSearch("");
+        setStatusFilter("all");
+        setPriorityFilter("all");
+        setCategoryFilter("all");
+      }
+    };
+    window.addEventListener("tab-reset", handler);
+    return () => window.removeEventListener("tab-reset", handler);
+  }, []);
+
+  const handleTouchStart = (e) => {
+    if (scrollRef.current?.scrollTop === 0) touchStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e) => {
+    if (touchStartY.current === null || refreshing) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 0) setPullY(Math.min(delta * 0.45, PULL_THRESHOLD + 20));
+  };
+  const handleTouchEnd = async () => {
+    if (pullY >= PULL_THRESHOLD && !refreshing) {
+      setRefreshing(true);
+      setPullY(PULL_THRESHOLD);
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      setRefreshing(false);
+    }
+    setPullY(0);
+    touchStartY.current = null;
+  };
 
   const { data: user } = useQuery({
     queryKey: ["me"],
