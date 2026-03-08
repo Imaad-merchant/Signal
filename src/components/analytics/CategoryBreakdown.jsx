@@ -64,7 +64,7 @@ export default function CategoryBreakdown({ tasks }) {
         {categoryData.map((cat) => (
           <div key={cat.name} className="flex items-center gap-1.5">
             <div className="h-2 w-2 rounded-full" style={{ backgroundColor: cat.color }} />
-            <span className="text-xs text-gray-500 capitalize">{cat.name}</span>
+            <span className="text-xs text-gray-400 capitalize">{cat.name}</span>
           </div>
         ))}
       </div>
