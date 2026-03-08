@@ -37,6 +37,7 @@ Valid actions:
 - create_category: { action: "create_category", label, color (hex code like #FF5733), key }
 - update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
 - delete: { action: "delete", id }
+- delete_all: { action: "delete_all" } — use this when user wants to delete ALL tasks at once, instead of listing individual deletes
 
 IMPORTANT FOR CATEGORY CHANGES: When the user asks to change tasks to a specific category (e.g., "change these to ACCT" or "make them green for accounting"), find the matching tasks and use the update action to set their category field to the correct category key (e.g., "acct", "busi"). Use the existing categories provided - don't create new ones unless explicitly asked.
 
