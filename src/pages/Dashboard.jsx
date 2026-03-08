@@ -78,6 +78,7 @@ function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChan
 
 export default function Dashboard() {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showImport, setShowImport] = useState(false);
