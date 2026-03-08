@@ -13,7 +13,7 @@ export default function Layout({ children, currentPageName }) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#1e1f20]">
+    <div className="min-h-screen bg-[#1e1f20]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       <style>{`
         * { -webkit-font-smoothing: antialiased; }
         body {
@@ -29,7 +29,7 @@ export default function Layout({ children, currentPageName }) {
           -webkit-tap-highlight-color: transparent;
         }
       `}</style>
-      <div style={{ paddingTop: "env(safe-area-inset-top)" }} />
+
       <AnimatePresence mode="wait">
         <motion.main
           key={currentPageName}
