@@ -200,9 +200,29 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg h-[85vh] flex flex-col p-0 gap-0 bg-[#1e1f20] border-white/10">
         <DialogHeader className="px-4 py-3 border-b border-white/10 flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2 text-sm font-semibold text-gray-200">
-            <Sparkles className="h-4 w-4 text-blue-400" />
-            AI Calendar Assistant
+          <DialogTitle className="flex items-center justify-between text-sm font-semibold text-gray-200">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-blue-400" />
+              AI Calendar Assistant
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleUndo}
+                disabled={undoStack.length === 0}
+                title="Undo last action"
+                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <Undo2 className="h-4 w-4" />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={redoStack.length === 0}
+                title="Redo last action"
+                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <Redo2 className="h-4 w-4" />
+              </button>
+            </div>
           </DialogTitle>
         </DialogHeader>
 
