@@ -23,8 +23,8 @@ Deno.serve(async (req) => {
       sortedTasks.slice(0, 50).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
-    // Always fetch categories fresh from DB — never rely on frontend to pass them
-    const fetchedCategories = await base44.asServiceRole.entities.Category.list();
+    // Always fetch categories fresh from DB — filter by current user
+    const fetchedCategories = await base44.entities.Category.list();
     const catList = fetchedCategories.length > 0 ? fetchedCategories : [];
     const categoryList = catList.length > 0
       ? catList.map(c => `  - Label: "${c.label}", Key: "${c.key}"`).join("\n")
