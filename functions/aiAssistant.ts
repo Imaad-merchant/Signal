@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
       .slice()
       .sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
     const tasksJson = JSON.stringify(
-      sortedTasks.slice(0, 50).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
+      sortedTasks.map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
     // Fetch all categories (user-scoped — all categories are created by the user)
