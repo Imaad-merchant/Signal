@@ -113,13 +113,13 @@ export default function Settings() {
 
       {/* About */}
       <Section title="About">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">Version</span>
-          <span className="text-gray-400">1.0.0</span>
+        <div className="flex items-center justify-between text-sm min-h-[44px]">
+          <span className="text-gray-400">Version</span>
+          <span className="text-gray-500">1.0.0</span>
         </div>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-gray-500">App</span>
-          <span className="text-gray-400 font-semibold">Pulse</span>
+        <div className="flex items-center justify-between text-sm min-h-[44px]">
+          <span className="text-gray-400">App</span>
+          <span className="text-gray-500 font-semibold">Pulse</span>
         </div>
       </Section>
 
