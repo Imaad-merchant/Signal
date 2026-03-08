@@ -122,21 +122,25 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
         actionCount += snapshotTasks.length;
       } else {
         const promises = actions.map(async (act) => {
-          if (act.action === "create_category") {
-            if (act.label && act.color && act.key) {
-              await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+          try {
+            if (act.action === "create_category") {
+              if (act.label && act.color && act.key) {
+                await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+                actionCount++;
+              }
+            } else if (act.action === "create") {
+              const { action, ...data } = act;
+              await base44.entities.Task.create({ status: "todo", priority: "medium", ...data });
+              actionCount++;
+            } else if (act.action === "update" && act.id) {
+              await base44.entities.Task.update(act.id, act.fields || {});
+              actionCount++;
+            } else if (act.action === "delete" && act.id) {
+              await base44.entities.Task.delete(act.id);
               actionCount++;
             }
-          } else if (act.action === "create") {
-            const { action, ...data } = act;
-            await base44.entities.Task.create({ status: "todo", priority: "medium", ...data });
-            actionCount++;
-          } else if (act.action === "update" && act.id) {
-            await base44.entities.Task.update(act.id, act.fields || {});
-            actionCount++;
-          } else if (act.action === "delete" && act.id) {
-            await base44.entities.Task.delete(act.id);
-            actionCount++;
+          } catch (_) {
+            // Skip actions on tasks that no longer exist
           }
         });
         await Promise.all(promises);
