@@ -75,12 +75,19 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
       currentTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date", 50);
     } catch (_) {}
 
-    const response = await base44.functions.invoke('aiAssistant', {
-      messages: conversationHistory,
-      tasks: currentTasks,
-      imageUrls: uploadedUrls,
-      categories,
-    });
+    let response;
+    try {
+      response = await base44.functions.invoke('aiAssistant', {
+        messages: conversationHistory,
+        tasks: currentTasks,
+        imageUrls: uploadedUrls,
+        categories,
+      });
+    } catch (err) {
+      setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, something went wrong. Please try again." }]);
+      setLoading(false);
+      return;
+    }
 
     const result = response.data;
     const reply = result?.reply || "Done!";
