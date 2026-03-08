@@ -31,10 +31,10 @@ export default function ProductivityChart({ dailyLogs }) {
   };
 
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6">
+    <div className="rounded-2xl border border-white/10 bg-[#2d2e30] p-6">
       <div className="mb-6">
-        <h3 className="text-sm font-semibold text-gray-900">Productivity Trend</h3>
-        <p className="text-xs text-gray-400 mt-0.5">Last 7 days</p>
+        <h3 className="text-sm font-semibold text-gray-100">Productivity Trend</h3>
+        <p className="text-xs text-gray-500 mt-0.5">Last 7 days</p>
       </div>
       <div className="h-52">
         <ResponsiveContainer width="100%" height="100%">
