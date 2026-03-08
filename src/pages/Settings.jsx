@@ -9,8 +9,8 @@ const WEEK_STARTS = ["Sunday", "Monday"];
 
 function Section({ title, children }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-6 space-y-5">
-      <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+    <div className="rounded-2xl border border-white/10 bg-[#2d2e30] shadow-sm p-6 space-y-5">
+      <h2 className="text-sm font-semibold text-gray-100">{title}</h2>
       {children}
     </div>
   );
@@ -18,10 +18,10 @@ function Section({ title, children }) {
 
 function Row({ label, description, children }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex items-start justify-between gap-4 min-h-[44px] py-1">
       <div>
-        <p className="text-sm font-medium text-gray-800">{label}</p>
-        {description && <p className="text-xs text-gray-400 mt-0.5">{description}</p>}
+        <p className="text-sm font-medium text-gray-200">{label}</p>
+        {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -32,9 +32,9 @@ function Toggle({ checked, onChange }) {
   return (
     <button
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? "bg-gray-900" : "bg-gray-200"}`}
+      className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-white/10"}`}
     >
-      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`} />
+      <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`} />
     </button>
   );
 }
