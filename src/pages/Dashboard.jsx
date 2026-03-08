@@ -17,6 +17,8 @@ import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import TaskDetailModal from "../components/dashboard/TaskDetailModal";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
+import AgendaView from "../components/dashboard/AgendaView";
+import { useIsMobile } from "../components/useIsMobile";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
 const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly" };
