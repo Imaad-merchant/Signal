@@ -19,7 +19,7 @@ export default function ProductivityChart({ dailyLogs }) {
   const CustomTooltip = ({ active, payload, label }) => {
     if (!active || !payload?.length) return null;
     return (
-      <div className="rounded-xl border border-gray-100 bg-white/95 backdrop-blur-sm p-3 shadow-lg">
+      <div className="rounded-xl border border-white/10 bg-[#2d2e30]/95 backdrop-blur-sm p-3 shadow-lg">
         <p className="text-xs font-medium text-gray-500 mb-1.5">{payload[0]?.payload?.date}</p>
         <div className="space-y-1">
           <p className="text-sm"><span className="font-semibold text-amber-600">{payload[0]?.value}</span> <span className="text-gray-400">score</span></p>
