@@ -45,6 +45,13 @@ Valid actions:
 - delete: { action: "delete", id }
 - delete_all: { action: "delete_all" } — use this when user wants to delete ALL tasks at once, instead of listing individual deletes
 
+If the user is just ASKING A QUESTION (e.g., "What do I have due tomorrow?", "How many tasks do I have?"), answer in the reply field and return an empty actions array []. Do NOT create or modify anything for read-only queries.
+
+Priority synonyms — map these to the correct enum value:
+- "urgent", "critical", "ASAP", "important" → high
+- "normal", "regular", "moderate" → medium
+- "minor", "trivial", "whenever", "not important", "low priority" → low
+
 IMPORTANT FOR CATEGORY CHANGES: When the user asks to change tasks to a specific category (e.g., "change these to FA" or "put under FA"), FIRST look at the available categories list above and find the matching key. Use the update action with that existing key. NEVER create a new category if one already exists with a matching name or abbreviation.
 
 Only use create_category if the user explicitly asks to CREATE a new category that does not exist in the available categories list.
