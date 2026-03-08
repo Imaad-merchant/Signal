@@ -5,7 +5,7 @@ import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, Undo2, Redo2 } fr
 import { base44 } from "@/api/base44Client";
 import ReactMarkdown from "react-markdown";
 
-export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
+export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categories = [] }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
