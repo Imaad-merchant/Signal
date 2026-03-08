@@ -139,12 +139,12 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
     if (!parsed.reply) parsed.reply = "Done!";
     if (!Array.isArray(parsed.actions)) parsed.actions = [];
 
-    // Process create_category actions FIRST, so they're available for task assignments
+    // Process create_category actions FIRST using user-scoped client so they're visible to the user
     if (parsed.actions?.length > 0) {
       const createCategoryActions = parsed.actions.filter(a => a.action === "create_category");
       for (const act of createCategoryActions) {
         if (act.label && act.color && act.key) {
-          await base44.asServiceRole.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+          await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
         }
       }
     }
