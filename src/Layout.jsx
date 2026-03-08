@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import MobileBottomTab from "./components/MobileBottomTab";
 
 export default function Layout({ children, currentPageName }) {
   const [themeColor, setThemeColor] = useState(() => localStorage.getItem("pulse_theme") || "#4285f4");

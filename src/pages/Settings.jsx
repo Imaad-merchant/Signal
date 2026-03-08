@@ -44,6 +44,26 @@ export default function Settings() {
   const [weekStart, setWeekStart] = useState(() => localStorage.getItem("pulse_week_start") || "Sunday");
   const [notifications, setNotifications] = useState(() => localStorage.getItem("pulse_notifications") !== "false");
   const [saved, setSaved] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      const user = await base44.auth.me();
+      // Delete all user tasks and categories
+      const tasks = await base44.entities.Task.filter({ created_by: user.email });
+      const cats = await base44.entities.Category.list();
+      await Promise.all([
+        ...tasks.map(t => base44.entities.Task.delete(t.id)),
+        ...cats.map(c => base44.entities.Category.delete(c.id)),
+      ]);
+      base44.auth.logout();
+    } catch (e) {
+      setDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   const handleSave = () => {
     localStorage.setItem("pulse_week_start", weekStart);
