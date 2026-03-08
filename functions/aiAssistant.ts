@@ -37,7 +37,14 @@ Deno.serve(async (req) => {
 The user's current tasks (JSON):
 ${tasksJson}
 
-Available categories: ${categoryList}
+Available categories (Label → Key mapping):
+${categoryList}
+
+CRITICAL CATEGORY RULES:
+1. The "Key" is what goes in the database — use the EXACT key value (e.g. "fa", not "FA" or "Finance").
+2. When the user mentions a category by any name or abbreviation, find the closest matching Label in the list above and use its Key.
+3. NEVER invent a new category key. NEVER use a capitalized or modified version of the key.
+4. Only use create_category if the user explicitly says "create a new category" AND no existing category matches their intent.
 
 Your job is to understand what the user wants and return BOTH a friendly reply AND a list of actions.
 
