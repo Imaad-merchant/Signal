@@ -211,7 +211,7 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
             <div className="flex items-center gap-1">
               <button
                 onClick={handleUndo}
-                disabled={undoStack.length === 0}
+                disabled={undoStackRef.current.length === 0}
                 title="Undo last action"
                 className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
