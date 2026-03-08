@@ -49,7 +49,7 @@ Always respond with valid JSON only (no markdown blocks):
   "actions": [ ...actions ]
 }
 
-If there are images attached, analyze them for schedule/task information and extract events.
+CRITICAL FOR CALENDAR IMAGES: If an image of a calendar is attached, carefully read EVERY visible event on the calendar. Look at each cell/day and extract ALL event titles you can see, along with the exact date from the calendar grid. Create a task for each event with the correct due_date (YYYY-MM-DD). The calendar shown is for the year/month visible in the image header. Read truncated text as best you can and include it. Do not skip any events.
 Be proactive, helpful, and conversational. Keep replies concise.`;
 
     // Build OpenAI messages
