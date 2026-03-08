@@ -144,8 +144,9 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
 
       if (actionCount > 0) {
         // Save snapshot for undo, clear redo stack
-        setUndoStack(prev => [...prev, snapshotTasks]);
-        setRedoStack([]);
+        undoStackRef.current = [...undoStackRef.current, snapshotTasks];
+        redoStackRef.current = [];
+        forceUpdate(n => n + 1);
       }
     }
 
