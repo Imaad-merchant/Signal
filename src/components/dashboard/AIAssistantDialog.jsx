@@ -79,10 +79,8 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
     }));
 
     let currentTasks = [];
-    let categories = [];
     try {
-      const [user, cats] = await Promise.all([base44.auth.me(), base44.entities.Category.list()]);
-      categories = cats;
+      const user = await base44.auth.me();
       currentTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date", 50);
     } catch (_) {}
 
