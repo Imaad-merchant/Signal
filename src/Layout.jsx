@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import MobileBottomTab from "./components/MobileBottomTab";
 
 export default function Layout({ children, currentPageName }) {
