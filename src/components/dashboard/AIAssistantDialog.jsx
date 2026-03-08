@@ -154,6 +154,41 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
     setLoading(false);
   };
 
+  const handleUndo = async () => {
+    if (undoStack.length === 0) return;
+    const user = await base44.auth.me();
+    const currentTasks = await base44.entities.Task.filter({ created_by: user.email });
+    const snapshot = undoStack[undoStack.length - 1];
+
+    // Delete all current tasks, then recreate snapshot tasks
+    await Promise.all(currentTasks.map(t => base44.entities.Task.delete(t.id)));
+    await Promise.all(snapshot.map(({ id, created_date, updated_date, created_by, ...data }) =>
+      base44.entities.Task.create(data)
+    ));
+
+    setRedoStack(prev => [...prev, currentTasks]);
+    setUndoStack(prev => prev.slice(0, -1));
+    onUpdated();
+    setMessages(prev => [...prev, { role: "assistant", content: "↩️ Undone!" }]);
+  };
+
+  const handleRedo = async () => {
+    if (redoStack.length === 0) return;
+    const user = await base44.auth.me();
+    const currentTasks = await base44.entities.Task.filter({ created_by: user.email });
+    const snapshot = redoStack[redoStack.length - 1];
+
+    await Promise.all(currentTasks.map(t => base44.entities.Task.delete(t.id)));
+    await Promise.all(snapshot.map(({ id, created_date, updated_date, created_by, ...data }) =>
+      base44.entities.Task.create(data)
+    ));
+
+    setUndoStack(prev => [...prev, currentTasks]);
+    setRedoStack(prev => prev.slice(0, -1));
+    onUpdated();
+    setMessages(prev => [...prev, { role: "assistant", content: "↪️ Redone!" }]);
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
