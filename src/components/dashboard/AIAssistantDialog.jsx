@@ -105,13 +105,12 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
     const reply = result?.reply || "Done!";
     const actions = result?.actions || [];
 
-    // Execute actions
+    // Execute actions in parallel for speed
     let actionCount = 0;
-    for (const act of actions) {
+    const promises = actions.map(async (act) => {
       if (act.action === "create_category") {
-        const { action, label, color, key } = act;
-        if (label && color && key) {
-          await base44.entities.Category.create({ label, color, key });
+        if (act.label && act.color && act.key) {
+          await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
           actionCount++;
         }
       } else if (act.action === "create") {
@@ -125,7 +124,8 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
         await base44.entities.Task.delete(act.id);
         actionCount++;
       }
-    }
+    });
+    await Promise.all(promises);
 
     if (actionCount > 0) onUpdated();
 
