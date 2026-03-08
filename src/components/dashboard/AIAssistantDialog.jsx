@@ -243,13 +243,22 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
               style={{ height: "auto" }}
               onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
             />
-            <Button
-              onClick={handleSend}
-              disabled={loading || (!input.trim() && attachedImages.length === 0)}
-              className="bg-blue-600 hover:bg-blue-500 rounded-xl px-3 h-9 flex-shrink-0"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+            {loading ? (
+              <Button
+                onClick={handleStop}
+                className="bg-red-600 hover:bg-red-500 rounded-xl px-3 h-9 flex-shrink-0"
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSend}
+                disabled={!input.trim() && attachedImages.length === 0}
+                className="bg-blue-600 hover:bg-blue-500 rounded-xl px-3 h-9 flex-shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           <p className="text-[10px] text-gray-600 mt-1.5 text-center">Press Enter to send · Shift+Enter for new line</p>
         </div>
