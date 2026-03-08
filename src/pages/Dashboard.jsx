@@ -103,57 +103,6 @@ export default function Dashboard() {
     { label: "Creative", color: "#db4437", key: "creative" },
   ];
 
-  const [enabledCategories, setEnabledCategories] = useState(() => {
-    try { const s = localStorage.getItem("pulse_enabled_categories"); return s ? JSON.parse(s) : {}; } catch { return {}; }
-  });
-
-  const saveEnabledCategories = (enabled) => { setEnabledCategories(enabled); localStorage.setItem("pulse_enabled_categories", JSON.stringify(enabled)); };
-
-  // Load categories from DB
-  const { data: dbCategories = [], refetch: refetchCategories } = useQuery({
-    queryKey: ["categories", user?.email],
-    queryFn: async () => {
-      const cats = await base44.entities.Category.list();
-      // Seed defaults if none exist yet
-      if (cats.length === 0) {
-        await Promise.all(DEFAULT_CATEGORIES.map(c => base44.entities.Category.create(c)));
-        return DEFAULT_CATEGORIES;
-      }
-      return cats;
-    },
-    enabled: !!user,
-    staleTime: 0,
-  });
-  const categories = dbCategories;
-
-  const toggleCategory = (key) => { const next = { ...enabledCategories, [key]: !enabledCategories[key] }; saveEnabledCategories(next); };
-
-  const deleteCategory = async (key) => {
-    const cat = categories.find(c => c.key === key);
-    if (cat?.id) await base44.entities.Category.delete(cat.id);
-    const nextEnabled = { ...enabledCategories }; delete nextEnabled[key]; saveEnabledCategories(nextEnabled);
-    refetchCategories();
-  };
-
-  const renameCategory = async (key) => {
-    if (!editingCatName.trim()) return;
-    const cat = categories.find(c => c.key === key);
-    if (cat?.id) await base44.entities.Category.update(cat.id, { label: editingCatName.trim() });
-    setEditingCatKey(null);
-    refetchCategories();
-  };
-
-  const addCategory = async () => {
-    if (!newCatName.trim()) return;
-    const key = newCatName.trim().toLowerCase().replace(/\s+/g, "_") + "_" + Date.now();
-    await base44.entities.Category.create({ label: newCatName.trim(), color: newCatColor, key });
-    saveEnabledCategories({ ...enabledCategories, [key]: true });
-    setNewCatName("");
-    setNewCatColor("#4285f4");
-    setShowAddCategory(false);
-    refetchCategories();
-  };
-
   const internalView = VIEW_MAP[view];
 
   const { data: user } = useQuery({
