@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
       .join("; ") || "work, personal, health, learning, creative";
     const categoryEnum = (categories || []).map(c => c.key).join("|") || "work|personal|health|learning|creative";
 
-    const systemPrompt = `You are a smart, friendly calendar & task management AI assistant. Today's date is ${today}.
+    const systemPrompt = `You are a smart, friendly calendar & task management AI assistant. Today's date is ${today} and the current time is ${currentTime} (America/Chicago).
 
 The user's current tasks (JSON):
 ${tasksJson}
