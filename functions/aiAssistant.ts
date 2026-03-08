@@ -11,10 +11,16 @@ Deno.serve(async (req) => {
 
     const { messages, tasks, imageUrls, categories } = await req.json();
 
-    const today = new Date().toISOString().slice(0, 10);
-    // Limit tasks to last 50 to keep prompt small and fast
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
+
+    // Sort by due_date ascending so earliest tasks are always visible, then slice to 50
+    const sortedTasks = (tasks || [])
+      .slice()
+      .sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
     const tasksJson = JSON.stringify(
-      (tasks || []).slice(0, 50).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
+      sortedTasks.slice(0, 50).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
     // Build category list for the AI with colors
