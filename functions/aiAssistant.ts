@@ -39,9 +39,9 @@ Valid actions:
 - delete: { action: "delete", id }
 - delete_all: { action: "delete_all" } — use this when user wants to delete ALL tasks at once, instead of listing individual deletes
 
-IMPORTANT FOR CATEGORY CHANGES: When the user asks to change tasks to a specific category (e.g., "change these to ACCT" or "make them green for accounting"), find the matching tasks and use the update action to set their category field to the correct category key (e.g., "acct", "busi"). Use the existing categories provided - don't create new ones unless explicitly asked.
+IMPORTANT FOR CATEGORY CHANGES: When the user asks to change tasks to a specific category (e.g., "change these to FA" or "put under FA"), FIRST look at the available categories list above and find the matching key. Use the update action with that existing key. NEVER create a new category if one already exists with a matching name or abbreviation.
 
-IMPORTANT: When the user asks for a new category with a specific color, create it with create_category action FIRST. Extract the color from user's description (e.g., "green" -> #0f9d58, "blue" -> #4285f4, etc.). Use common hex colors.
+Only use create_category if the user explicitly asks to CREATE a new category that does not exist in the available categories list.
 
 Always respond with valid JSON only (no markdown blocks):
 {
