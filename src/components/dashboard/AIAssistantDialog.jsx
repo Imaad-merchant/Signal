@@ -60,28 +60,19 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated }) {
     setInput("");
     setAttachedImages([]);
 
-    // Fetch current tasks to give context
-    let currentTasks = [];
-    try {
-      const user = await base44.auth.me();
-      currentTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date", 100);
-    } catch (_) {}
-
-    const today = new Date().toISOString().slice(0, 10);
-    const tasksJson = JSON.stringify(
-      currentTasks.map((t) => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
-    );
-
+    // Fetch tasks and categories in parallel
     const conversationHistory = newMessages.slice(1).map(m => ({
       role: m.role,
       content: m.content,
       imageUrls: m.imageUrls || [],
     }));
 
-    // Fetch categories
+    let currentTasks = [];
     let categories = [];
     try {
-      categories = await base44.entities.Category.list();
+      const [user, cats] = await Promise.all([base44.auth.me(), base44.entities.Category.list()]);
+      categories = cats;
+      currentTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date", 50);
     } catch (_) {}
 
     const response = await base44.functions.invoke('aiAssistant', {
