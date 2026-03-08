@@ -94,6 +94,31 @@ export default function Dashboard() {
   const [newCatColor, setNewCatColor] = useState("#4285f4");
   const [editingCatKey, setEditingCatKey] = useState(null);
   const [editingCatName, setEditingCatName] = useState("");
+  const calBodyRef = React.useRef(null);
+  const [pullY, setPullY] = React.useState(0);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const touchStartY = React.useRef(null);
+  const PULL_THRESHOLD = 70;
+
+  const handleCalTouchStart = (e) => {
+    if (calBodyRef.current?.scrollTop === 0) touchStartY.current = e.touches[0].clientY;
+  };
+  const handleCalTouchMove = (e) => {
+    if (touchStartY.current === null || isRefreshing) return;
+    const delta = e.touches[0].clientY - touchStartY.current;
+    if (delta > 0) setPullY(Math.min(delta * 0.45, PULL_THRESHOLD + 20));
+  };
+  const handleCalTouchEnd = async () => {
+    if (pullY >= PULL_THRESHOLD && !isRefreshing) {
+      setIsRefreshing(true);
+      setPullY(PULL_THRESHOLD);
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["categories"] });
+      setIsRefreshing(false);
+    }
+    setPullY(0);
+    touchStartY.current = null;
+  };
 
   const DEFAULT_CATEGORIES = [
     { label: "Work",     color: "#4285f4", key: "work" },
