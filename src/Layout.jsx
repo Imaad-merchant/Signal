@@ -19,6 +19,7 @@ export default function Layout({ children, currentPageName }) {
         body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background-color: #1e1f20; }
         :root { --pulse-theme: ${themeColor}; }
         .safe-area-pb { padding-bottom: calc(env(safe-area-inset-bottom) + 4rem); }
+        #root > div { padding-top: env(safe-area-inset-top); }
       `}</style>
       <AnimatePresence mode="wait">
         <motion.main
