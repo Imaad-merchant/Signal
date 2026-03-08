@@ -128,7 +128,7 @@ export default function Settings() {
         <Row label="Delete Account" description="Permanently delete your account and all data. This cannot be undone.">
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-colors"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors min-h-[44px]"
           >
             <Trash2 className="h-4 w-4" />
             Delete
