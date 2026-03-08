@@ -43,7 +43,7 @@ export default function WeeklyBreakdown({ focusSessions }) {
             <Tooltip content={<CustomTooltip />} cursor={false} />
             <Bar dataKey="minutes" radius={[6, 6, 0, 0]}>
               {weekDays.map((entry, index) => (
-                <Cell key={index} fill={entry.isToday ? "#f59e0b" : "#e5e7eb"} />
+                <Cell key={index} fill={entry.isToday ? "#f59e0b" : "#3c3d3f"} />
               ))}
             </Bar>
           </BarChart>
