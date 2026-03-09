@@ -74,12 +74,30 @@ function EventForm({ form, set, onSubmit, onClose, saving, accentColor, categori
   );
 }
 
-export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdded }) {
-  const [form, setForm] = useState({ title: "", description: "", due_date: defaultDate || "", category: "personal", priority: "medium", estimated_minutes: "" });
+export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdded, categories: propCategories }) {
+  const [categories, setCategories] = useState(propCategories || []);
+  const [form, setForm] = useState({ title: "", description: "", due_date: defaultDate || "", category: "", priority: "medium", estimated_minutes: "" });
   const [saving, setSaving] = useState(false);
   const isMobile = useIsMobile();
   const accentColor = localStorage.getItem("pulse_secondary") || "#f59e0b";
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (propCategories && propCategories.length > 0) {
+      setCategories(propCategories);
+    } else {
+      base44.entities.Category.list().then(cats => {
+        if (cats.length > 0) setCategories(cats);
+      });
+    }
+  }, [propCategories]);
+
+  // Set default category once categories load
+  useEffect(() => {
+    if (categories.length > 0 && !form.category) {
+      setForm(f => ({ ...f, category: categories[0].key }));
+    }
+  }, [categories]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
