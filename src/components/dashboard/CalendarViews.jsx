@@ -188,7 +188,12 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                     <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
                   ))}
                   {dayTasks.length > 3 && (
-                    <div className="text-[10px] text-gray-500 px-1">{dayTasks.length - 3} more</div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setOverflowDay({ date, tasks: dayTasks }); }}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 px-1 transition-colors"
+                    >
+                      +{dayTasks.length - 3} more
+                    </button>
                   )}
                 </div>
               </div>
