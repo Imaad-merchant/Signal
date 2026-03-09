@@ -194,7 +194,7 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
       model: "gpt-4o-mini",
       messages: oaiMessages,
       response_format: { type: "json_schema", json_schema: responseSchema },
-      max_tokens: 2000,
+      max_tokens: 4000,
     });
 
     const message = completion.choices[0].message;
