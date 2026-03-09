@@ -141,11 +141,12 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
 
   const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
   const { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate } = useDragDrop(onUpdated);
+  const [overflowDay, setOverflowDay] = useState(null);
 
   return (
     <>
       {menuEl}
-      <div className="h-full flex flex-col">
+      <div className="h-full flex flex-col relative">
         <div className="grid grid-cols-7 border-b border-white/10">
           {DAY_HEADERS.map((d) => (
             <div key={d} className="py-2 text-center text-[11px] font-semibold text-gray-500 tracking-wider">{d}</div>
