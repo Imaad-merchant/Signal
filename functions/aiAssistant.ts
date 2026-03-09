@@ -154,7 +154,7 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
             }
           }
         },
-        required: ["reply", "actions"],
+        required: ["thought_process", "reply", "actions"],
         additionalProperties: false
       }
     };
