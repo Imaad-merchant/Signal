@@ -77,9 +77,9 @@ Deno.serve(async (req) => {
       ? catList.map(c => `  - Label: "${c.label}", Key: "${c.key}"`).join("\n")
       : '  - Label: "Work", Key: "work"\n  - Label: "Personal", Key: "personal"';
 
-    // ---------- System prompt (shorter thanks to few-shot) ----------
+    // ---------- System prompt ----------
     const systemPrompt = `You are a smart calendar & task management assistant. Today is ${today}, time: ${currentTime} (America/Chicago).
-
+${userPrefsText}
 User's tasks:
 ${tasksJson}
 
@@ -93,6 +93,7 @@ Action field rules — populate ONLY relevant fields, set all others to null:
 - delete_all: all fields = null
 - create_category: label, color (hex), key (simple lowercase slug); others = null — ONLY when user explicitly asks
 
+THOUGHT PROCESS: Before deciding on actions, briefly explain your reasoning in thought_process (1-2 sentences). This helps you choose the right category, priority, and date.
 For read-only questions, return empty actions [].
 CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task for each.`;
 
