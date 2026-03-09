@@ -107,7 +107,7 @@ export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdde
     setSaving(false);
     onAdded?.();
     onOpenChange(false);
-    setForm({ title: "", description: "", due_date: defaultDate || "", category: "personal", priority: "medium", estimated_minutes: "" });
+    setForm({ title: "", description: "", due_date: defaultDate || "", category: categories[0]?.key || "", priority: "medium", estimated_minutes: "" });
   };
 
   const formProps = { form, set, onSubmit: handleSubmit, onClose: () => onOpenChange(false), saving, accentColor };
