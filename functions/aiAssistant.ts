@@ -14,80 +14,145 @@ Deno.serve(async (req) => {
     const now = new Date();
     const today = now.toISOString().slice(0, 10);
     const currentTime = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Chicago' });
+    const tomorrowStr = new Date(now.getTime() + 86400000).toISOString().slice(0, 10);
 
-    // Always fetch tasks fresh from DB for the current user
-    const freshTasks = await base44.asServiceRole.entities.Task.filter({ created_by: user.email }, "-due_date", 200);
+    // ---------- Step 1: Smart keyword extraction (Two-Step Context) ----------
+    const latestUserMsg = [...messages].reverse().find(m => m.role === 'user')?.content || '';
+    let keywords = [];
 
-    // Sort by due_date ascending
-    const sortedTasks = freshTasks
-      .slice()
-      .sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
+    if (latestUserMsg.length > 10 && !imageUrls?.length) {
+      try {
+        const kwRes = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: 'Extract 3-6 short search keywords (nouns/task names) from the user request. For broad listing queries like "what do I have this week", return empty. JSON: {"keywords": ["word1"]}' },
+            { role: "user", content: latestUserMsg }
+          ],
+          response_format: { type: "json_object" },
+          max_tokens: 80,
+        });
+        const kwParsed = JSON.parse(kwRes.choices[0].message.content);
+        keywords = Array.isArray(kwParsed.keywords) ? kwParsed.keywords.map(k => k.toLowerCase()) : [];
+      } catch (_) { keywords = []; }
+    }
+
+    // ---------- Step 2: Fetch tasks and filter by keywords ----------
+    const allTasks = await base44.asServiceRole.entities.Task.filter({ created_by: user.email }, "-due_date", 200);
+    const sorted = allTasks.sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
+
+    let contextTasks;
+    if (keywords.length > 0) {
+      const matched = sorted.filter(t =>
+        keywords.some(kw =>
+          (t.title || '').toLowerCase().includes(kw) ||
+          (t.description || '').toLowerCase().includes(kw) ||
+          (t.category || '').toLowerCase().includes(kw)
+        )
+      );
+      const matchedIds = new Set(matched.map(m => m.id));
+      const upcoming = sorted.filter(t => (t.due_date || '') >= today && !matchedIds.has(t.id)).slice(0, 25);
+      contextTasks = [...matched, ...upcoming].slice(0, 80);
+    } else {
+      contextTasks = sorted.slice(0, 80);
+    }
+
     const tasksJson = JSON.stringify(
-      sortedTasks.map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
+      contextTasks.map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
-    // Fetch all categories (user-scoped — all categories are created by the user)
+    // ---------- Categories ----------
     const fetchedCategories = await base44.entities.Category.filter({}, "-created_date", 100);
     const catList = fetchedCategories.length > 0 ? fetchedCategories : [];
+    const categoryKeys = catList.length > 0 ? catList.map(c => c.key) : ["work", "personal"];
     const categoryList = catList.length > 0
       ? catList.map(c => `  - Label: "${c.label}", Key: "${c.key}"`).join("\n")
-      : "  - Label: \"Work\", Key: \"work\"\n  - Label: \"Personal\", Key: \"personal\"";
-    const categoryEnum = catList.length > 0
-      ? catList.map(c => c.key).join("|")
-      : "work|personal";
+      : '  - Label: "Work", Key: "work"\n  - Label: "Personal", Key: "personal"';
 
-    const systemPrompt = `You are a smart, friendly calendar & task management AI assistant. Today's date is ${today} and the current time is ${currentTime} (America/Chicago).
+    // ---------- System prompt (shorter thanks to few-shot) ----------
+    const systemPrompt = `You are a smart calendar & task management assistant. Today is ${today}, time: ${currentTime} (America/Chicago).
 
-The user's current tasks (JSON):
+User's tasks:
 ${tasksJson}
 
-Available categories (Label → Key mapping):
+Available categories (use EXACT Key value only):
 ${categoryList}
 
-CRITICAL CATEGORY RULES:
-1. The "Key" is what goes in the database — use the EXACT key value (e.g. "fa", not "FA" or "Finance").
-2. When the user mentions a category by any name or abbreviation, find the closest matching Label in the list above and use its Key.
-3. NEVER invent a new category key. NEVER use a capitalized or modified version of the key.
-4. Only use create_category if the user explicitly says "create a new category" AND no existing category matches their intent.
+Action field rules — populate ONLY relevant fields, set all others to null:
+- create: title, due_date (YYYY-MM-DD), category (exact key), priority, description; id/label/color/key = null
+- update: id + only changed fields; unchanged fields = null
+- delete: id only; all others = null
+- delete_all: all fields = null
+- create_category: label, color (hex), key (simple lowercase slug); others = null — ONLY when user explicitly asks
 
-Your job is to understand what the user wants and return BOTH a friendly reply AND a list of actions.
+For read-only questions, return empty actions [].
+CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task for each.`;
 
-Valid actions:
-- create: { action: "create", title, due_date (YYYY-MM-DD), category (${categoryEnum}), priority (low|medium|high), description? }
-- create_category: { action: "create_category", label, color (hex code like #FF5733), key (MUST be a simple lowercase slug like "cfps", "work", "health" — NO numbers, NO timestamps, NO underscores with numbers) }
-- update: { action: "update", id, fields: { due_date?, title?, status?, category?, priority?, description? } }
-- delete: { action: "delete", id }
-- delete_all: { action: "delete_all" } — use this when user wants to delete ALL tasks at once, instead of listing individual deletes
+    // ---------- Few-Shot Examples ----------
+    const exampleCat = categoryKeys[0] || "work";
+    const fewShotMessages = [
+      { role: "user", content: `Add dentist appointment for ${tomorrowStr}` },
+      {
+        role: "assistant", content: JSON.stringify({
+          reply: "Done! Dentist appointment added.",
+          actions: [{ action: "create", id: null, title: "Dentist appointment", due_date: tomorrowStr, category: exampleCat, priority: "medium", description: null, status: null, label: null, color: null, key: null }]
+        })
+      },
+      { role: "user", content: "Mark my gym session as done" },
+      {
+        role: "assistant", content: JSON.stringify({
+          reply: "Marked your gym session as complete!",
+          actions: [{ action: "update", id: "EXAMPLE_ID", title: null, due_date: null, category: null, priority: null, description: null, status: "done", label: null, color: null, key: null }]
+        })
+      },
+      { role: "user", content: "What tasks do I have this week?" },
+      {
+        role: "assistant", content: JSON.stringify({
+          reply: "Here's what you have this week: [lists based on context]",
+          actions: []
+        })
+      }
+    ];
 
-If the user is just ASKING A QUESTION (e.g., "What do I have due tomorrow?", "How many tasks do I have?"), answer in the reply field and return an empty actions array []. Do NOT create or modify anything for read-only queries.
+    // ---------- Structured Output Schema (100% reliable) ----------
+    const responseSchema = {
+      name: "task_response",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          reply: { type: "string" },
+          actions: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                action: { type: "string", enum: ["create", "update", "delete", "delete_all", "create_category"] },
+                id:          { anyOf: [{ type: "string" }, { type: "null" }] },
+                title:       { anyOf: [{ type: "string" }, { type: "null" }] },
+                due_date:    { anyOf: [{ type: "string" }, { type: "null" }] },
+                category:    { anyOf: [{ type: "string" }, { type: "null" }] },
+                priority:    { anyOf: [{ type: "string", enum: ["low", "medium", "high"] }, { type: "null" }] },
+                description: { anyOf: [{ type: "string" }, { type: "null" }] },
+                status:      { anyOf: [{ type: "string", enum: ["todo", "in_progress", "done"] }, { type: "null" }] },
+                label:       { anyOf: [{ type: "string" }, { type: "null" }] },
+                color:       { anyOf: [{ type: "string" }, { type: "null" }] },
+                key:         { anyOf: [{ type: "string" }, { type: "null" }] }
+              },
+              required: ["action", "id", "title", "due_date", "category", "priority", "description", "status", "label", "color", "key"],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ["reply", "actions"],
+        additionalProperties: false
+      }
+    };
 
-Priority synonyms — map these to the correct enum value:
-- "urgent", "critical", "ASAP", "important" → high
-- "normal", "regular", "moderate" → medium
-- "minor", "trivial", "whenever", "not important", "low priority" → low
-
-IMPORTANT FOR CATEGORY CHANGES: When the user asks to change tasks to a specific category (e.g., "change these to FA" or "put under FA"), FIRST look at the available categories list above and find the matching key. Use the update action with that existing key. NEVER create a new category if one already exists with a matching name or abbreviation.
-
-Only use create_category if the user explicitly asks to CREATE a new category that does not exist in the available categories list.
-
-Always respond with valid JSON only (no markdown blocks):
-{
-  "reply": "Your friendly message here",
-  "actions": [ ...actions ]
-}
-
-CRITICAL FOR CALENDAR IMAGES: If an image of a calendar is attached, carefully read EVERY visible event on the calendar. Look at each cell/day and extract ALL event titles you can see, along with the exact date from the calendar grid. Create a task for each event with the correct due_date (YYYY-MM-DD). The calendar shown is for the year/month visible in the image header. Read truncated text as best you can and include it. Do not skip any events.
-
-CRITICAL FOR CATEGORY ASSIGNMENT:
-- Match the user's words to the closest Label in the available categories list, then use that Label's exact Key (lowercase, as listed).
-- If the user says "FA", look for a Label like "FA" or "Financial Aid" etc., and use its Key exactly as written.
-- If the user asks to move/change EXISTING tasks to a category, use the update action for each task ID and set category to the matched exact Key.
-- NEVER use a modified, capitalized, or invented key. The key must come directly from the list above.
-
-Be proactive, helpful, and conversational. Keep replies concise.`;
-
-    // Build OpenAI messages
-    const oaiMessages = [{ role: "system", content: systemPrompt }];
+    // ---------- Build messages ----------
+    const oaiMessages = [
+      { role: "system", content: systemPrompt },
+      ...fewShotMessages
+    ];
 
     for (const msg of messages) {
       if (msg.role === "user") {
@@ -104,7 +169,6 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
       }
     }
 
-    // Attach current turn images
     if (imageUrls?.length > 0) {
       const last = oaiMessages[oaiMessages.length - 1];
       if (last.role === "user") {
@@ -114,35 +178,50 @@ Be proactive, helpful, and conversational. Keep replies concise.`;
       }
     }
 
+    // ---------- OpenAI call with Structured Outputs ----------
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: oaiMessages,
-      response_format: { type: "json_object" },
+      response_format: { type: "json_schema", json_schema: responseSchema },
       max_tokens: 2000,
     });
 
-    const raw = completion.choices[0].message.content;
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (_) {
-      // If JSON parse fails, return a safe fallback with the raw text as reply
-      parsed = { reply: raw || "I couldn't process that. Please try again.", actions: [] };
+    const message = completion.choices[0].message;
+    if (message.refusal) {
+      return Response.json({ reply: "I couldn't process that request. Please try rephrasing.", actions: [] });
     }
-    if (!parsed.reply) parsed.reply = "Done!";
-    if (!Array.isArray(parsed.actions)) parsed.actions = [];
 
-    // Process create_category actions FIRST using user-scoped client so they're visible to the user
-    if (parsed.actions?.length > 0) {
-      const createCategoryActions = parsed.actions.filter(a => a.action === "create_category");
-      for (const act of createCategoryActions) {
-        if (act.label && act.color && act.key) {
-          await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
-        }
+    const parsed = JSON.parse(message.content);
+
+    // ---------- Transform flat schema → frontend-expected format ----------
+    const transformedActions = parsed.actions.map(act => {
+      if (act.action === "update") {
+        const fields = {};
+        if (act.title !== null)       fields.title = act.title;
+        if (act.due_date !== null)    fields.due_date = act.due_date;
+        if (act.category !== null)    fields.category = act.category;
+        if (act.priority !== null)    fields.priority = act.priority;
+        if (act.description !== null) fields.description = act.description;
+        if (act.status !== null)      fields.status = act.status;
+        return { action: "update", id: act.id, fields };
+      }
+      if (act.action === "create") {
+        return { action: "create", title: act.title, due_date: act.due_date, category: act.category, priority: act.priority, description: act.description };
+      }
+      if (act.action === "delete")         return { action: "delete", id: act.id };
+      if (act.action === "delete_all")     return { action: "delete_all" };
+      if (act.action === "create_category") return { action: "create_category", label: act.label, color: act.color, key: act.key };
+      return act;
+    });
+
+    // Process create_category actions first
+    for (const act of transformedActions.filter(a => a.action === "create_category")) {
+      if (act.label && act.color && act.key) {
+        await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
       }
     }
 
-    return Response.json(parsed);
+    return Response.json({ reply: parsed.reply, actions: transformedActions });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
