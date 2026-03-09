@@ -97,6 +97,37 @@ function useDragDrop(onUpdated) {
   return { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate };
 }
 
+// ── DAY OVERFLOW POPOVER ──────────────────────────────────────────────────────
+function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, onDragStart, categories }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute z-50 bg-[#2d2e30] border border-white/15 rounded-xl shadow-2xl p-3 min-w-[200px] max-w-[260px]"
+      style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)" }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-gray-300">{format(date, "EEE, MMM d")}</span>
+        <button onClick={onClose} className="p-0.5 rounded hover:bg-white/10 text-gray-500 hover:text-gray-300">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="space-y-1">
+        {tasks.map((task) => (
+          <TaskPill key={task.id} task={task} onContextMenu={onContextMenu} onDragStart={onDragStart} onTaskClick={(t) => { onTaskClick?.(t); onClose(); }} categories={categories} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
 export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick }) {
   const monthStart = startOfMonth(currentMonth);
