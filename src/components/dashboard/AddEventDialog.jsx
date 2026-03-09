@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,9 @@ import { base44 } from "@/api/base44Client";
 import { CalendarDays, Loader2 } from "lucide-react";
 import { useIsMobile } from "@/components/useIsMobile";
 
-const CATEGORIES = ["work", "personal", "health", "learning", "creative"];
 const PRIORITIES = ["low", "medium", "high"];
 
-function EventForm({ form, set, onSubmit, onClose, saving, accentColor }) {
+function EventForm({ form, set, onSubmit, onClose, saving, accentColor, categories }) {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <Input
