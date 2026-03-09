@@ -11,6 +11,7 @@ import { createPageUrl } from "@/utils";
 import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
+import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
 import AddEventDialog from "../components/dashboard/AddEventDialog";
