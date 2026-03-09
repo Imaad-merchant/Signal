@@ -110,7 +110,7 @@ export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdde
     setForm({ title: "", description: "", due_date: defaultDate || "", category: categories[0]?.key || "", priority: "medium", estimated_minutes: "" });
   };
 
-  const formProps = { form, set, onSubmit: handleSubmit, onClose: () => onOpenChange(false), saving, accentColor };
+  const formProps = { form, set, onSubmit: handleSubmit, onClose: () => onOpenChange(false), saving, accentColor, categories };
 
   if (isMobile) {
     return (
