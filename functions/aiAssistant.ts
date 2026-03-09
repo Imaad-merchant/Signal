@@ -130,6 +130,7 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
       schema: {
         type: "object",
         properties: {
+          thought_process: { type: "string" },
           reply: { type: "string" },
           actions: {
             type: "array",
