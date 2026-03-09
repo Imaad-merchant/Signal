@@ -162,6 +162,11 @@ export default function Dashboard() {
     const nextEnabled = { ...enabledCategories }; delete nextEnabled[key]; saveEnabledCategories(nextEnabled);
     refetchCategories();
   };
+  const changeColor = async (key, color) => {
+    const cat = categories.find(c => c.key === key);
+    if (cat?.id) await base44.entities.Category.update(cat.id, { color });
+    refetchCategories();
+  };
   const renameCategory = async (key) => {
     if (!editingCatName.trim()) return;
     const cat = categories.find(c => c.key === key);
