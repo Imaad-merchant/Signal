@@ -42,7 +42,14 @@ function EventForm({ form, set, onSubmit, onClose, saving, accentColor, categori
           <Select value={form.category} onValueChange={v => set("category", v)}>
             <SelectTrigger className="rounded-xl h-11 bg-[#2d2e30] border-white/10 text-gray-100"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {CATEGORIES.map(c => <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>)}
+              {categories.map(c => (
+                <SelectItem key={c.key} value={c.key}>
+                  <span className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ backgroundColor: c.color }} />
+                    {c.label}
+                  </span>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
