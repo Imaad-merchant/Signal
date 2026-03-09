@@ -60,6 +60,15 @@ Deno.serve(async (req) => {
       contextTasks.map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
     );
 
+    // ---------- UserPreferences ----------
+    let userPrefsText = "";
+    try {
+      const prefs = await base44.asServiceRole.entities.UserPreferences.filter({ user_email: user.email }, "-created_date", 1);
+      if (prefs.length > 0 && prefs[0].preferences) {
+        userPrefsText = `\nUser preferences (apply these automatically):\n${prefs[0].preferences}\n`;
+      }
+    } catch (_) {}
+
     // ---------- Categories ----------
     const fetchedCategories = await base44.entities.Category.filter({}, "-created_date", 100);
     const catList = fetchedCategories.length > 0 ? fetchedCategories : [];
