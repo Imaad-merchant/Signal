@@ -201,6 +201,17 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
           })}
         </div>
       </div>
+      {overflowDay && (
+        <DayOverflowPopover
+          date={overflowDay.date}
+          tasks={overflowDay.tasks}
+          onClose={() => setOverflowDay(null)}
+          onTaskClick={onTaskClick}
+          onContextMenu={openMenu}
+          onDragStart={onDragStart}
+          categories={categories}
+        />
+      )}
     </>
   );
 }
