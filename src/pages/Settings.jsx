@@ -124,7 +124,7 @@ export default function Settings() {
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-white/10 text-gray-400 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center">
+        <button onClick={() => navigate('/')} className="p-2 rounded-xl hover:bg-white/10 text-gray-400 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center">
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div>
