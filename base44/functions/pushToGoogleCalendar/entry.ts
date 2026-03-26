@@ -14,12 +14,9 @@ Deno.serve(async (req) => {
     const tasks = await base44.entities.Task.filter({ created_by: user.email });
     const tasksWithDates = tasks.filter(t => t.due_date);
 
-    const created = [];
-    const failed = [];
-
-    for (const task of tasksWithDates) {
-      // Build event payload
-      const startDate = task.due_date; // YYYY-MM-DD
+    // Push all tasks to Google Calendar in parallel
+    const results = await Promise.all(tasksWithDates.map(async (task) => {
+      const startDate = task.due_date;
       const event = {
         summary: task.title,
         description: task.description || '',
@@ -27,61 +24,32 @@ Deno.serve(async (req) => {
           ? { dateTime: `${startDate}T09:00:00`, timeZone: 'America/Chicago' }
           : { date: startDate },
         end: task.estimated_minutes
-          ? { 
+          ? {
               dateTime: new Date(new Date(`${startDate}T09:00:00`).getTime() + task.estimated_minutes * 60000).toISOString().replace('Z', ''),
               timeZone: 'America/Chicago'
             }
           : { date: startDate },
-        extendedProperties: {
-          private: { pulseTaskId: task.id }
-        }
+        extendedProperties: { private: { pulseTaskId: task.id } }
       };
 
-      // Check if event already exists in Google Calendar with this task ID
-      const searchParams = new URLSearchParams({
-        privateExtendedProperty: `pulseTaskId=${task.id}`,
-        singleEvents: 'true',
-        maxResults: '1'
-      });
-
-      const searchRes = await fetch(
-        `https://www.googleapis.com/calendar/v3/calendars/primary/events?${searchParams}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
+      const res = await fetch(
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(event)
+        }
       );
-      const searchData = await searchRes.json();
+      return res.ok ? 'ok' : 'fail';
+    }));
 
-      if (searchData.items && searchData.items.length > 0) {
-        // Update existing event
-        const existingId = searchData.items[0].id;
-        const updateRes = await fetch(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${existingId}`,
-          {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(event)
-          }
-        );
-        if (updateRes.ok) created.push(task.id);
-        else failed.push(task.title);
-      } else {
-        // Create new event
-        const createRes = await fetch(
-          'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-          {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(event)
-          }
-        );
-        if (createRes.ok) created.push(task.id);
-        else failed.push(task.title);
-      }
-    }
+    const synced = results.filter(r => r === 'ok').length;
+    const failed = results.filter(r => r === 'fail').length;
 
     return Response.json({
       success: true,
-      synced: created.length,
-      failed: failed.length,
+      synced,
+      failed,
       total: tasksWithDates.length
     });
 
