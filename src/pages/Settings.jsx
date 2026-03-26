@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, ArrowLeft, Trash2, AlertTriangle } from "lucide-react";
+import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 
@@ -46,6 +46,8 @@ export default function Settings() {
   const [saved, setSaved] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -63,6 +65,18 @@ export default function Settings() {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
+  };
+
+  const handleGoogleCalendarSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await base44.functions.invoke('pushToGoogleCalendar', {});
+      setSyncResult({ success: true, synced: res.data.synced, total: res.data.total });
+    } catch (e) {
+      setSyncResult({ success: false, error: e.message });
+    }
+    setSyncing(false);
   };
 
   const handleSave = () => {
@@ -84,6 +98,29 @@ export default function Settings() {
           <p className="text-sm text-gray-500 mt-1">Customize your Pulse experience</p>
         </div>
       </div>
+
+      {/* Google Calendar Sync */}
+      <Section title="Google Calendar">
+        <Row label="Sync to Google Calendar" description="Push all your tasks with due dates to your Google Calendar">
+          <button
+            onClick={handleGoogleCalendarSync}
+            disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/20 transition-colors min-h-[44px] disabled:opacity-60"
+          >
+            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
+            {syncing ? "Syncing…" : "Sync Now"}
+          </button>
+        </Row>
+        {syncResult && (
+          <div className={`flex items-center gap-2 text-xs rounded-xl px-3 py-2 ${
+            syncResult.success ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+          }`}>
+            {syncResult.success
+              ? <><CheckCircle2 className="h-3.5 w-3.5" /> {syncResult.synced} of {syncResult.total} tasks synced to Google Calendar</>
+              : <><AlertTriangle className="h-3.5 w-3.5" /> Sync failed: {syncResult.error}</>}
+          </div>
+        )}
+      </Section>
 
       {/* Calendar */}
       <Section title="Calendar">
