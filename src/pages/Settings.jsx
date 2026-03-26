@@ -1,5 +1,7 @@
 import React, { useState } from "react";
-import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2 } from "lucide-react";
+import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo } from "lucide-react";
+import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
+import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 
@@ -48,6 +50,9 @@ export default function Settings() {
   const [deleting, setDeleting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [showImportCalendar, setShowImportCalendar] = useState(false);
+  const [showImportTasks, setShowImportTasks] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -65,6 +70,35 @@ export default function Settings() {
       setDeleting(false);
       setShowDeleteConfirm(false);
     }
+  };
+
+  const handleDownloadCalendar = async () => {
+    setDownloading(true);
+    const user = await base44.auth.me();
+    const tasks = await base44.entities.Task.filter({ created_by: user.email });
+    const withDates = tasks.filter(t => t.due_date);
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Pulse//Calendar//EN',
+    ];
+    for (const task of withDates) {
+      const d = task.due_date.replace(/-/g, '');
+      lines.push('BEGIN:VEVENT');
+      lines.push(`UID:pulse-${task.id}`);
+      lines.push(`SUMMARY:${task.title}`);
+      if (task.description) lines.push(`DESCRIPTION:${task.description.replace(/\n/g, '\\n')}`);
+      lines.push(`DTSTART;VALUE=DATE:${d}`);
+      lines.push(`DTEND;VALUE=DATE:${d}`);
+      lines.push('END:VEVENT');
+    }
+    lines.push('END:VCALENDAR');
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'pulse-calendar.ics'; a.click();
+    URL.revokeObjectURL(url);
+    setDownloading(false);
   };
 
   const handleGoogleCalendarSync = async () => {
@@ -98,6 +132,38 @@ export default function Settings() {
           <p className="text-sm text-gray-500 mt-1">Customize your Pulse experience</p>
         </div>
       </div>
+
+      {/* Import & Export */}
+      <Section title="Import & Export">
+        <Row label="Import Calendar" description="Import events from an image, PDF, or file">
+          <button
+            onClick={() => setShowImportCalendar(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors min-h-[44px]"
+          >
+            <Calendar className="h-4 w-4" />
+            Import
+          </button>
+        </Row>
+        <Row label="Import Tasks" description="Import tasks from a file or spreadsheet">
+          <button
+            onClick={() => setShowImportTasks(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors min-h-[44px]"
+          >
+            <ListTodo className="h-4 w-4" />
+            Import
+          </button>
+        </Row>
+        <Row label="Download Calendar" description="Download all your tasks as an .ics file">
+          <button
+            onClick={handleDownloadCalendar}
+            disabled={downloading}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition-colors min-h-[44px] disabled:opacity-60"
+          >
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {downloading ? 'Preparing…' : 'Download .ics'}
+          </button>
+        </Row>
+      </Section>
 
       {/* Google Calendar Sync */}
       <Section title="Google Calendar">
@@ -187,6 +253,9 @@ export default function Settings() {
       </div>
 
       {/* Delete Confirmation Dialog */}
+      <ImportActivitiesDialog open={showImportCalendar} onOpenChange={setShowImportCalendar} onImported={() => {}} />
+      <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={() => {}} />
+
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="bg-[#2d2e30] border border-white/10 rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">

@@ -10,9 +10,7 @@ import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
-import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
 import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
@@ -82,8 +80,6 @@ export default function Dashboard() {
   const isMobile = useIsMobile();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [showImport, setShowImport] = useState(false);
-  const [showImportTasks, setShowImportTasks] = useState(false);
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [showAddTask, setShowAddTask] = useState(false);
@@ -365,27 +361,16 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Import */}
+            {/* AI Assistant */}
             <div className="px-3 mt-4">
-              <div className="flex items-center justify-between py-2 px-2">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Import</span>
-              </div>
               <div className="space-y-1 pl-1">
-                <button onClick={() => setShowImport(true)} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 w-full text-left">
-                  <CalendarDays className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-sm text-gray-300">Import Calendar</span>
-                </button>
-                <button onClick={() => setShowImportTasks(true)} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 w-full text-left">
-                  <ListTodo className="h-3.5 w-3.5 text-gray-400" />
-                  <span className="text-sm text-gray-300">Import Tasks</span>
-                </button>
                 <button onClick={() => setShowAIAssistant(true)} className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-white/5 w-full text-left">
                   <Sparkles className="h-3.5 w-3.5 text-blue-400" />
                   <span className="text-sm text-gray-300">AI Assistant</span>
                 </button>
               </div>
             </div>
-          </motion.aside>
+            </motion.aside>
         )}
       </AnimatePresence>
 
@@ -505,8 +490,6 @@ export default function Dashboard() {
       </div>
 
       <AIAssistantDialog open={showAIAssistant} onOpenChange={setShowAIAssistant} onUpdated={refresh} categories={categories} />
-      <ImportActivitiesDialog open={showImport} onOpenChange={setShowImport} onImported={refresh} />
-      <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={refresh} />
       <AddEventDialog open={showAddEvent} onOpenChange={setShowAddEvent} defaultDate={format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} categories={categories} />
       <AddTaskDialog2 open={showAddTask} onOpenChange={setShowAddTask} onAdded={refresh} />
       <TaskDetailModal task={selectedTask} open={showTaskDetail} onOpenChange={setShowTaskDetail} />
