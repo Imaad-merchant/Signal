@@ -124,9 +124,9 @@ export default function Settings() {
     try {
       const res = await base44.functions.invoke('disconnectGoogleCalendar', {});
       if (res.data?.success) {
-        setDisconnectResult({ success: true });
+        setDisconnectResult({ success: true, deleted: res.data.deleted });
       } else {
-        setDisconnectResult({ success: false, error: res.data?.error || 'Disconnect failed' });
+        setDisconnectResult({ success: false, error: res.data?.error || 'Failed to remove events' });
       }
     } catch (e) {
       setDisconnectResult({ success: false, error: e.message });
@@ -303,7 +303,7 @@ export default function Settings() {
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors min-h-[44px] disabled:opacity-60"
             >
               {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlink className="h-4 w-4" />}
-              {disconnecting ? "Disconnecting…" : "Disconnect"}
+              {disconnecting ? "Removing…" : "Remove Synced"}
             </button>
           </div>
         </Row>
@@ -321,8 +321,8 @@ export default function Settings() {
             disconnectResult.success ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
           }`}>
             {disconnectResult.success
-              ? <><CheckCircle2 className="h-3.5 w-3.5" /> Google Calendar disconnected successfully</>
-              : <><AlertTriangle className="h-3.5 w-3.5" /> Disconnect failed: {disconnectResult.error}</>}
+              ? <><CheckCircle2 className="h-3.5 w-3.5" /> {disconnectResult.deleted} synced events removed from Google Calendar</>
+              : <><AlertTriangle className="h-3.5 w-3.5" /> {disconnectResult.error}</>}
           </div>
         )}
       </Section>

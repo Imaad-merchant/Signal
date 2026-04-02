@@ -8,21 +8,47 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get the current Google Calendar access token
     const { accessToken } = await base44.asServiceRole.connectors.getConnection('googlecalendar');
 
-    // Revoke the token via Google's OAuth2 revocation endpoint
-    const revokeRes = await fetch(`https://oauth2.googleapis.com/revoke?token=${accessToken}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+    // Fetch all events that have the pulseTaskId extended property (created by this app)
+    let deleted = 0;
+    let pageToken = '';
 
-    if (!revokeRes.ok) {
-      const text = await revokeRes.text();
-      return Response.json({ success: false, error: `Google revocation failed: ${text}` });
-    }
+    do {
+      const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+      url.searchParams.set('privateExtendedProperty', 'pulseTaskId');
+      url.searchParams.set('maxResults', '250');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
 
-    return Response.json({ success: true });
+      const listRes = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!listRes.ok) {
+        const text = await listRes.text();
+        return Response.json({ error: `Failed to list events: ${text}` }, { status: 500 });
+      }
+
+      const data = await listRes.json();
+      const events = data.items || [];
+
+      // Delete all found events in parallel
+      const results = await Promise.all(events.map(async (event) => {
+        const delRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`,
+          {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }
+        );
+        return delRes.ok || delRes.status === 404;
+      }));
+
+      deleted += results.filter(Boolean).length;
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+
+    return Response.json({ success: true, deleted });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
