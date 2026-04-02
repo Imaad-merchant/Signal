@@ -117,15 +117,15 @@ export default function Tasks() {
       )}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+          <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-white/10 text-gray-400 transition-colors">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-sm text-gray-400 mt-0.5">{tasks.length} total · {tasks.filter(t => t.status === "done").length} completed</p>
+          <h1 className="text-2xl font-bold text-gray-100">Tasks</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{tasks.length} total · {tasks.filter(t => t.status === "done").length} completed</p>
           </div>
         </div>
-        <Button onClick={() => setShowAdd(true)} className="bg-gray-900 hover:bg-gray-800 rounded-xl gap-2">
+        <Button onClick={() => setShowAdd(true)} className="bg-blue-600 hover:bg-blue-500 text-white rounded-xl gap-2">
           <Plus className="h-4 w-4" /> New Task
         </Button>
       </div>
@@ -133,16 +133,16 @@ export default function Tasks() {
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
           <Input
             placeholder="Search tasks..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 rounded-xl border-gray-200"
+            className="pl-9 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200 placeholder-gray-500"
           />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-32 rounded-xl"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-32 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="todo">To Do</SelectItem>
@@ -151,7 +151,7 @@ export default function Tasks() {
           </SelectContent>
         </Select>
         <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="w-32 rounded-xl"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-32 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Priority</SelectItem>
             <SelectItem value="high">High</SelectItem>
@@ -160,7 +160,7 @@ export default function Tasks() {
           </SelectContent>
         </Select>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-36 rounded-xl"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
             <SelectItem value="work">Work</SelectItem>
@@ -175,7 +175,7 @@ export default function Tasks() {
       {/* Task List */}
       <div className="space-y-2">
         {isLoading && (
-          <div className="text-center py-12 text-gray-400 text-sm">Loading tasks...</div>
+          <div className="text-center py-12 text-gray-500 text-sm">Loading tasks...</div>
         )}
         <AnimatePresence>
           {filtered.map((task) => (
@@ -192,8 +192,8 @@ export default function Tasks() {
         </AnimatePresence>
         {!isLoading && filtered.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-gray-400 text-sm">No tasks found</p>
-            <Button variant="ghost" onClick={() => setShowAdd(true)} className="mt-2 text-amber-600 hover:text-amber-700">
+            <p className="text-gray-500 text-sm">No tasks found</p>
+            <Button variant="ghost" onClick={() => setShowAdd(true)} className="mt-2 text-blue-400 hover:text-blue-300">
               Create your first task
             </Button>
           </div>

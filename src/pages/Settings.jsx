@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo } from "lucide-react";
+import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo, Unlink, FilePlus2, FileDown } from "lucide-react";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";
@@ -50,9 +50,14 @@ export default function Settings() {
   const [deleting, setDeleting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectResult, setDisconnectResult] = useState(null);
   const [showImportCalendar, setShowImportCalendar] = useState(false);
   const [showImportTasks, setShowImportTasks] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -113,6 +118,98 @@ export default function Settings() {
     setSyncing(false);
   };
 
+  const handleDisconnectGoogleCalendar = async () => {
+    setDisconnecting(true);
+    setDisconnectResult(null);
+    try {
+      await base44.connectors.disconnect('googlecalendar');
+      setDisconnectResult({ success: true });
+    } catch (e) {
+      setDisconnectResult({ success: false, error: e.message });
+    }
+    setDisconnecting(false);
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true);
+    try {
+      const user = await base44.auth.me();
+      const tasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date");
+      const sorted = [...tasks].sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'));
+
+      // Group tasks by date
+      const grouped = {};
+      for (const t of sorted) {
+        const key = t.due_date || 'No Date';
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(t);
+      }
+
+      const priorityColors = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' };
+      const statusLabels = { todo: 'To Do', in_progress: 'In Progress', done: 'Done' };
+
+      const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      let html = `<!DOCTYPE html><html><head><title>Pulse Calendar Export</title><style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; color: #1a1a1a; background: #fff; }
+        h1 { font-size: 24px; margin-bottom: 4px; }
+        .subtitle { color: #666; font-size: 13px; margin-bottom: 32px; }
+        .date-group { margin-bottom: 24px; }
+        .date-header { font-size: 15px; font-weight: 600; color: #333; padding: 8px 0; border-bottom: 2px solid #e5e7eb; margin-bottom: 8px; }
+        .task { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px; margin-bottom: 4px; background: #f9fafb; }
+        .task.done { opacity: 0.5; text-decoration: line-through; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .title { font-size: 13px; font-weight: 500; flex: 1; }
+        .meta { font-size: 11px; color: #888; }
+        .badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+        .summary { margin-top: 32px; padding-top: 16px; border-top: 2px solid #e5e7eb; font-size: 13px; color: #666; }
+        @media print { body { padding: 20px; } }
+      </style></head><body>
+        <h1>Pulse Calendar</h1>
+        <p class="subtitle">Exported on ${dateStr} · ${tasks.length} tasks</p>`;
+
+      for (const [date, dateTasks] of Object.entries(grouped)) {
+        const label = date === 'No Date' ? 'No Due Date' : new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        html += `<div class="date-group"><div class="date-header">${label}</div>`;
+        for (const t of dateTasks) {
+          const color = priorityColors[t.priority] || priorityColors.medium;
+          const status = statusLabels[t.status] || 'To Do';
+          html += `<div class="task ${t.status === 'done' ? 'done' : ''}">
+            <span class="dot" style="background:${color}"></span>
+            <span class="title">${t.title || 'Untitled'}</span>
+            <span class="meta">${status}</span>
+            ${t.category ? `<span class="badge" style="background:#f3f4f6">${t.category}</span>` : ''}
+          </div>`;
+        }
+        html += `</div>`;
+      }
+
+      const doneCount = tasks.filter(t => t.status === 'done').length;
+      const highCount = tasks.filter(t => t.priority === 'high').length;
+      html += `<div class="summary">
+        <strong>${doneCount}</strong> completed · <strong>${highCount}</strong> high priority · <strong>${tasks.length - doneCount}</strong> remaining
+      </div></body></html>`;
+
+      const w = window.open('', '_blank');
+      w.document.write(html);
+      w.document.close();
+      w.onload = () => w.print();
+    } catch (_) {}
+    setDownloadingPdf(false);
+  };
+
+  const handleClearAllTasks = async () => {
+    setClearing(true);
+    try {
+      const user = await base44.auth.me();
+      const tasks = await base44.entities.Task.filter({ created_by: user.email });
+      await Promise.all(tasks.map(t => base44.entities.Task.delete(t.id)));
+    } catch (_) {}
+    setClearing(false);
+    setShowClearConfirm(false);
+  };
+
   const handleSave = () => {
     localStorage.setItem("pulse_week_start", weekStart);
     localStorage.setItem("pulse_notifications", notifications);
@@ -153,6 +250,15 @@ export default function Settings() {
             Import
           </button>
         </Row>
+        <Row label="Start Fresh" description="Clear all tasks and start with a blank task list">
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/20 transition-colors min-h-[44px]"
+          >
+            <FilePlus2 className="h-4 w-4" />
+            New List
+          </button>
+        </Row>
         <Row label="Download Calendar" description="Download all your tasks as an .ics file">
           <button
             onClick={handleDownloadCalendar}
@@ -163,19 +269,39 @@ export default function Settings() {
             {downloading ? 'Preparing…' : 'Download .ics'}
           </button>
         </Row>
+        <Row label="Export as PDF" description="Download a formatted PDF view of your calendar and tasks">
+          <button
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 border border-violet-500/20 transition-colors min-h-[44px] disabled:opacity-60"
+          >
+            {downloadingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+            {downloadingPdf ? 'Preparing…' : 'Export PDF'}
+          </button>
+        </Row>
       </Section>
 
       {/* Google Calendar Sync */}
       <Section title="Google Calendar">
         <Row label="Sync to Google Calendar" description="Push all your tasks with due dates to your Google Calendar">
-          <button
-            onClick={handleGoogleCalendarSync}
-            disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/20 transition-colors min-h-[44px] disabled:opacity-60"
-          >
-            {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
-            {syncing ? "Syncing…" : "Sync Now"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleGoogleCalendarSync}
+              disabled={syncing}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/20 transition-colors min-h-[44px] disabled:opacity-60"
+            >
+              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
+              {syncing ? "Syncing…" : "Sync Now"}
+            </button>
+            <button
+              onClick={handleDisconnectGoogleCalendar}
+              disabled={disconnecting}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors min-h-[44px] disabled:opacity-60"
+            >
+              {disconnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlink className="h-4 w-4" />}
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </button>
+          </div>
         </Row>
         {syncResult && (
           <div className={`flex items-center gap-2 text-xs rounded-xl px-3 py-2 ${
@@ -184,6 +310,15 @@ export default function Settings() {
             {syncResult.success
               ? <><CheckCircle2 className="h-3.5 w-3.5" /> {syncResult.synced} of {syncResult.total} tasks synced to Google Calendar</>
               : <><AlertTriangle className="h-3.5 w-3.5" /> Sync failed: {syncResult.error}</>}
+          </div>
+        )}
+        {disconnectResult && (
+          <div className={`flex items-center gap-2 text-xs rounded-xl px-3 py-2 ${
+            disconnectResult.success ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
+          }`}>
+            {disconnectResult.success
+              ? <><CheckCircle2 className="h-3.5 w-3.5" /> Google Calendar disconnected successfully</>
+              : <><AlertTriangle className="h-3.5 w-3.5" /> Disconnect failed: {disconnectResult.error}</>}
           </div>
         )}
       </Section>
@@ -255,6 +390,41 @@ export default function Settings() {
       {/* Delete Confirmation Dialog */}
       <ImportActivitiesDialog open={showImportCalendar} onOpenChange={setShowImportCalendar} onImported={() => {}} />
       <ImportTasksDialog open={showImportTasks} onOpenChange={setShowImportTasks} onImported={() => {}} />
+
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-[#2d2e30] border border-white/10 rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                <FilePlus2 className="h-5 w-5 text-orange-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-100">Start Fresh</h3>
+                <p className="text-sm text-gray-500">This will delete all your current tasks.</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-400">
+              All tasks will be permanently removed so you can start with a clean slate. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                disabled={clearing}
+                className="flex-1 px-4 py-3 rounded-xl border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors min-h-[44px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearAllTasks}
+                disabled={clearing}
+                className="flex-1 px-4 py-3 rounded-xl bg-orange-600 text-white text-sm font-medium hover:bg-orange-700 transition-colors disabled:opacity-60 min-h-[44px]"
+              >
+                {clearing ? "Clearing…" : "Clear All Tasks"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">

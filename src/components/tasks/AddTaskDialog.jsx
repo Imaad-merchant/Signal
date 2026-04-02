@@ -11,14 +11,30 @@ import { useIsMobile } from "@/components/useIsMobile";
 
 const EMPTY_FORM = { title: "", description: "", priority: "medium", category: "work", estimated_minutes: "", due_date: "" };
 
+const HIGH_PRIORITY_KEYWORDS = /\b(exam|test|quiz|midterm|final|payment|bill|rent|tuition|fee|due|deadline|submission|application)\b/i;
+
+function autoDetectPriority(title) {
+  return HIGH_PRIORITY_KEYWORDS.test(title) ? "high" : null;
+}
+
 function TaskForm({ form, setForm, onSubmit, onCancel, saving }) {
+  const handleTitleChange = (e) => {
+    const title = e.target.value;
+    const detected = autoDetectPriority(title);
+    if (detected && form.priority === "medium") {
+      setForm({ ...form, title, priority: detected });
+    } else {
+      setForm({ ...form, title });
+    }
+  };
+
   return (
     <form onSubmit={onSubmit} className="space-y-4 px-1">
       <div>
         <Label className="text-xs text-gray-400">Title</Label>
         <Input
           value={form.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })}
+          onChange={handleTitleChange}
           placeholder="What needs to be done?"
           className="mt-1 bg-[#2d2e30] border-white/10 text-gray-100 placeholder:text-gray-600 h-11"
         />

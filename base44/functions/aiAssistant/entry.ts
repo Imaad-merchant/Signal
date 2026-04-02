@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     }
 
     // ---------- Step 2: Fetch tasks and filter by keywords ----------
-    const allTasks = await base44.asServiceRole.entities.Task.filter({ created_by: user.email }, "-due_date", 200);
+    const allTasks = await base44.asServiceRole.entities.Task.filter({ created_by: user.email }, "-due_date", 500);
     const sorted = allTasks.sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
 
     let contextTasks;
@@ -50,14 +50,14 @@ Deno.serve(async (req) => {
         )
       );
       const matchedIds = new Set(matched.map(m => m.id));
-      const upcoming = sorted.filter(t => (t.due_date || '') >= today && !matchedIds.has(t.id)).slice(0, 25);
-      contextTasks = [...matched, ...upcoming].slice(0, 80);
+      const upcoming = sorted.filter(t => (t.due_date || '') >= today && !matchedIds.has(t.id)).slice(0, 50);
+      contextTasks = [...matched, ...upcoming].slice(0, 150);
     } else {
-      contextTasks = sorted.slice(0, 80);
+      contextTasks = sorted.slice(0, 150);
     }
 
     const tasksJson = JSON.stringify(
-      contextTasks.map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority }))
+      contextTasks.map(t => ({ id: t.id, title: t.title, due_date: t.due_date, status: t.status, category: t.category, priority: t.priority, description: t.description || null, estimated_minutes: t.estimated_minutes || null }))
     );
 
     // ---------- UserPreferences ----------
@@ -78,7 +78,7 @@ Deno.serve(async (req) => {
       : '  - Label: "Work", Key: "work"\n  - Label: "Personal", Key: "personal"';
 
     // ---------- System prompt ----------
-    const systemPrompt = `You are a smart calendar & task management assistant. Today is ${today}, time: ${currentTime} (America/Chicago).
+    const systemPrompt = `You are an expert AI calendar & task management assistant with deep scheduling intelligence. Today is ${today}, time: ${currentTime} (America/Chicago). Tomorrow is ${tomorrowStr}.
 ${userPrefsText}
 User's tasks:
 ${tasksJson}
@@ -87,15 +87,38 @@ Available categories (use EXACT Key value only):
 ${categoryList}
 
 Action field rules — populate ONLY relevant fields, set all others to null:
-- create: title, due_date (YYYY-MM-DD), category (exact key), priority, description; id/label/color/key = null
+- create: title, due_date (YYYY-MM-DD), category (exact key), priority, description, estimated_minutes; id/label/color/key = null
 - update: id + only changed fields; unchanged fields = null
 - delete: id only; all others = null
 - delete_all: all fields = null
 - create_category: label, color (hex), key (simple lowercase slug); others = null — ONLY when user explicitly asks
 
-THOUGHT PROCESS: Before deciding on actions, briefly explain your reasoning in thought_process (1-2 sentences). This helps you choose the right category, priority, and date.
-For read-only questions, return empty actions [].
-CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task for each.`;
+## CORE CAPABILITIES
+You are highly capable at complex scheduling tasks. You can:
+
+1. **Bulk editing**: Change multiple tasks at once (e.g., "move all my work tasks to next week", "mark everything due today as high priority")
+2. **Smart reorganization**: When asked to reorganize, rebalance, or optimize a schedule, analyze the full task list and redistribute tasks across dates to create a balanced workload. Consider priority, category, and due dates.
+3. **Conflict resolution**: Detect when too many tasks are on one day and suggest or automatically spread them out.
+4. **Batch rescheduling**: Handle requests like "push everything back 2 days", "clear Friday and move those to Monday".
+5. **Smart defaults**: When creating tasks, infer reasonable due dates, categories, and priorities from context if not specified.
+6. **Multi-step operations**: For complex requests, break them into multiple actions. For example, "swap the dates of task A and task B" requires two update actions.
+7. **Date math**: Understand "next Monday", "end of week", "in 3 days", "this weekend", etc. Always resolve to YYYY-MM-DD.
+8. **Prioritization**: When asked to prioritize or rank tasks, update their priority fields and optionally reorder due dates so high-priority items come first.
+
+## RESPONSE GUIDELINES
+- THOUGHT PROCESS: Before deciding on actions, explain your reasoning in thought_process (2-4 sentences). Analyze what the user wants, which tasks are affected, and your strategy.
+- For read-only questions, return empty actions [] but give a thorough, helpful answer.
+- When reorganizing, explain your reasoning in the reply (e.g., "I spread your 8 Monday tasks across Mon-Wed to keep each day manageable").
+- Be proactive: if you notice issues (overloaded days, missed deadlines), mention them.
+- CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task for each.
+- For ambiguous requests, make your best judgment and explain what you did so the user can undo if needed.
+
+## AUTO-PRIORITY RULES (always apply when creating/updating tasks)
+- Payments, bills, rent, tuition, fees, subscriptions due → always HIGH priority
+- Exams, tests, quizzes, midterms, finals → always HIGH priority
+- Deadlines, submissions, applications → always HIGH priority
+- Meetings, appointments → MEDIUM priority unless specified otherwise
+- These rules apply automatically even if the user doesn't mention priority.`;
 
     // ---------- Few-Shot Examples ----------
     const exampleCat = categoryKeys[0] || "work";
@@ -103,24 +126,31 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
       { role: "user", content: `Add dentist appointment for ${tomorrowStr}` },
       {
         role: "assistant", content: JSON.stringify({
-          reply: "Done! Dentist appointment added.",
-          actions: [{ action: "create", id: null, title: "Dentist appointment", due_date: tomorrowStr, category: exampleCat, priority: "medium", description: null, status: null, label: null, color: null, key: null }]
+          thought_process: "User wants a new dentist appointment for tomorrow. I'll use medium priority and the first available category.",
+          reply: "Done! Dentist appointment added for tomorrow.",
+          actions: [{ action: "create", id: null, title: "Dentist appointment", due_date: tomorrowStr, category: exampleCat, priority: "medium", description: null, status: null, estimated_minutes: null, label: null, color: null, key: null }]
         })
       },
       { role: "user", content: "Mark my gym session as done" },
       {
         role: "assistant", content: JSON.stringify({
+          thought_process: "User wants to mark gym session as complete. I'll update the status to done.",
           reply: "Marked your gym session as complete!",
-          actions: [{ action: "update", id: "EXAMPLE_ID", title: null, due_date: null, category: null, priority: null, description: null, status: "done", label: null, color: null, key: null }]
+          actions: [{ action: "update", id: "EXAMPLE_ID", title: null, due_date: null, category: null, priority: null, description: null, status: "done", estimated_minutes: null, label: null, color: null, key: null }]
         })
       },
-      { role: "user", content: "What tasks do I have this week?" },
+      { role: "user", content: "Reorganize my week — I have too much on Monday" },
       {
         role: "assistant", content: JSON.stringify({
-          reply: "Here's what you have this week: [lists based on context]",
-          actions: []
+          thought_process: "User has too many tasks on Monday. I need to look at Monday's tasks and spread some to Tue/Wed/Thu to balance the load. I'll keep high-priority items on Monday and move medium/low ones later.",
+          reply: "I've rebalanced your week! Moved 3 lower-priority tasks from Monday to Tuesday and Wednesday. Monday now has 4 tasks (down from 7), and your high-priority items stay put.",
+          actions: [
+            { action: "update", id: "TASK_1", title: null, due_date: "2025-01-07", category: null, priority: null, description: null, status: null, estimated_minutes: null, label: null, color: null, key: null },
+            { action: "update", id: "TASK_2", title: null, due_date: "2025-01-08", category: null, priority: null, description: null, status: null, estimated_minutes: null, label: null, color: null, key: null },
+            { action: "update", id: "TASK_3", title: null, due_date: "2025-01-08", category: null, priority: null, description: null, status: null, estimated_minutes: null, label: null, color: null, key: null }
+          ]
         })
-      }
+      },
     ];
 
     // ---------- Structured Output Schema (100% reliable) ----------
@@ -145,11 +175,12 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
                 priority:    { anyOf: [{ type: "string", enum: ["low", "medium", "high"] }, { type: "null" }] },
                 description: { anyOf: [{ type: "string" }, { type: "null" }] },
                 status:      { anyOf: [{ type: "string", enum: ["todo", "in_progress", "done"] }, { type: "null" }] },
+                estimated_minutes: { anyOf: [{ type: "number" }, { type: "null" }] },
                 label:       { anyOf: [{ type: "string" }, { type: "null" }] },
                 color:       { anyOf: [{ type: "string" }, { type: "null" }] },
                 key:         { anyOf: [{ type: "string" }, { type: "null" }] }
               },
-              required: ["action", "id", "title", "due_date", "category", "priority", "description", "status", "label", "color", "key"],
+              required: ["action", "id", "title", "due_date", "category", "priority", "description", "status", "estimated_minutes", "label", "color", "key"],
               additionalProperties: false
             }
           }
@@ -191,10 +222,10 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
 
     // ---------- OpenAI call with Structured Outputs ----------
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: oaiMessages,
       response_format: { type: "json_schema", json_schema: responseSchema },
-      max_tokens: 4000,
+      max_tokens: 8000,
     });
 
     const message = completion.choices[0].message;
@@ -214,10 +245,13 @@ CALENDAR IMAGES: Extract ALL visible events with exact dates and create a task f
         if (act.priority !== null)    fields.priority = act.priority;
         if (act.description !== null) fields.description = act.description;
         if (act.status !== null)      fields.status = act.status;
+        if (act.estimated_minutes !== null) fields.estimated_minutes = act.estimated_minutes;
         return { action: "update", id: act.id, fields };
       }
       if (act.action === "create") {
-        return { action: "create", title: act.title, due_date: act.due_date, category: act.category, priority: act.priority, description: act.description };
+        const data = { title: act.title, due_date: act.due_date, category: act.category, priority: act.priority, description: act.description };
+        if (act.estimated_minutes !== null) data.estimated_minutes = act.estimated_minutes;
+        return { action: "create", ...data };
       }
       if (act.action === "delete")         return { action: "delete", id: act.id };
       if (act.action === "delete_all")     return { action: "delete_all" };
