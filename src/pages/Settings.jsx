@@ -122,8 +122,12 @@ export default function Settings() {
     setDisconnecting(true);
     setDisconnectResult(null);
     try {
-      await base44.connectors.disconnect('googlecalendar');
-      setDisconnectResult({ success: true });
+      const res = await base44.functions.invoke('disconnectGoogleCalendar', {});
+      if (res.data?.success) {
+        setDisconnectResult({ success: true });
+      } else {
+        setDisconnectResult({ success: false, error: res.data?.error || 'Disconnect failed' });
+      }
     } catch (e) {
       setDisconnectResult({ success: false, error: e.message });
     }
