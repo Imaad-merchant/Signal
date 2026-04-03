@@ -29,7 +29,7 @@ Deno.serve(async (req) => {
               timeZone: 'America/Chicago'
             }
           : { date: startDate },
-        extendedProperties: { private: { pulseTaskId: task.id } }
+        extendedProperties: { private: { pulseTaskId: task.id, pulseApp: 'true' } }
       };
 
       const res = await fetch(

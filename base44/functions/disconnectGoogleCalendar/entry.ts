@@ -16,7 +16,7 @@ Deno.serve(async (req) => {
 
     do {
       const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
-      url.searchParams.set('privateExtendedProperty', 'pulseTaskId');
+      url.searchParams.set('privateExtendedProperty', 'pulseApp=true');
       url.searchParams.set('maxResults', '250');
       if (pageToken) url.searchParams.set('pageToken', pageToken);
 
