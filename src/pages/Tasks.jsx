@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2 } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,7 @@ import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import { format, isSameDay, isToday, parseISO } from "date-fns";
 
 const PULL_THRESHOLD = 70;
 
@@ -19,12 +20,27 @@ export default function Tasks() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [folderFilter, setFolderFilter] = useState("all");
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const scrollRef = useRef(null);
+  const todayRef = useRef(null);
   const [pullY, setPullY] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const touchStartY = useRef(null);
+
+  // Read folders from localStorage
+  const [categoryFolders, setCategoryFolders] = useState(() => {
+    try { const s = localStorage.getItem("pulse_category_folders"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  // Re-read folders when window regains focus (in case Dashboard changed them)
+  useEffect(() => {
+    const handler = () => {
+      try { const s = localStorage.getItem("pulse_category_folders"); setCategoryFolders(s ? JSON.parse(s) : []); } catch {}
+    };
+    window.addEventListener("focus", handler);
+    return () => window.removeEventListener("focus", handler);
+  }, []);
 
   // Reset on tab re-tap
   useEffect(() => {
@@ -71,6 +87,12 @@ export default function Tasks() {
     enabled: !!user,
   });
 
+  const { data: dbCategories = [] } = useQuery({
+    queryKey: ["categories", user?.email],
+    queryFn: () => base44.entities.Category.list(),
+    enabled: !!user,
+  });
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
   const handleStatusChange = async (task, newStatus) => {
@@ -89,13 +111,59 @@ export default function Tasks() {
     refresh();
   };
 
+  const handleDescriptionChange = async (task, newDescription) => {
+    // Optimistic update
+    queryClient.setQueryData(["tasks", user?.email], (old = []) =>
+      old.map(t => t.id === task.id ? { ...t, description: newDescription } : t)
+    );
+    await base44.entities.Task.update(task.id, { description: newDescription });
+  };
+
+  // Get category keys for selected folder
+  const activeFolderCatKeys = folderFilter !== "all" && categoryFolders[folderFilter]
+    ? categoryFolders[folderFilter].categoryKeys
+    : null;
+
   const filtered = tasks.filter((t) => {
     if (search && !t.title?.toLowerCase().includes(search.toLowerCase())) return false;
     if (statusFilter !== "all" && t.status !== statusFilter) return false;
     if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
-    if (categoryFilter !== "all" && t.category !== categoryFilter) return false;
+    // Folder filter overrides category filter
+    if (activeFolderCatKeys) {
+      if (!activeFolderCatKeys.includes(t.category ?? "work")) return false;
+    } else if (categoryFilter !== "all" && t.category !== categoryFilter) {
+      return false;
+    }
     return true;
   });
+
+  // When a folder is selected, sort by due_date ascending and group by date
+  const isFolderView = folderFilter !== "all";
+  const sortedFiltered = isFolderView
+    ? [...filtered].sort((a, b) => {
+        if (!a.due_date && !b.due_date) return 0;
+        if (!a.due_date) return 1;
+        if (!b.due_date) return -1;
+        return a.due_date.localeCompare(b.due_date);
+      })
+    : filtered;
+
+  // Group tasks by date when in folder view
+  const groupedByDate = isFolderView
+    ? sortedFiltered.reduce((groups, task) => {
+        const key = task.due_date || "no-date";
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(task);
+        return groups;
+      }, {})
+    : null;
+
+  // Auto-scroll to today when folder is selected
+  useEffect(() => {
+    if (isFolderView && todayRef.current) {
+      setTimeout(() => todayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    }
+  }, [folderFilter]);
 
   const pullProgress = Math.min(pullY / PULL_THRESHOLD, 1);
   const showPullIndicator = pullY > 8 || refreshing;
@@ -141,6 +209,22 @@ export default function Tasks() {
             className="pl-9 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200 placeholder-gray-500"
           />
         </div>
+        {categoryFolders.length > 0 && (
+          <Select value={folderFilter} onValueChange={(v) => { setFolderFilter(v); if (v !== "all") setCategoryFilter("all"); }}>
+            <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200">
+              <div className="flex items-center gap-2">
+                <Folder className="h-3.5 w-3.5 text-blue-400" />
+                <SelectValue />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Folders</SelectItem>
+              {categoryFolders.map((f, i) => (
+                <SelectItem key={i} value={String(i)}>{f.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-32 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -159,17 +243,24 @@ export default function Tasks() {
             <SelectItem value="low">Low</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            <SelectItem value="work">Work</SelectItem>
-            <SelectItem value="personal">Personal</SelectItem>
-            <SelectItem value="health">Health</SelectItem>
-            <SelectItem value="learning">Learning</SelectItem>
-            <SelectItem value="creative">Creative</SelectItem>
-          </SelectContent>
-        </Select>
+        {!isFolderView && (
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {dbCategories.length > 0
+                ? dbCategories.map(c => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)
+                : <>
+                    <SelectItem value="work">Work</SelectItem>
+                    <SelectItem value="personal">Personal</SelectItem>
+                    <SelectItem value="health">Health</SelectItem>
+                    <SelectItem value="learning">Learning</SelectItem>
+                    <SelectItem value="creative">Creative</SelectItem>
+                  </>
+              }
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* Task List */}
@@ -177,22 +268,67 @@ export default function Tasks() {
         {isLoading && (
           <div className="text-center py-12 text-gray-500 text-sm">Loading tasks...</div>
         )}
-        <AnimatePresence>
-          {filtered.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              onStatusChange={handleStatusChange}
-              onDelete={handleDelete}
-              onStartFocus={(t) => {
-                window.location.href = createPageUrl("Focus") + `?taskId=${t.id}&taskTitle=${encodeURIComponent(t.title)}`;
-              }}
-            />
-          ))}
-        </AnimatePresence>
-        {!isLoading && filtered.length === 0 && (
+
+        {/* Folder view: grouped by date */}
+        {isFolderView && groupedByDate && !isLoading && (
+          <div className="space-y-4">
+            {Object.entries(groupedByDate).map(([dateKey, dateTasks]) => {
+              const isNoDate = dateKey === "no-date";
+              const dateObj = !isNoDate ? parseISO(dateKey) : null;
+              const isTodayDate = dateObj && isToday(dateObj);
+              return (
+                <div key={dateKey} ref={isTodayDate ? todayRef : undefined}>
+                  <div className={`sticky top-0 z-10 flex items-center gap-2 py-2 px-1 mb-1 ${isTodayDate ? "bg-blue-600/10" : "bg-[#1e1f20]"}`}>
+                    <div className={`h-2 w-2 rounded-full ${isTodayDate ? "bg-blue-500" : "bg-gray-600"}`} />
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${isTodayDate ? "text-blue-400" : "text-gray-500"}`}>
+                      {isNoDate ? "No Date" : format(dateObj, "EEEE, MMMM d, yyyy")}
+                      {isTodayDate && <span className="ml-2 text-blue-300 normal-case tracking-normal font-medium">Today</span>}
+                    </span>
+                    <span className="text-[10px] text-gray-600 ml-auto">{dateTasks.length} task{dateTasks.length !== 1 ? "s" : ""}</span>
+                  </div>
+                  <div className="space-y-2">
+                    <AnimatePresence>
+                      {dateTasks.map((task) => (
+                        <TaskCard
+                          key={task.id}
+                          task={task}
+                          onStatusChange={handleStatusChange}
+                          onDelete={handleDelete}
+                          onDescriptionChange={handleDescriptionChange}
+                          onStartFocus={(t) => {
+                            window.location.href = createPageUrl("Focus") + `?taskId=${t.id}&taskTitle=${encodeURIComponent(t.title)}`;
+                          }}
+                        />
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Regular view: flat list */}
+        {!isFolderView && !isLoading && (
+          <AnimatePresence>
+            {sortedFiltered.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onStatusChange={handleStatusChange}
+                onDelete={handleDelete}
+                onDescriptionChange={handleDescriptionChange}
+                onStartFocus={(t) => {
+                  window.location.href = createPageUrl("Focus") + `?taskId=${t.id}&taskTitle=${encodeURIComponent(t.title)}`;
+                }}
+              />
+            ))}
+          </AnimatePresence>
+        )}
+
+        {!isLoading && sortedFiltered.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-gray-500 text-sm">No tasks found</p>
+            <p className="text-gray-500 text-sm">{isFolderView ? "No tasks in this folder" : "No tasks found"}</p>
             <Button variant="ghost" onClick={() => setShowAdd(true)} className="mt-2 text-blue-400 hover:text-blue-300">
               Create your first task
             </Button>

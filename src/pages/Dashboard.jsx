@@ -112,6 +112,9 @@ export default function Dashboard() {
   const [newFolderName, setNewFolderName] = useState("");
   const [editingFolderIdx, setEditingFolderIdx] = useState(null);
   const [editingFolderName, setEditingFolderName] = useState("");
+  const [draggingCatKey, setDraggingCatKey] = useState(null);
+  const [dragOverFolder, setDragOverFolder] = useState(null);
+  const [contextMenu, setContextMenu] = useState(null); // { x, y }
   const calBodyRef = React.useRef(null);
   const [pullY, setPullY] = React.useState(0);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
@@ -350,26 +353,60 @@ export default function Dashboard() {
             />
 
             {/* Categories & Folders */}
-            <div className="px-3 mt-2 flex-1 overflow-y-auto">
+            <div
+              className="px-3 mt-2 flex-1 overflow-y-auto"
+              onContextMenu={(e) => {
+                // Only show context menu if right-clicking on the empty area (not on a category/folder)
+                if (e.target.closest('[data-cat-item]') || e.target.closest('[data-folder-item]')) return;
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY });
+              }}
+            >
               <div className="flex items-center justify-between py-2 px-2">
                 <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Categories</span>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => setShowAddFolder(o => !o)}
-                    className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
-                    title="Add folder"
+                    className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-colors"
+                    title="New folder"
                   >
-                    <Folder className="h-3.5 w-3.5" />
+                    <Folder className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => setShowAddCategory(o => !o)}
-                    className="p-0.5 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
+                    className="p-1 rounded hover:bg-white/10 text-gray-400 hover:text-gray-200 transition-colors"
                     title="Add category"
                   >
-                    <Plus className="h-3.5 w-3.5" />
+                    <Plus className="h-4 w-4" />
                   </button>
                 </div>
               </div>
+
+              {/* Right-click context menu */}
+              {contextMenu && (
+                <>
+                  <div className="fixed inset-0 z-[100]" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+                  <div
+                    className="fixed z-[101] bg-[#2d2e30] border border-white/15 rounded-xl shadow-2xl py-1 min-w-[160px]"
+                    style={{ left: contextMenu.x, top: contextMenu.y }}
+                  >
+                    <button
+                      onClick={() => { setShowAddCategory(true); setContextMenu(null); }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-200 hover:bg-white/10 transition-colors"
+                    >
+                      <Plus className="h-3.5 w-3.5 text-gray-400" />
+                      New Category
+                    </button>
+                    <button
+                      onClick={() => { setShowAddFolder(true); setContextMenu(null); }}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-200 hover:bg-white/10 transition-colors"
+                    >
+                      <Folder className="h-3.5 w-3.5 text-blue-400" />
+                      New Folder
+                    </button>
+                  </div>
+                </>
+              )}
 
               {/* Add folder form */}
               {showAddFolder && (
@@ -430,10 +467,33 @@ export default function Dashboard() {
                   const isCollapsed = collapsedFolders[idx];
                   const folderEnabled = enabledFolders[idx] !== false;
                   const folderCats = CATEGORIES.filter(c => folder.categoryKeys.includes(c.key));
+                  const isDragOver = dragOverFolder === idx;
                   return (
-                    <div key={idx}>
+                    <div
+                      key={idx}
+                      data-folder-item
+                      onDragOver={(e) => { e.preventDefault(); setDragOverFolder(idx); }}
+                      onDragLeave={() => setDragOverFolder(null)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setDragOverFolder(null);
+                        if (draggingCatKey) {
+                          // Remove from any other folder first
+                          const nextFolders = categoryFolders.map((f, i) => ({
+                            ...f,
+                            categoryKeys: f.categoryKeys.filter(k => k !== draggingCatKey)
+                          }));
+                          // Add to this folder
+                          if (!nextFolders[idx].categoryKeys.includes(draggingCatKey)) {
+                            nextFolders[idx] = { ...nextFolders[idx], categoryKeys: [...nextFolders[idx].categoryKeys, draggingCatKey] };
+                          }
+                          saveCategoryFolders(nextFolders);
+                          setDraggingCatKey(null);
+                        }
+                      }}
+                    >
                       {/* Folder header */}
-                      <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-white/5 group select-none">
+                      <div className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-white/5 group select-none transition-colors ${isDragOver ? "bg-blue-600/15 ring-1 ring-blue-500/30" : ""}`}>
                         <button onClick={() => toggleFolderCollapse(idx)} className="flex-shrink-0 text-gray-400 hover:text-gray-200 transition-colors">
                           {isCollapsed
                             ? <Folder className="h-3.5 w-3.5" />
@@ -477,7 +537,7 @@ export default function Dashboard() {
 
                       {/* Folder categories (collapsible) */}
                       {!isCollapsed && (
-                        <div className="ml-4 space-y-0.5">
+                        <div className={`ml-4 space-y-0.5 ${isDragOver && folderCats.length === 0 ? "min-h-[28px]" : ""}`}>
                           {folderCats.map((cat) => {
                             const enabled = enabledCategories[cat.key];
                             return (
@@ -488,7 +548,13 @@ export default function Dashboard() {
                                 onSaveColor={(color) => changeColor(cat.key, color)}
                                 onDelete={() => deleteCategory(cat.key)}
                               >
-                                <div className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/5 group/cat select-none">
+                                <div
+                                  data-cat-item
+                                  draggable
+                                  onDragStart={() => setDraggingCatKey(cat.key)}
+                                  onDragEnd={() => { setDraggingCatKey(null); setDragOverFolder(null); }}
+                                  className={`flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/5 group/cat select-none cursor-grab active:cursor-grabbing ${draggingCatKey === cat.key ? "opacity-40" : ""}`}
+                                >
                                   <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
                                   {editingCatKey === cat.key ? (
                                     <input
@@ -522,7 +588,9 @@ export default function Dashboard() {
                           })}
                           {/* Drop zone hint */}
                           {folderCats.length === 0 && (
-                            <div className="text-[10px] text-gray-600 px-2 py-1 italic">Drag categories here</div>
+                            <div className={`text-[10px] px-2 py-1 italic rounded transition-colors ${isDragOver ? "text-blue-400 bg-blue-600/10" : "text-gray-600"}`}>
+                              {isDragOver ? "Drop here" : "Drag categories here"}
+                            </div>
                           )}
                         </div>
                       )}
@@ -541,7 +609,13 @@ export default function Dashboard() {
                       onSaveColor={(color) => changeColor(cat.key, color)}
                       onDelete={() => deleteCategory(cat.key)}
                     >
-                      <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 group select-none">
+                      <div
+                        data-cat-item
+                        draggable
+                        onDragStart={() => setDraggingCatKey(cat.key)}
+                        onDragEnd={() => { setDraggingCatKey(null); setDragOverFolder(null); }}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5 group select-none cursor-grab active:cursor-grabbing ${draggingCatKey === cat.key ? "opacity-40" : ""}`}
+                      >
                         <div className="h-3 w-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
                         {editingCatKey === cat.key ? (
                           <input
@@ -555,22 +629,6 @@ export default function Dashboard() {
                           />
                         ) : (
                           <span className="text-sm text-gray-300 flex-1">{cat.label}</span>
-                        )}
-                        {/* Add to folder menu */}
-                        {categoryFolders.length > 0 && (
-                          <div className="relative opacity-0 group-hover:opacity-100 transition-opacity">
-                            <select
-                              className="appearance-none bg-transparent text-gray-500 hover:text-gray-300 cursor-pointer text-[10px] w-5 h-4"
-                              title="Move to folder"
-                              value=""
-                              onChange={(e) => { if (e.target.value !== "") addCategoryToFolder(parseInt(e.target.value), cat.key); }}
-                            >
-                              <option value="" disabled>+</option>
-                              {categoryFolders.map((f, fi) => (
-                                <option key={fi} value={fi}>{f.name}</option>
-                              ))}
-                            </select>
-                          </div>
                         )}
                         <button
                           onClick={() => toggleCategory(cat.key)}

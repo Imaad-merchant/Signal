@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, Circle, Clock, ArrowUpCircle, Calendar, MoreHorizontal, Trash2, Play } from "lucide-react";
+import { CheckCircle2, Circle, Clock, ArrowUpCircle, Calendar, MoreHorizontal, Trash2, Play, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import {
@@ -30,9 +30,38 @@ const statusIcons = {
   done: CheckCircle2,
 };
 
-export default function TaskCard({ task, onStatusChange, onDelete, onStartFocus }) {
+export default function TaskCard({ task, onStatusChange, onDelete, onStartFocus, onDescriptionChange }) {
   const StatusIcon = statusIcons[task.status] || Circle;
   const priority = priorityConfig[task.priority] || priorityConfig.medium;
+  const [editingDesc, setEditingDesc] = useState(false);
+  const [descValue, setDescValue] = useState(task.description || "");
+  const descRef = useRef(null);
+  const debounceRef = useRef(null);
+
+  // Sync with task prop
+  useEffect(() => { setDescValue(task.description || ""); }, [task.description]);
+
+  const saveDescription = useCallback((val) => {
+    if (onDescriptionChange && val !== (task.description || "")) {
+      onDescriptionChange(task, val);
+    }
+  }, [task, onDescriptionChange]);
+
+  const handleDescChange = (e) => {
+    const val = e.target.value;
+    setDescValue(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => saveDescription(val), 800);
+  };
+
+  const closeDesc = () => {
+    if (debounceRef.current) { clearTimeout(debounceRef.current); saveDescription(descValue); }
+    setEditingDesc(false);
+  };
+
+  useEffect(() => {
+    if (editingDesc && descRef.current) descRef.current.focus();
+  }, [editingDesc]);
 
   return (
     <motion.div
@@ -68,8 +97,26 @@ export default function TaskCard({ task, onStatusChange, onDelete, onStartFocus 
         <p className={`text-sm font-medium ${task.status === "done" ? "line-through text-gray-500" : "text-gray-100"}`}>
           {task.title}
         </p>
-        {task.description && (
-          <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{task.description}</p>
+        {editingDesc ? (
+          <textarea
+            ref={descRef}
+            value={descValue}
+            onChange={handleDescChange}
+            onBlur={closeDesc}
+            onKeyDown={(e) => { if (e.key === "Escape") closeDesc(); }}
+            rows={2}
+            placeholder="Add a note..."
+            className="w-full mt-1 bg-[#1e1f20] border border-white/15 rounded-lg px-2 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-blue-500/40 resize-none"
+          />
+        ) : (
+          <p
+            className={`text-xs mt-0.5 cursor-pointer rounded px-1 -mx-1 transition-colors ${
+              descValue ? "text-gray-500 hover:text-gray-400 hover:bg-white/5" : "text-gray-600 hover:text-gray-500 hover:bg-white/5 italic"
+            }`}
+            onClick={() => onDescriptionChange && setEditingDesc(true)}
+          >
+            {descValue || "Add a note..."}
+          </p>
         )}
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           <Badge variant="secondary" className={`text-[10px] px-2 py-0.5 border ${priority.color}`}>
