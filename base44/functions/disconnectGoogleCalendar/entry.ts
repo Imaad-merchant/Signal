@@ -10,14 +10,14 @@ Deno.serve(async (req) => {
 
     const { accessToken } = await base44.asServiceRole.connectors.getConnection('googlecalendar');
 
-    // Fetch all events that have the pulseTaskId extended property (created by this app)
+    // Fetch all events and filter by pulseTaskId extended property (client-side)
     let deleted = 0;
     let pageToken = '';
 
     do {
       const url = new URL('https://www.googleapis.com/calendar/v3/calendars/primary/events');
-      url.searchParams.set('privateExtendedProperty', 'pulseApp=true');
-      url.searchParams.set('maxResults', '250');
+      url.searchParams.set('maxResults', '2500');
+      url.searchParams.set('singleEvents', 'true');
       if (pageToken) url.searchParams.set('pageToken', pageToken);
 
       const listRes = await fetch(url.toString(), {
@@ -30,7 +30,9 @@ Deno.serve(async (req) => {
       }
 
       const data = await listRes.json();
-      const events = data.items || [];
+      const events = (data.items || []).filter(e =>
+        e.extendedProperties?.private?.pulseTaskId || e.extendedProperties?.private?.pulseApp
+      );
 
       // Delete all found events in parallel
       const results = await Promise.all(events.map(async (event) => {
