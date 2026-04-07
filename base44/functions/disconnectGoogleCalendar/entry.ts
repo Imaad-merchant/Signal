@@ -34,19 +34,21 @@ Deno.serve(async (req) => {
         e.extendedProperties?.private?.pulseTaskId || e.extendedProperties?.private?.pulseApp
       );
 
-      // Delete all found events in parallel
-      const results = await Promise.all(events.map(async (event) => {
-        const delRes = await fetch(
-          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`,
-          {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${accessToken}` },
-          }
-        );
-        return delRes.ok || delRes.status === 404;
-      }));
+      // Delete in small batches to avoid rate limits
+      const batchSize = 10;
+      for (let i = 0; i < events.length; i += batchSize) {
+        const batch = events.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(async (event) => {
+          const delRes = await fetch(
+            `https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`,
+            { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          return delRes.ok || delRes.status === 404;
+        }));
+        deleted += results.filter(Boolean).length;
+        if (i + batchSize < events.length) await new Promise(r => setTimeout(r, 500));
+      }
 
-      deleted += results.filter(Boolean).length;
       pageToken = data.nextPageToken || '';
     } while (pageToken);
 
