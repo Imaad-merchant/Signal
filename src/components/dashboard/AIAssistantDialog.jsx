@@ -119,14 +119,42 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
         await Promise.all(snapshotTasks.map(t => base44.entities.Task.delete(t.id)));
         actionCount += snapshotTasks.length;
       } else {
-        const promises = actions.map(async (act) => {
+        // Process categories and folders first (sequentially), then tasks in parallel
+        const catActions = actions.filter(a => a.action === "create_category");
+        const folderActions = actions.filter(a => a.action === "create_folder");
+        const taskActions = actions.filter(a => !["create_category", "create_folder"].includes(a.action));
+
+        // Create categories first
+        for (const act of catActions) {
           try {
-            if (act.action === "create_category") {
-              if (act.label && act.color && act.key) {
-                await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+            if (act.label && act.color && act.key) {
+              await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key });
+              actionCount++;
+            }
+          } catch (_) {}
+        }
+
+        // Create folders (stored in localStorage)
+        if (folderActions.length > 0) {
+          try {
+            const existing = JSON.parse(localStorage.getItem("pulse_category_folders") || "[]");
+            const enabledFolders = JSON.parse(localStorage.getItem("pulse_enabled_folders") || "{}");
+            for (const act of folderActions) {
+              if (act.name) {
+                existing.push({ name: act.name, categoryKeys: act.categoryKeys || [] });
+                enabledFolders[existing.length - 1] = true;
                 actionCount++;
               }
-            } else if (act.action === "create") {
+            }
+            localStorage.setItem("pulse_category_folders", JSON.stringify(existing));
+            localStorage.setItem("pulse_enabled_folders", JSON.stringify(enabledFolders));
+          } catch (_) {}
+        }
+
+        // Create/update/delete tasks in parallel
+        const taskPromises = taskActions.map(async (act) => {
+          try {
+            if (act.action === "create") {
               const { action, ...data } = act;
               await base44.entities.Task.create({ status: "todo", priority: "medium", ...data });
               actionCount++;
@@ -137,11 +165,9 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
               await base44.entities.Task.delete(act.id);
               actionCount++;
             }
-          } catch (_) {
-            // Skip actions on tasks that no longer exist
-          }
+          } catch (_) {}
         });
-        await Promise.all(promises);
+        await Promise.all(taskPromises);
       }
 
       if (actionCount > 0) {

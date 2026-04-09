@@ -126,8 +126,6 @@ export default function Tasks() {
 
   const filtered = tasks.filter((t) => {
     if (search && !t.title?.toLowerCase().includes(search.toLowerCase())) return false;
-    if (statusFilter !== "all" && t.status !== statusFilter) return false;
-    if (priorityFilter !== "all" && t.priority !== priorityFilter) return false;
     // Folder filter overrides category filter
     if (activeFolderCatKeys) {
       if (!activeFolderCatKeys.includes(t.category ?? "work")) return false;
@@ -209,58 +207,36 @@ export default function Tasks() {
             className="pl-9 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200 placeholder-gray-500"
           />
         </div>
-        {categoryFolders.length > 0 && (
-          <Select value={folderFilter} onValueChange={(v) => { setFolderFilter(v); if (v !== "all") setCategoryFilter("all"); }}>
-            <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200">
-              <div className="flex items-center gap-2">
-                <Folder className="h-3.5 w-3.5 text-blue-400" />
-                <SelectValue />
-              </div>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Folders</SelectItem>
-              {categoryFolders.map((f, i) => (
-                <SelectItem key={i} value={String(i)}>{f.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-32 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
+        <Select value={folderFilter} onValueChange={(v) => { setFolderFilter(v); if (v !== "all") setCategoryFilter("all"); }}>
+          <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200">
+            <div className="flex items-center gap-2">
+              <Folder className="h-3.5 w-3.5 text-blue-400" />
+              <SelectValue />
+            </div>
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="todo">To Do</SelectItem>
-            <SelectItem value="in_progress">In Progress</SelectItem>
-            <SelectItem value="done">Done</SelectItem>
+            <SelectItem value="all">All Folders</SelectItem>
+            {categoryFolders.map((f, i) => (
+              <SelectItem key={i} value={String(i)}>{f.name}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="w-32 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
+        <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); if (v !== "all") setFolderFilter("all"); }}>
+          <SelectTrigger className="w-40 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Priority</SelectItem>
-            <SelectItem value="high">High</SelectItem>
-            <SelectItem value="medium">Medium</SelectItem>
-            <SelectItem value="low">Low</SelectItem>
+            <SelectItem value="all">All Categories</SelectItem>
+            {dbCategories.length > 0
+              ? dbCategories.map(c => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)
+              : <>
+                  <SelectItem value="work">Work</SelectItem>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="health">Health</SelectItem>
+                  <SelectItem value="learning">Learning</SelectItem>
+                  <SelectItem value="creative">Creative</SelectItem>
+                </>
+            }
           </SelectContent>
         </Select>
-        {!isFolderView && (
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-36 rounded-xl bg-[#2d2e30] border-white/10 text-gray-200"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {dbCategories.length > 0
-                ? dbCategories.map(c => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)
-                : <>
-                    <SelectItem value="work">Work</SelectItem>
-                    <SelectItem value="personal">Personal</SelectItem>
-                    <SelectItem value="health">Health</SelectItem>
-                    <SelectItem value="learning">Learning</SelectItem>
-                    <SelectItem value="creative">Creative</SelectItem>
-                  </>
-              }
-            </SelectContent>
-          </Select>
-        )}
       </div>
 
       {/* Task List */}

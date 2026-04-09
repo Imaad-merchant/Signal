@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo, Unlink, FilePlus2, FileDown } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo, Unlink, FilePlus2, FileDown, FileUp } from "lucide-react";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";
@@ -58,6 +58,116 @@ export default function Settings() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [smartImporting, setSmartImporting] = useState(false);
+  const [smartImportResult, setSmartImportResult] = useState(null);
+  const [smartImportProgress, setSmartImportProgress] = useState("");
+  const smartImportRef = useRef(null);
+
+  const handleSmartImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSmartImporting(true);
+    setSmartImportResult(null);
+    setSmartImportProgress("Reading file...");
+
+    try {
+      const isImage = file.type.startsWith("image/");
+      const isPdf = file.type === "application/pdf";
+
+      if (isImage || isPdf) {
+        // Convert to base64 and send directly to API (no Firebase Storage needed)
+        setSmartImportProgress("Reading file...");
+        const base64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(file);
+        });
+
+        setSmartImportProgress("AI is reading your file...");
+        const token = await (await import("@/api/firebase")).auth.currentUser.getIdToken();
+
+        const res = await fetch("/api/smart-import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ fileBase64: base64, fileName: file.name, fileType: file.type }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || "AI import failed");
+        }
+        const { tasks: parsedTasks } = await res.json();
+
+        setSmartImportProgress(`Creating ${parsedTasks.length} tasks...`);
+        let count = 0;
+        for (const task of parsedTasks) {
+          await base44.entities.Task.create({
+            title: task.title || "Untitled",
+            description: task.description || "",
+            due_date: task.due_date || "",
+            category: task.category || "work",
+            priority: task.priority || "medium",
+            status: task.status || "todo",
+          });
+          count++;
+          if (count % 5 === 0) setSmartImportProgress(`Creating tasks... ${count}/${parsedTasks.length}`);
+        }
+        setSmartImportResult({ success: true, count });
+      } else {
+        // Text-based files (ICS, CSV, TXT, etc.)
+        const text = await file.text();
+
+        // Try ICS parsing first
+        if (file.name.endsWith(".ics") || text.includes("BEGIN:VCALENDAR")) {
+          setSmartImportProgress("Parsing .ics file...");
+          const events = [];
+          const blocks = text.split("BEGIN:VEVENT");
+          for (let i = 1; i < blocks.length; i++) {
+            const block = blocks[i].split("END:VEVENT")[0];
+            const get = (key) => { const m = block.match(new RegExp(`${key}[^:]*:(.+)`)); return m ? m[1].trim() : ""; };
+            const title = get("SUMMARY");
+            const dateStr = get("DTSTART");
+            const due_date = dateStr.length >= 8 ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}` : "";
+            if (title) events.push({ title, description: get("DESCRIPTION") || "", due_date, status: "todo", priority: "medium", category: "work" });
+          }
+          setSmartImportProgress(`Creating ${events.length} tasks...`);
+          for (const task of events) await base44.entities.Task.create(task);
+          setSmartImportResult({ success: true, count: events.length });
+        } else {
+          // Send text to AI for parsing
+          setSmartImportProgress("AI is reading your file...");
+          const token = await (await import("@/api/firebase")).auth.currentUser.getIdToken();
+          const res = await fetch("/api/smart-import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ textContent: text, fileName: file.name, fileType: file.type }),
+          });
+          if (!res.ok) throw new Error("AI import failed");
+          const { tasks: parsedTasks } = await res.json();
+
+          setSmartImportProgress(`Creating ${parsedTasks.length} tasks...`);
+          let count = 0;
+          for (const task of parsedTasks) {
+            await base44.entities.Task.create({
+              title: task.title || "Untitled",
+              description: task.description || "",
+              due_date: task.due_date || "",
+              category: task.category || "work",
+              priority: task.priority || "medium",
+              status: task.status || "todo",
+            });
+            count++;
+          }
+          setSmartImportResult({ success: true, count });
+        }
+      }
+    } catch (err) {
+      console.error("Smart import error:", err);
+      setSmartImportResult({ success: false, error: err.message });
+    }
+    setSmartImporting(false);
+    setSmartImportProgress("");
+    e.target.value = "";
+  };
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -236,23 +346,20 @@ export default function Settings() {
 
       {/* Import & Export */}
       <Section title="Import & Export">
-        <Row label="Import Calendar" description="Import events from an image, PDF, or file">
-          <button
-            onClick={() => setShowImportCalendar(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors min-h-[44px]"
-          >
-            <Calendar className="h-4 w-4" />
-            Import
-          </button>
-        </Row>
-        <Row label="Import Tasks" description="Import tasks from a file or spreadsheet">
-          <button
-            onClick={() => setShowImportTasks(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition-colors min-h-[44px]"
-          >
-            <ListTodo className="h-4 w-4" />
-            Import
-          </button>
+        <Row label="Import" description="Upload any file — PDF, image, .ics, spreadsheet — AI will extract your tasks">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => smartImportRef.current?.click()}
+              disabled={smartImporting}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/20 transition-colors min-h-[44px] disabled:opacity-60"
+            >
+              {smartImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              {smartImporting ? smartImportProgress || "Importing..." : "Import File"}
+            </button>
+            <input ref={smartImportRef} type="file" accept=".pdf,.ics,.csv,.txt,.xlsx,.png,.jpg,.jpeg,.webp" className="hidden" onChange={handleSmartImport} />
+            {smartImportResult?.success && <span className="text-xs text-emerald-400">{smartImportResult.count} tasks imported!</span>}
+            {smartImportResult?.success === false && <span className="text-xs text-red-400">{smartImportResult.error || "Error"}</span>}
+          </div>
         </Row>
         <Row label="Start Fresh" description="Clear all tasks and start with a blank task list">
           <button
