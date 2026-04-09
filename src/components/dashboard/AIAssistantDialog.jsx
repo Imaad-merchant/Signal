@@ -53,12 +53,8 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
     abortRef.current = false;
     setLoading(true);
 
-    // Upload any images first
-    let uploadedUrls = [];
-    for (const img of attachedImages) {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file: img.file });
-      uploadedUrls.push(file_url);
-    }
+    // Use base64 previews directly — no upload needed
+    const uploadedUrls = attachedImages.map((i) => i.preview);
 
     const userMsg = {
       role: "user",

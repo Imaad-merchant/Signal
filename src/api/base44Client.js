@@ -22,18 +22,27 @@ function requireUser() {
   return user;
 }
 
+// Helper: strip undefined values (Firestore rejects them)
+function stripUndefined(obj) {
+  const result = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
 // Entity CRUD factory — creates handlers for a Firestore collection
 function createEntityHandler(collectionName) {
   return {
     async create(data) {
       const user = requireUser();
-      const docData = {
+      const docData = stripUndefined({
         ...data,
         userId: user.uid,
         created_by: user.email,
         created_date: new Date().toISOString(),
         updated_date: new Date().toISOString(),
-      };
+      });
       const docRef = await addDoc(collection(db, collectionName), docData);
       return { id: docRef.id, ...docData };
     },
@@ -44,13 +53,13 @@ function createEntityHandler(collectionName) {
       const results = [];
       for (const data of items) {
         const docRef = doc(collection(db, collectionName));
-        const docData = {
+        const docData = stripUndefined({
           ...data,
           userId: user.uid,
           created_by: user.email,
           created_date: new Date().toISOString(),
           updated_date: new Date().toISOString(),
-        };
+        });
         batch.set(docRef, docData);
         results.push({ id: docRef.id, ...docData });
       }
@@ -119,10 +128,10 @@ function createEntityHandler(collectionName) {
 
     async update(id, data) {
       const docRef = doc(db, collectionName, id);
-      await updateDoc(docRef, {
+      await updateDoc(docRef, stripUndefined({
         ...data,
         updated_date: new Date().toISOString(),
-      });
+      }));
       const updated = await getDoc(docRef);
       return { id: updated.id, ...updated.data() };
     },
@@ -167,14 +176,22 @@ export const base44 = {
       const user = requireUser();
       const token = await user.getIdToken();
       const baseUrl = import.meta.env.VITE_API_URL || "";
-      const res = await fetch(`${baseUrl}/api/${name}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 55000); // 55s timeout
+      let res;
+      try {
+        res = await fetch(`${baseUrl}/api/${name}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
       if (!res.ok) throw new Error(`Function ${name} failed: ${res.status}`);
       const data = await res.json();
       return { data };

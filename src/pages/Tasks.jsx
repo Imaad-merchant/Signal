@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -21,6 +21,7 @@ export default function Tasks() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [folderFilter, setFolderFilter] = useState("all");
+  const [showPastTasks, setShowPastTasks] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const scrollRef = useRef(null);
@@ -135,33 +136,30 @@ export default function Tasks() {
     return true;
   });
 
-  // When a folder is selected, sort by due_date ascending and group by date
-  const isFolderView = folderFilter !== "all";
-  const sortedFiltered = isFolderView
-    ? [...filtered].sort((a, b) => {
-        if (!a.due_date && !b.due_date) return 0;
-        if (!a.due_date) return 1;
-        if (!b.due_date) return -1;
-        return a.due_date.localeCompare(b.due_date);
-      })
-    : filtered;
+  // Sort by due_date ascending
+  const isFolderView = folderFilter !== "all" || categoryFilter !== "all";
+  const todayStr = format(new Date(), "yyyy-MM-dd");
 
-  // Group tasks by date when in folder view
-  const groupedByDate = isFolderView
-    ? sortedFiltered.reduce((groups, task) => {
-        const key = task.due_date || "no-date";
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(task);
-        return groups;
-      }, {})
-    : null;
+  const sortedFiltered = [...filtered]
+    .sort((a, b) => {
+      if (!a.due_date && !b.due_date) return 0;
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return a.due_date.localeCompare(b.due_date);
+    });
 
-  // Auto-scroll to today when folder is selected
-  useEffect(() => {
-    if (isFolderView && todayRef.current) {
-      setTimeout(() => todayRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
-    }
-  }, [folderFilter]);
+  // Split into past and current/future tasks
+  const pastTasks = sortedFiltered.filter(t => t.due_date && t.due_date < todayStr);
+  const currentTasks = sortedFiltered.filter(t => !t.due_date || t.due_date >= todayStr);
+  const displayTasks = showPastTasks ? sortedFiltered : currentTasks;
+
+  // Group tasks by date
+  const groupedByDate = displayTasks.reduce((groups, task) => {
+    const key = task.due_date || "no-date";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(task);
+    return groups;
+  }, {});
 
   const pullProgress = Math.min(pullY / PULL_THRESHOLD, 1);
   const showPullIndicator = pullY > 8 || refreshing;
@@ -239,6 +237,17 @@ export default function Tasks() {
         </Select>
       </div>
 
+      {/* Past tasks toggle */}
+      {pastTasks.length > 0 && (
+        <button
+          onClick={() => setShowPastTasks(!showPastTasks)}
+          className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-300 transition-colors px-1"
+        >
+          <History className="h-3.5 w-3.5" />
+          {showPastTasks ? "Hide past tasks" : `Show ${pastTasks.length} past tasks`}
+        </button>
+      )}
+
       {/* Task List */}
       <div className="space-y-2">
         {isLoading && (
@@ -246,7 +255,7 @@ export default function Tasks() {
         )}
 
         {/* Folder view: grouped by date */}
-        {isFolderView && groupedByDate && !isLoading && (
+        {!isLoading && Object.keys(groupedByDate).length > 0 && (
           <div className="space-y-4">
             {Object.entries(groupedByDate).map(([dateKey, dateTasks]) => {
               const isNoDate = dateKey === "no-date";
@@ -284,27 +293,14 @@ export default function Tasks() {
           </div>
         )}
 
-        {/* Regular view: flat list */}
-        {!isFolderView && !isLoading && (
-          <AnimatePresence>
-            {sortedFiltered.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                onStatusChange={handleStatusChange}
-                onDelete={handleDelete}
-                onDescriptionChange={handleDescriptionChange}
-                onStartFocus={(t) => {
-                  window.location.href = createPageUrl("Focus") + `?taskId=${t.id}&taskTitle=${encodeURIComponent(t.title)}`;
-                }}
-              />
-            ))}
-          </AnimatePresence>
-        )}
-
-        {!isLoading && sortedFiltered.length === 0 && (
+        {!isLoading && displayTasks.length === 0 && (
           <div className="text-center py-16">
-            <p className="text-gray-500 text-sm">{isFolderView ? "No tasks in this folder" : "No tasks found"}</p>
+            <p className="text-gray-500 text-sm">No upcoming tasks</p>
+            {pastTasks.length > 0 && !showPastTasks && (
+              <button onClick={() => setShowPastTasks(true)} className="text-blue-400 hover:text-blue-300 text-sm mt-2">
+                Show {pastTasks.length} past tasks
+              </button>
+            )}
             <Button variant="ghost" onClick={() => setShowAdd(true)} className="mt-2 text-blue-400 hover:text-blue-300">
               Create your first task
             </Button>

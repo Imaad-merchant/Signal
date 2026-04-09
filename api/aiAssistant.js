@@ -7,11 +7,16 @@ export default async function handler(req, res) {
   try {
     const { messages, tasks, imageUrls, categories } = req.body;
 
-    const systemPrompt = `You are a powerful calendar AI assistant that can create tasks, categories, and organize them into folders.
+    // Only send a summary of tasks to keep prompt small and fast
+    const taskSummary = (tasks || []).length > 20
+      ? `${(tasks || []).length} tasks total. Recent 20: ${JSON.stringify((tasks || []).slice(0, 20).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, category: t.category })))}`
+      : JSON.stringify((tasks || []).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, category: t.category })));
+
+    const systemPrompt = `You are a calendar AI assistant.
 
 CURRENT STATE:
-- Existing tasks: ${JSON.stringify((tasks || []).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, category: t.category, status: t.status })), null, 1)}
-- Existing categories: ${JSON.stringify((categories || []).map(c => ({ key: c.key, label: c.label, color: c.color })))}
+- Tasks: ${taskSummary}
+- Categories: ${JSON.stringify((categories || []).map(c => ({ key: c.key, label: c.label, color: c.color })))}
 
 CAPABILITIES - You respond with JSON containing:
 - "reply": your text response to the user

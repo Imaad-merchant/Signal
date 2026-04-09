@@ -129,7 +129,7 @@ function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, 
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
-export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick }) {
+export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick, onAddEvent }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
@@ -142,10 +142,32 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
   const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
   const { onDragStart, onDragOver, onDrop, onDragLeave, dragOverDate } = useDragDrop(onUpdated);
   const [overflowDay, setOverflowDay] = useState(null);
+  const [dayContextMenu, setDayContextMenu] = useState(null); // { x, y, date }
 
   return (
     <>
       {menuEl}
+      {/* Day right-click context menu */}
+      {dayContextMenu && (
+        <>
+          <div className="fixed inset-0 z-[100]" onClick={() => setDayContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setDayContextMenu(null); }} />
+          <div
+            className="fixed z-[101] bg-[#2d2e30] border border-white/15 rounded-xl shadow-2xl py-1 min-w-[160px]"
+            style={{ left: dayContextMenu.x, top: dayContextMenu.y }}
+          >
+            <button
+              onClick={() => {
+                onAddEvent?.(format(dayContextMenu.date, "yyyy-MM-dd"));
+                setDayContextMenu(null);
+              }}
+              className="flex items-center gap-2.5 w-full px-3 py-2 text-xs text-gray-200 hover:bg-white/10 transition-colors"
+            >
+              <span className="text-blue-400">+</span>
+              New Event on {format(dayContextMenu.date, "MMM d")}
+            </button>
+          </div>
+        </>
+      )}
       <div className="h-full flex flex-col relative">
         <div className="grid grid-cols-7 border-b border-white/10">
           {DAY_HEADERS.map((d) => (
@@ -164,6 +186,12 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
               <div
                 key={idx}
                 onClick={() => setSelectedDate(date)}
+                onContextMenu={(e) => {
+                  // Only show day menu if not right-clicking on a task pill
+                  if (e.target.closest('[draggable="true"]')) return;
+                  e.preventDefault();
+                  setDayContextMenu({ x: e.clientX, y: e.clientY, date });
+                }}
                 onDragOver={(e) => onDragOver(e, dateStr)}
                 onDrop={(e) => onDrop(e, dateStr)}
                 onDragLeave={onDragLeave}
@@ -184,15 +212,15 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                   </span>
                 </div>
                 <div className="space-y-0.5">
-                  {dayTasks.slice(0, 3).map((task) => (
+                  {dayTasks.slice(0, 6).map((task) => (
                     <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
                   ))}
-                  {dayTasks.length > 3 && (
+                  {dayTasks.length > 6 && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setOverflowDay({ date, tasks: dayTasks }); }}
                       className="text-[10px] text-blue-400 hover:text-blue-300 px-1 transition-colors"
                     >
-                      +{dayTasks.length - 3} more
+                      +{dayTasks.length - 6} more
                     </button>
                   )}
                 </div>

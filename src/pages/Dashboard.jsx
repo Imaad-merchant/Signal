@@ -8,7 +8,7 @@ import {
 } from "date-fns";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Check } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
@@ -528,19 +528,20 @@ export default function Dashboard() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); toggleFolder(idx); }}
-                          className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 relative ${folderEnabled ? "bg-blue-600" : "bg-white/10"}`}
+                          className="flex-shrink-0"
                           title={folderEnabled ? "Hide all" : "Show all"}
                         >
-                          <span className="absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all" style={{ left: folderEnabled ? "calc(100% - 14px)" : "2px" }} />
+                          {folderEnabled
+                            ? <CheckSquare className="h-3.5 w-3.5 text-blue-400" />
+                            : <Square className="h-3.5 w-3.5 text-gray-600" />
+                          }
                         </button>
                       </div>
 
-                      {/* Folder categories (collapsible) */}
+                      {/* Folder categories (collapsible) — no individual toggles */}
                       {!isCollapsed && (
                         <div className={`ml-4 space-y-0.5 ${isDragOver && folderCats.length === 0 ? "min-h-[28px]" : ""}`}>
-                          {folderCats.map((cat) => {
-                            const enabled = enabledCategories[cat.key];
-                            return (
+                          {folderCats.map((cat) => (
                               <CategoryContextMenu
                                 key={cat.key}
                                 cat={cat}
@@ -576,16 +577,9 @@ export default function Dashboard() {
                                   >
                                     <Minus className="h-2.5 w-2.5" />
                                   </button>
-                                  <button
-                                    onClick={() => toggleCategory(cat.key)}
-                                    className={`w-7 h-3.5 rounded-full transition-colors flex-shrink-0 relative ${enabled ? "bg-blue-600" : "bg-white/10"}`}
-                                  >
-                                    <span className="absolute top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-all" style={{ left: enabled ? "calc(100% - 12px)" : "2px" }} />
-                                  </button>
                                 </div>
                               </CategoryContextMenu>
-                            );
-                          })}
+                          ))}
                           {/* Drop zone hint */}
                           {folderCats.length === 0 && (
                             <div className={`text-[10px] px-2 py-1 italic rounded transition-colors ${isDragOver ? "text-blue-400 bg-blue-600/10" : "text-gray-600"}`}>
@@ -632,10 +626,13 @@ export default function Dashboard() {
                         )}
                         <button
                           onClick={() => toggleCategory(cat.key)}
-                          className={`w-8 h-4 rounded-full transition-colors flex-shrink-0 relative ${enabled ? "bg-blue-600" : "bg-white/10"}`}
+                          className="flex-shrink-0"
                           title={enabled ? "Hide" : "Show"}
                         >
-                          <span className="absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all" style={{ left: enabled ? "calc(100% - 14px)" : "2px" }} />
+                          {enabled
+                            ? <CheckSquare className="h-3.5 w-3.5 text-blue-400" />
+                            : <Square className="h-3.5 w-3.5 text-gray-600" />
+                          }
                         </button>
                       </div>
                     </CategoryContextMenu>
@@ -739,6 +736,7 @@ export default function Dashboard() {
                     onUpdated={refresh}
                     categories={categories}
                     onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+                    onAddEvent={(dateStr) => { setSelectedDate(new Date(dateStr + "T12:00:00")); setShowAddEvent(true); }}
                   />
             )}
            {internalView === "Weekly" && (
