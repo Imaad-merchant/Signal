@@ -99,6 +99,13 @@ export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdde
     }
   }, [categories]);
 
+  // Update due_date whenever the dialog opens with a new defaultDate
+  useEffect(() => {
+    if (open && defaultDate) {
+      setForm(f => ({ ...f, due_date: defaultDate }));
+    }
+  }, [open, defaultDate]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.title.trim()) return;

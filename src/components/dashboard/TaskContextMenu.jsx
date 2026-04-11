@@ -6,6 +6,7 @@ import EditTaskDialog from "./EditTaskDialog";
 export default function TaskContextMenu({ task, position, onClose, onUpdated, categories = [] }) {
   const [showEdit, setShowEdit] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
+  const [adjustedPos, setAdjustedPos] = useState(position);
   const menuRef = useRef();
 
   const categoryColors = Object.fromEntries(categories.map(c => [c.key, c.color]));
@@ -17,6 +18,26 @@ export default function TaskContextMenu({ task, position, onClose, onUpdated, ca
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [onClose]);
+
+  // Reposition menu to stay within viewport after it renders
+  useEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const padding = 8;
+    let x = position.x;
+    let y = position.y;
+
+    // If menu overflows right edge, flip left
+    if (x + rect.width + padding > window.innerWidth) {
+      x = Math.max(padding, window.innerWidth - rect.width - padding);
+    }
+    // If menu overflows bottom edge, flip up
+    if (y + rect.height + padding > window.innerHeight) {
+      y = Math.max(padding, window.innerHeight - rect.height - padding);
+    }
+
+    setAdjustedPos({ x, y });
+  }, [position, showCategories]);
 
   const handleDelete = async () => {
     await base44.entities.Task.delete(task.id);
@@ -32,8 +53,8 @@ export default function TaskContextMenu({ task, position, onClose, onUpdated, ca
 
   const style = {
     position: "fixed",
-    top: Math.min(position.y, window.innerHeight - 200),
-    left: Math.min(position.x, window.innerWidth - 200),
+    top: adjustedPos.y,
+    left: adjustedPos.x,
     zIndex: 9999,
   };
 

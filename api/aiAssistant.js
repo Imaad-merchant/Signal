@@ -7,15 +7,20 @@ export default async function handler(req, res) {
   try {
     const { messages, tasks, imageUrls, categories } = req.body;
 
-    // Only send a summary of tasks to keep prompt small and fast
-    const taskSummary = (tasks || []).length > 20
-      ? `${(tasks || []).length} tasks total. Recent 20: ${JSON.stringify((tasks || []).slice(0, 20).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, category: t.category })))}`
-      : JSON.stringify((tasks || []).map(t => ({ id: t.id, title: t.title, due_date: t.due_date, category: t.category })));
+    // Send ALL tasks with minimal fields so AI can see and act on every single one
+    const allTasks = (tasks || []).map(t => ({
+      id: t.id,
+      title: t.title,
+      due_date: t.due_date || null,
+      category: t.category || null,
+      status: t.status || "todo",
+    }));
 
-    const systemPrompt = `You are a calendar AI assistant.
+    const systemPrompt = `You are a calendar AI assistant that executes user commands on their tasks.
 
 CURRENT STATE:
-- Tasks: ${taskSummary}
+- Total tasks: ${allTasks.length}
+- ALL TASKS (you can see every single one): ${JSON.stringify(allTasks)}
 - Categories: ${JSON.stringify((categories || []).map(c => ({ key: c.key, label: c.label, color: c.color })))}
 
 CAPABILITIES - You respond with JSON containing:
@@ -24,7 +29,7 @@ CAPABILITIES - You respond with JSON containing:
 
   Task actions:
   - { "action": "create", "title": "...", "due_date": "YYYY-MM-DD", "category": "category_key", "priority": "high|medium|low", "description": "..." }
-  - { "action": "update", "id": "task_id", "fields": { "title": "...", "status": "done", ... } }
+  - { "action": "update", "id": "task_id", "fields": { "title": "...", "category": "key", "status": "done", ... } }
   - { "action": "delete", "id": "task_id" }
   - { "action": "delete_all" }
 
@@ -34,23 +39,15 @@ CAPABILITIES - You respond with JSON containing:
   Folder actions (folders group categories together):
   - { "action": "create_folder", "name": "Folder Name", "categoryKeys": ["key1", "key2"] }
 
-IMPORTANT RULES:
-1. When the user shows you a SCREENSHOT of a calendar/schedule, extract EVERY SINGLE task/event visible. Do not skip any.
-2. Look carefully at dates, task titles, category labels, and colors in the screenshot.
-3. When creating categories, match the EXACT colors you see. Common color mappings:
-   - Blue: #4285f4
-   - Red/Coral: #db4437 or #ea4335
-   - Green: #0f9d58 or #34a853
-   - Yellow/Amber: #f4b400 or #fbbc05
-   - Purple: #a142f4 or #9c27b0
-   - Orange: #ff6d00 or #e67c73
-   - Teal: #009688
-   - Pink: #e91e63
-4. Create categories FIRST, then tasks that reference those categories, then folders to group them.
-5. For folder organization, group related categories together (e.g., all class categories in a "Spring Classes" folder).
-6. Be thorough — if you see 50+ tasks, create all 50+. Never summarize or skip tasks.
-7. Always respond with valid JSON only. No markdown wrapping.
-8. Set max_tokens high enough to include all tasks. If there are many tasks, include ALL of them.`;
+CRITICAL RULES:
+1. BULK OPERATIONS: When the user says "change ALL X to Y" or "move all tasks from X to Y", you MUST scan through EVERY task in the ALL TASKS list above and generate an update action for EACH ONE that matches. Do NOT skip any. Do NOT summarize.
+2. When the user asks you to change all tasks in a category (e.g., "change all GOVT to BUSI"), iterate through the ENTIRE task list and create an update action for every single task where category matches. You have the full list above — use it.
+3. When you see a SCREENSHOT of a calendar/schedule, extract EVERY SINGLE task/event visible.
+4. For color matching when creating categories from screenshots:
+   - Blue: #4285f4 | Red: #db4437 | Green: #0f9d58 | Yellow: #f4b400 | Purple: #a142f4 | Orange: #ff6d00 | Teal: #009688 | Pink: #e91e63
+5. Create categories FIRST, then tasks, then folders.
+6. Always respond with valid JSON only. No markdown wrapping.
+7. Be thorough — if 30 tasks match the user's criteria, generate 30 update actions. Never say "I don't have details" when the tasks are in the list above.`;
 
     const openaiMessages = [
       { role: "system", content: systemPrompt },
@@ -81,6 +78,7 @@ IMPORTANT RULES:
         messages: openaiMessages,
         temperature: 0.3,
         max_tokens: 16000,
+        response_format: { type: "json_object" },
       }),
     });
 
@@ -95,12 +93,27 @@ IMPORTANT RULES:
 
     let parsed;
     try {
-      // Strip markdown code fences if present
-      const cleaned = content.replace(/^```json\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-      parsed = JSON.parse(cleaned);
+      // Try direct parse first
+      parsed = JSON.parse(content);
     } catch {
-      parsed = { reply: content, actions: [] };
+      // Fallback: strip markdown code fences
+      try {
+        const cleaned = content.replace(/^```json\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // Fallback: extract first JSON object from mixed text
+        const match = content.match(/\{[\s\S]*\}/);
+        if (match) {
+          try { parsed = JSON.parse(match[0]); } catch { parsed = { reply: content, actions: [] }; }
+        } else {
+          parsed = { reply: content, actions: [] };
+        }
+      }
     }
+
+    // Ensure shape is correct
+    if (!parsed.reply) parsed.reply = "Done!";
+    if (!Array.isArray(parsed.actions)) parsed.actions = [];
 
     return res.status(200).json(parsed);
   } catch (err) {

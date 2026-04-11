@@ -153,7 +153,10 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
           <div className="fixed inset-0 z-[100]" onClick={() => setDayContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setDayContextMenu(null); }} />
           <div
             className="fixed z-[101] bg-[#2d2e30] border border-white/15 rounded-xl shadow-2xl py-1 min-w-[160px]"
-            style={{ left: dayContextMenu.x, top: dayContextMenu.y }}
+            style={{
+              left: Math.min(dayContextMenu.x, window.innerWidth - 200),
+              top: Math.min(dayContextMenu.y, window.innerHeight - 60),
+            }}
           >
             <button
               onClick={() => {

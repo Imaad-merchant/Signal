@@ -388,7 +388,10 @@ export default function Dashboard() {
                   <div className="fixed inset-0 z-[100]" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
                   <div
                     className="fixed z-[101] bg-[#2d2e30] border border-white/15 rounded-xl shadow-2xl py-1 min-w-[160px]"
-                    style={{ left: contextMenu.x, top: contextMenu.y }}
+                    style={{
+                      left: Math.min(contextMenu.x, window.innerWidth - 180),
+                      top: Math.min(contextMenu.y, window.innerHeight - 100),
+                    }}
                   >
                     <button
                       onClick={() => { setShowAddCategory(true); setContextMenu(null); }}

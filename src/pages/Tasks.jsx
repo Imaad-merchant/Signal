@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -29,6 +29,58 @@ export default function Tasks() {
   const [pullY, setPullY] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const touchStartY = useRef(null);
+
+  // Notepad
+  const [notepadOpen, setNotepadOpen] = useState(() => {
+    return localStorage.getItem("pulse_notepad_open") === "true";
+  });
+  const [notepadText, setNotepadText] = useState("");
+  const [notepadSaved, setNotepadSaved] = useState(false);
+  const notepadDebounce = useRef(null);
+
+  // Load notepad from Firestore
+  const { data: notepadData } = useQuery({
+    queryKey: ["notepad", user?.email],
+    queryFn: async () => {
+      const notes = await base44.entities.DailyLog.filter({ type: "notepad" });
+      return notes[0] || null;
+    },
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (notepadData?.notes) setNotepadText(notepadData.notes);
+  }, [notepadData]);
+
+  const saveNotepad = useCallback((text) => {
+    if (notepadDebounce.current) clearTimeout(notepadDebounce.current);
+    notepadDebounce.current = setTimeout(async () => {
+      try {
+        if (notepadData?.id) {
+          await base44.entities.DailyLog.update(notepadData.id, { notes: text });
+        } else {
+          await base44.entities.DailyLog.create({ type: "notepad", notes: text, date: new Date().toISOString().split("T")[0] });
+          queryClient.invalidateQueries({ queryKey: ["notepad"] });
+        }
+        setNotepadSaved(true);
+        setTimeout(() => setNotepadSaved(false), 2000);
+      } catch (err) {
+        console.error("Notepad save error:", err);
+      }
+    }, 800);
+  }, [notepadData, queryClient]);
+
+  const handleNotepadChange = (e) => {
+    const text = e.target.value;
+    setNotepadText(text);
+    saveNotepad(text);
+  };
+
+  const toggleNotepad = () => {
+    const next = !notepadOpen;
+    setNotepadOpen(next);
+    localStorage.setItem("pulse_notepad_open", String(next));
+  };
 
   // Read folders from localStorage
   const [categoryFolders, setCategoryFolders] = useState(() => {
@@ -235,6 +287,32 @@ export default function Tasks() {
             }
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Notepad */}
+      <div className="rounded-xl border border-white/10 bg-[#2d2e30] overflow-hidden">
+        <button
+          onClick={toggleNotepad}
+          className="flex items-center justify-between w-full px-4 py-2.5 hover:bg-white/5 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <StickyNote className="h-4 w-4 text-amber-400" />
+            <span className="text-sm font-medium text-gray-200">Notes</span>
+            {notepadSaved && <span className="flex items-center gap-1 text-[10px] text-emerald-400"><Check className="h-3 w-3" />Saved</span>}
+          </div>
+          {notepadOpen ? <ChevronUp className="h-4 w-4 text-gray-500" /> : <ChevronDown className="h-4 w-4 text-gray-500" />}
+        </button>
+        {notepadOpen && (
+          <div className="px-4 pb-4">
+            <textarea
+              value={notepadText}
+              onChange={handleNotepadChange}
+              placeholder="Write your notes here..."
+              rows={6}
+              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500/30 resize-y min-h-[120px]"
+            />
+          </div>
+        )}
       </div>
 
       {/* Past tasks toggle */}
