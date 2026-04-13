@@ -48,17 +48,19 @@ function useContextMenu(onUpdated, categories) {
 function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = [] }) {
   const categoryMap = Object.fromEntries(categories.map(c => [c.key, { bg: c.color, text: "#fff" }]));
   const c = categoryMap[task.category] || DEFAULT_CATEGORY_COLORS[task.category] || defaultColor;
+  const isDone = task.status === "done";
   return (
     <div
       draggable
       onDragStart={(e) => { e.stopPropagation(); onDragStart(task); }}
       onContextMenu={(e) => onContextMenu(e, task)}
       onClick={(e) => { e.stopPropagation(); onTaskClick?.(task); }}
-      className="text-[11px] font-medium px-1.5 py-0.5 rounded truncate cursor-grab active:cursor-grabbing select-none hover:opacity-80 transition-opacity"
+      className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-[3px] rounded-[4px] truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125"
       style={{
-        backgroundColor: task.status === "done" ? "#3c3d3f" : c.bg,
-        color: task.status === "done" ? "#888" : c.text,
-        textDecoration: task.status === "done" ? "line-through" : "none",
+        backgroundColor: isDone ? "rgba(255,255,255,0.04)" : c.bg,
+        color: isDone ? "#555" : c.text,
+        textDecoration: isDone ? "line-through" : "none",
+        opacity: isDone ? 0.4 : 0.9,
       }}
     >
       {task.title}
@@ -174,7 +176,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
       <div className="h-full flex flex-col relative">
         <div className="grid grid-cols-7 border-b border-white/10">
           {DAY_HEADERS.map((d) => (
-            <div key={d} className="py-2 text-center text-[11px] font-semibold text-gray-500 tracking-wider">{d}</div>
+            <div key={d} className="py-2 text-center text-[10px] font-medium text-gray-500 tracking-widest">{d}</div>
           ))}
         </div>
         <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${calDays.length / 7}, minmax(100px, 1fr))` }}>
@@ -190,7 +192,6 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                 key={idx}
                 onClick={() => setSelectedDate(date)}
                 onContextMenu={(e) => {
-                  // Only show day menu if not right-clicking on a task pill
                   if (e.target.closest('[draggable="true"]')) return;
                   e.preventDefault();
                   setDayContextMenu({ x: e.clientX, y: e.clientY, date });
@@ -198,18 +199,17 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                 onDragOver={(e) => onDragOver(e, dateStr)}
                 onDrop={(e) => onDrop(e, dateStr)}
                 onDragLeave={onDragLeave}
-                className={`p-1.5 border-b border-r border-white/10 cursor-pointer transition-colors ${!isCurrentMonth ? "opacity-40" : ""} ${isDragOver ? "bg-blue-500/20 border-blue-400/40" : "hover:bg-white/5"}`}
+                className={`p-1.5 border-b border-r border-white/[0.07] cursor-pointer transition-colors ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
               >
                 <div className="flex justify-end mb-1">
                   <span
-                    className="h-7 w-7 flex items-center justify-center rounded-full text-sm font-medium"
-                    style={
+                    className={`h-6 w-6 flex items-center justify-center rounded-full text-xs font-medium transition-colors ${
                       todayFlag
-                        ? { backgroundColor: "#4285f4", color: "#fff" }
+                        ? "bg-blue-500 text-white"
                         : isSelected
-                        ? { backgroundColor: "#3c3d3f", color: "#fff" }
-                        : { color: "#e8eaed" }
-                    }
+                        ? "bg-white/10 text-gray-200"
+                        : "text-gray-400"
+                    }`}
                   >
                     {format(date, "d")}
                   </span>

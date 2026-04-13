@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { Loader2 } from "lucide-react";
+import { Loader2, Calendar } from "lucide-react";
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -57,16 +57,17 @@ export default function Login() {
     <div className="min-h-screen bg-[#1e1f20] flex items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-8">
         {/* Logo / Title */}
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-white tracking-tight">Signal</h1>
-          <p className="text-sm text-gray-500">Your personal productivity hub</p>
+        <div className="text-center space-y-3">
+          <img src="/logo.svg" alt="Signal Calendar" className="w-12 h-12 mx-auto" />
+          <h1 className="text-2xl font-semibold text-white tracking-tight">Signal Calendar</h1>
+          <p className="text-xs text-gray-500">Your personal productivity hub</p>
         </div>
 
         {/* Google Sign In */}
         <button
           onClick={handleGoogle}
           disabled={loading}
-          className="flex items-center justify-center gap-3 w-full px-4 py-3 bg-white hover:bg-gray-50 text-gray-800 rounded-xl font-medium text-sm transition-colors disabled:opacity-50"
+          className="flex items-center justify-center gap-3 w-full px-4 py-3 bg-white hover:bg-gray-100 text-gray-800 rounded-lg font-medium text-sm transition-colors disabled:opacity-50"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
@@ -78,26 +79,26 @@ export default function Login() {
         </button>
 
         <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-white/10" />
-          <span className="text-xs text-gray-500">or</span>
-          <div className="flex-1 h-px bg-white/10" />
+          <div className="flex-1 h-px bg-white/[0.06]" />
+          <span className="text-[10px] text-gray-600 uppercase tracking-wider">or</span>
+          <div className="flex-1 h-px bg-white/[0.06]" />
         </div>
 
         {/* Email/Password Form */}
-        <form onSubmit={handleEmail} className="space-y-3">
+        <form onSubmit={handleEmail} className="space-y-2.5">
           <input
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-4 py-3 bg-[#2d2e30] border border-white/10 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
+            className="w-full px-3.5 py-2.5 bg-[#252627] border border-white/[0.06] rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500/30"
           />
           <input
             type="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-3 bg-[#2d2e30] border border-white/10 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500/50"
+            className="w-full px-3.5 py-2.5 bg-[#252627] border border-white/[0.06] rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500/30"
           />
           {error && <p className="text-xs text-red-400">{error}</p>}
           <button

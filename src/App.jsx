@@ -6,8 +6,7 @@ import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import Login from './pages/Login';
-// ImportData available at /import if needed
-// import ImportData from './pages/ImportData';
+import Cowork from './pages/Cowork';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -50,6 +49,7 @@ const AuthenticatedApp = () => {
           }
         />
       ))}
+      <Route path="/cowork" element={<Cowork />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );
