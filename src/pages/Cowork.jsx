@@ -1,10 +1,200 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, ArrowLeft, FolderPlus, CheckCircle2, ListTodo, ExternalLink } from "lucide-react";
+import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, ArrowLeft, FolderPlus, CheckCircle2, ExternalLink, ChevronRight, ChevronDown, Globe, FileText, FolderOpen, ListChecks, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+
+// ─── Project Sidebar ───────────────────────────────────────────────
+
+function ProjectSidebar({ open, onToggle }) {
+  const { data: user } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => base44.auth.me(),
+  });
+
+  const { data: tasks = [] } = useQuery({
+    queryKey: ["tasks", user?.email],
+    queryFn: () => base44.entities.Task.filter({ created_by: user.email }, "-created_date"),
+    enabled: !!user,
+    refetchInterval: 5000,
+  });
+
+  const { data: categories = [] } = useQuery({
+    queryKey: ["categories", user?.email],
+    queryFn: () => base44.entities.Category.list(),
+    enabled: !!user,
+  });
+
+  const [folders, setFolders] = useState([]);
+  const [expandedFolders, setExpandedFolders] = useState({});
+  const [contextOpen, setContextOpen] = useState(true);
+
+  // Read folders from localStorage
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem("pulse_category_folders");
+      setFolders(s ? JSON.parse(s) : []);
+    } catch {}
+  }, [tasks]); // re-read when tasks change (AI may have created folders)
+
+  const doneTasks = tasks.filter(t => t.status === "done").length;
+  const totalTasks = tasks.length;
+
+  const toggleFolder = (idx) => {
+    setExpandedFolders(prev => ({ ...prev, [idx]: !prev[idx] }));
+  };
+
+  // Get tasks for a category
+  const getTasksForCategory = (catKey) => {
+    return tasks.filter(t => t.category === catKey && t.status !== "done");
+  };
+
+  // Categories not in any folder
+  const folderedCatKeys = new Set(folders.flatMap(f => f.categoryKeys || []));
+  const unfolderedCategories = categories.filter(c => !folderedCatKeys.has(c.key));
+
+  if (!open) return null;
+
+  return (
+    <div className="w-72 border-l border-white/[0.08] bg-[#1a1b1c] flex flex-col shrink-0 overflow-hidden">
+      {/* Progress */}
+      <div className="px-4 py-3 border-b border-white/[0.06]">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-300">Progress</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-gray-500">{doneTasks} of {totalTasks}</span>
+            <ChevronRight className="h-3 w-3 text-gray-600" />
+          </div>
+        </div>
+        {totalTasks > 0 && (
+          <div className="mt-2 h-1 bg-gray-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-500"
+              style={{ width: `${(doneTasks / totalTasks) * 100}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Project Files / Tasks */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="px-4 py-3 border-b border-white/[0.06]">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-semibold text-gray-300">Signal Calendar</span>
+            <div className="flex items-center gap-1">
+              <FileText className="h-3 w-3 text-gray-600" />
+              <ChevronDown className="h-3 w-3 text-gray-600" />
+            </div>
+          </div>
+
+          <div className="space-y-0.5">
+            {/* Folders */}
+            {folders.map((folder, idx) => {
+              const expanded = expandedFolders[idx];
+              const folderCats = categories.filter(c => (folder.categoryKeys || []).includes(c.key));
+              const folderTaskCount = folderCats.reduce((sum, c) => sum + getTasksForCategory(c.key).length, 0);
+
+              return (
+                <div key={idx}>
+                  <button
+                    onClick={() => toggleFolder(idx)}
+                    className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md hover:bg-white/[0.04] transition-colors group"
+                  >
+                    {expanded ? (
+                      <ChevronDown className="h-3 w-3 text-gray-600 shrink-0" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3 text-gray-600 shrink-0" />
+                    )}
+                    <FolderOpen className="h-3.5 w-3.5 text-amber-500/70 shrink-0" />
+                    <span className="text-[12px] text-gray-400 truncate flex-1 text-left">{folder.name}</span>
+                    {folderTaskCount > 0 && (
+                      <span className="text-[10px] text-gray-600">{folderTaskCount}</span>
+                    )}
+                  </button>
+                  {expanded && (
+                    <div className="ml-5 mt-0.5 space-y-0.5">
+                      {folderCats.map(cat => {
+                        const catTasks = getTasksForCategory(cat.key);
+                        return (
+                          <div key={cat.key}>
+                            <div className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-white/[0.03]">
+                              <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                              <span className="text-[11px] text-gray-500 truncate flex-1">{cat.label}</span>
+                              <span className="text-[10px] text-gray-700">{catTasks.length}</span>
+                            </div>
+                            {catTasks.slice(0, 3).map(task => (
+                              <div key={task.id} className="flex items-center gap-2 px-2 py-0.5 ml-4">
+                                <ListChecks className="h-2.5 w-2.5 text-gray-700 shrink-0" />
+                                <span className="text-[10px] text-gray-600 truncate">{task.title}</span>
+                              </div>
+                            ))}
+                            {catTasks.length > 3 && (
+                              <div className="px-2 py-0.5 ml-4">
+                                <span className="text-[10px] text-gray-700">+{catTasks.length - 3} more</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Unfoldered categories */}
+            {unfolderedCategories.map(cat => {
+              const catTasks = getTasksForCategory(cat.key);
+              return (
+                <div key={cat.key} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04]">
+                  <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                  <span className="text-[12px] text-gray-400 truncate flex-1">{cat.label}</span>
+                  {catTasks.length > 0 && (
+                    <span className="text-[10px] text-gray-600">{catTasks.length}</span>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Empty state */}
+            {categories.length === 0 && (
+              <p className="text-[11px] text-gray-700 px-2 py-2">No categories yet. Chat with the AI to create projects.</p>
+            )}
+          </div>
+        </div>
+
+        {/* Context / Connectors */}
+        <div className="px-4 py-3">
+          <button
+            onClick={() => setContextOpen(!contextOpen)}
+            className="flex items-center justify-between w-full mb-2"
+          >
+            <span className="text-xs font-semibold text-gray-300">Context</span>
+            <ChevronDown className={`h-3 w-3 text-gray-600 transition-transform ${contextOpen ? "" : "-rotate-90"}`} />
+          </button>
+          {contextOpen && (
+            <div className="space-y-1">
+              <p className="text-[11px] text-gray-600 mb-2">Connectors</p>
+              <div className="flex items-center gap-2.5 px-2 py-2 rounded-md bg-white/[0.03] border border-white/[0.05]">
+                <Globe className="h-3.5 w-3.5 text-blue-400/70" />
+                <span className="text-[12px] text-gray-400">Web search</span>
+              </div>
+              <div className="flex items-center gap-2.5 px-2 py-2 rounded-md bg-white/[0.03] border border-white/[0.05]">
+                <FileText className="h-3.5 w-3.5 text-green-400/70" />
+                <span className="text-[12px] text-gray-400">Smart import</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Project Card (inline in chat) ─────────────────────────────────
 
 function ProjectCard({ project }) {
   const navigate = useNavigate();
@@ -42,12 +232,16 @@ function ActionSummary({ count }) {
   );
 }
 
+// ─── Suggestions ───────────────────────────────────────────────────
+
 const SUGGESTIONS = [
   "Plan my week — I have a project due Friday and a gym routine",
   "I need to organize a trip to NYC next weekend",
   "Help me build a study plan for my finals in 2 weeks",
   "I want to start a side project — a mobile app",
 ];
+
+// ─── Main Cowork Page ──────────────────────────────────────────────
 
 export default function Cowork() {
   const navigate = useNavigate();
@@ -60,6 +254,7 @@ export default function Cowork() {
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const abortRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -231,155 +426,168 @@ export default function Cowork() {
   const showSuggestions = messages.length <= 1;
 
   return (
-    <div className="flex flex-col h-screen bg-[#1e1f20] text-gray-100">
-      {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-white/[0.08] bg-[#232425] shrink-0">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-white/5 text-gray-500 transition-colors">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-blue-500/20 flex items-center justify-center">
-            <Sparkles className="h-4 w-4 text-blue-400" />
+    <div className="flex h-screen bg-[#1e1f20] text-gray-100">
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.08] bg-[#232425] shrink-0">
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-white/5 text-gray-500 transition-colors">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="flex items-center gap-2">
+              <div className="h-7 w-7 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                <Sparkles className="h-4 w-4 text-blue-400" />
+              </div>
+              <div>
+                <h1 className="text-sm font-semibold text-gray-200">AI Co-pilot</h1>
+                <p className="text-[10px] text-gray-600">Talk naturally — I'll organize everything</p>
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 className="text-sm font-semibold text-gray-200">AI Co-pilot</h1>
-            <p className="text-[10px] text-gray-600">Talk naturally — I'll organize everything</p>
-          </div>
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 rounded-lg hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors"
+            title={sidebarOpen ? "Hide panel" : "Show panel"}
+          >
+            {sidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+          </button>
         </div>
-      </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-            {msg.role === "assistant" && (
-              <div className="h-7 w-7 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex gap-2.5 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              {msg.role === "assistant" && (
+                <div className="h-7 w-7 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Bot className="h-4 w-4 text-blue-400" />
+                </div>
+              )}
+              <div className={`max-w-[80%] ${msg.role === "user" ? "items-end flex flex-col" : ""}`}>
+                {msg.images?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-1 justify-end">
+                    {msg.images.map((src, j) => (
+                      <img key={j} src={src} className="h-20 w-20 rounded-lg object-cover" alt="" />
+                    ))}
+                  </div>
+                )}
+                {msg.content && (
+                  <div
+                    className={`rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
+                      msg.role === "user"
+                        ? "bg-blue-600 text-white"
+                        : "bg-[#2a2b2d] text-gray-300 border border-white/[0.06]"
+                    }`}
+                  >
+                    {msg.role === "assistant" ? (
+                      <ReactMarkdown className="prose prose-invert prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 prose-p:my-1.5 prose-li:my-0.5">
+                        {msg.content}
+                      </ReactMarkdown>
+                    ) : (
+                      msg.content
+                    )}
+                  </div>
+                )}
+                {msg.project && <ProjectCard project={msg.project} />}
+                {msg.actionCount > 0 && !msg.project && <ActionSummary count={msg.actionCount} />}
+              </div>
+              {msg.role === "user" && (
+                <div className="h-7 w-7 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <User className="h-4 w-4 text-gray-500" />
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Suggestions */}
+          {showSuggestions && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+              {SUGGESTIONS.map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSend(s)}
+                  className="text-left text-xs text-gray-500 hover:text-gray-300 bg-[#2a2b2d] hover:bg-[#333435] border border-white/[0.06] rounded-xl px-3.5 py-3 transition-colors"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {loading && (
+            <div className="flex gap-2.5 justify-start">
+              <div className="h-7 w-7 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0">
                 <Bot className="h-4 w-4 text-blue-400" />
               </div>
-            )}
-            <div className={`max-w-[80%] ${msg.role === "user" ? "items-end flex flex-col" : ""}`}>
-              {msg.images?.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-1 justify-end">
-                  {msg.images.map((src, j) => (
-                    <img key={j} src={src} className="h-20 w-20 rounded-lg object-cover" alt="" />
-                  ))}
-                </div>
-              )}
-              {msg.content && (
-                <div
-                  className={`rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white"
-                      : "bg-[#2a2b2d] text-gray-300 border border-white/[0.06]"
-                  }`}
-                >
-                  {msg.role === "assistant" ? (
-                    <ReactMarkdown className="prose prose-invert prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 prose-p:my-1.5 prose-li:my-0.5">
-                      {msg.content}
-                    </ReactMarkdown>
-                  ) : (
-                    msg.content
-                  )}
-                </div>
-              )}
-              {/* Project card */}
-              {msg.project && <ProjectCard project={msg.project} />}
-              {/* Action summary */}
-              {msg.actionCount > 0 && !msg.project && <ActionSummary count={msg.actionCount} />}
-            </div>
-            {msg.role === "user" && (
-              <div className="h-7 w-7 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <User className="h-4 w-4 text-gray-500" />
+              <div className="bg-[#2a2b2d] border border-white/[0.06] rounded-2xl px-4 py-3 flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
+                <span className="text-xs text-gray-500">Thinking...</span>
               </div>
-            )}
-          </div>
-        ))}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
 
-        {/* Suggestions */}
-        {showSuggestions && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-            {SUGGESTIONS.map((s, i) => (
-              <button
-                key={i}
-                onClick={() => handleSend(s)}
-                className="text-left text-xs text-gray-500 hover:text-gray-300 bg-[#2a2b2d] hover:bg-[#333435] border border-white/[0.06] rounded-xl px-3.5 py-3 transition-colors"
-              >
-                {s}
-              </button>
+        {/* Image previews */}
+        {attachedImages.length > 0 && (
+          <div className="px-4 py-2 flex gap-2 flex-wrap border-t border-white/[0.06]">
+            {attachedImages.map((img, i) => (
+              <div key={i} className="relative">
+                <img src={img.preview} className="h-14 w-14 rounded-lg object-cover" alt="" />
+                <button
+                  onClick={() => removeImage(i)}
+                  className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 flex items-center justify-center"
+                >
+                  <X className="h-2.5 w-2.5 text-white" />
+                </button>
+              </div>
             ))}
           </div>
         )}
 
-        {loading && (
-          <div className="flex gap-2.5 justify-start">
-            <div className="h-7 w-7 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0">
-              <Bot className="h-4 w-4 text-blue-400" />
-            </div>
-            <div className="bg-[#2a2b2d] border border-white/[0.06] rounded-2xl px-4 py-3 flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
-              <span className="text-xs text-gray-500">Thinking...</span>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Image previews */}
-      {attachedImages.length > 0 && (
-        <div className="px-4 py-2 flex gap-2 flex-wrap border-t border-white/[0.06]">
-          {attachedImages.map((img, i) => (
-            <div key={i} className="relative">
-              <img src={img.preview} className="h-14 w-14 rounded-lg object-cover" alt="" />
-              <button
-                onClick={() => removeImage(i)}
-                className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 flex items-center justify-center"
-              >
-                <X className="h-2.5 w-2.5 text-white" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="px-4 py-3 border-t border-white/[0.06] bg-[#232425] shrink-0">
-        <div className="flex gap-2 items-end max-w-3xl mx-auto">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-lg bg-[#2a2b2d] hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
-            title="Attach image"
-          >
-            <Image className="h-4 w-4" />
-          </button>
-          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImagePick} />
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Tell me about a project, goal, or idea..."
-            rows={1}
-            className="flex-1 bg-[#2a2b2d] border border-white/[0.06] rounded-xl px-3.5 py-2.5 text-sm text-gray-200 placeholder-gray-600 resize-none focus:outline-none focus:border-blue-500/30 min-h-[40px] max-h-[120px]"
-            onInput={(e) => {
-              e.target.style.height = "auto";
-              e.target.style.height = e.target.scrollHeight + "px";
-            }}
-          />
-          {loading ? (
-            <Button onClick={handleStop} className="bg-red-600 hover:bg-red-500 rounded-lg px-3 h-10 flex-shrink-0">
-              <Square className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              onClick={() => handleSend()}
-              disabled={!input.trim() && attachedImages.length === 0}
-              className="bg-blue-600 hover:bg-blue-500 rounded-lg px-3 h-10 flex-shrink-0"
+        {/* Input */}
+        <div className="px-4 py-3 border-t border-white/[0.06] bg-[#232425] shrink-0">
+          <div className="flex gap-2 items-end max-w-3xl mx-auto">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="p-2.5 rounded-lg bg-[#2a2b2d] hover:bg-white/10 text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
+              title="Attach image"
             >
-              <Send className="h-4 w-4" />
-            </Button>
-          )}
+              <Image className="h-4 w-4" />
+            </button>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleImagePick} />
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Tell me about a project, goal, or idea..."
+              rows={1}
+              className="flex-1 bg-[#2a2b2d] border border-white/[0.06] rounded-xl px-3.5 py-2.5 text-sm text-gray-200 placeholder-gray-600 resize-none focus:outline-none focus:border-blue-500/30 min-h-[40px] max-h-[120px]"
+              onInput={(e) => {
+                e.target.style.height = "auto";
+                e.target.style.height = e.target.scrollHeight + "px";
+              }}
+            />
+            {loading ? (
+              <Button onClick={handleStop} className="bg-red-600 hover:bg-red-500 rounded-lg px-3 h-10 flex-shrink-0">
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={() => handleSend()}
+                disabled={!input.trim() && attachedImages.length === 0}
+                className="bg-blue-600 hover:bg-blue-500 rounded-lg px-3 h-10 flex-shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          <p className="text-[10px] text-gray-700 mt-1.5 text-center">Enter to send · Shift+Enter for new line</p>
         </div>
-        <p className="text-[10px] text-gray-700 mt-1.5 text-center">Enter to send · Shift+Enter for new line</p>
       </div>
+
+      {/* Sidebar */}
+      <ProjectSidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
     </div>
   );
 }
