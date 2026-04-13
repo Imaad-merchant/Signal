@@ -28,16 +28,20 @@ function ProjectSidebar({ open }) {
     enabled: !!user,
   });
 
-  const [folders, setFolders] = useState([]);
   const [expandedFolders, setExpandedFolders] = useState({});
   const [contextOpen, setContextOpen] = useState(true);
+  const [foldersKey, setFoldersKey] = useState(0);
 
+  // Re-read folders periodically via a key bump
   useEffect(() => {
-    try {
-      const s = localStorage.getItem("pulse_category_folders");
-      setFolders(s ? JSON.parse(s) : []);
-    } catch {}
-  }, [tasks]);
+    const interval = setInterval(() => setFoldersKey(k => k + 1), 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const folders = (() => {
+    try { const s = localStorage.getItem("pulse_category_folders"); return s ? JSON.parse(s) : []; }
+    catch { return []; }
+  })();
 
   const doneTasks = tasks.filter(t => t.status === "done").length;
   const totalTasks = tasks.length;
