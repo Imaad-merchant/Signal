@@ -82,6 +82,7 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAIAssistant, setShowAIAssistant] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
+  const [addEventDate, setAddEventDate] = useState(null);
   const [showAddTask, setShowAddTask] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [showTaskDetail, setShowTaskDetail] = useState(false);
@@ -740,7 +741,7 @@ export default function Dashboard() {
                     onUpdated={refresh}
                     categories={categories}
                     onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
-                    onAddEvent={(dateStr) => { setSelectedDate(new Date(dateStr + "T12:00:00")); setShowAddEvent(true); }}
+                    onAddEvent={(dateStr) => { setAddEventDate(dateStr); setSelectedDate(new Date(dateStr + "T12:00:00")); setShowAddEvent(true); }}
                   />
             )}
            {internalView === "Weekly" && (
@@ -775,7 +776,7 @@ export default function Dashboard() {
       </div>
 
       <AIAssistantDialog open={showAIAssistant} onOpenChange={setShowAIAssistant} onUpdated={refresh} categories={categories} />
-      <AddEventDialog open={showAddEvent} onOpenChange={setShowAddEvent} defaultDate={format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} categories={categories} />
+      <AddEventDialog open={showAddEvent} onOpenChange={(v) => { setShowAddEvent(v); if (!v) setAddEventDate(null); }} defaultDate={addEventDate || format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} categories={categories} />
       <AddTaskDialog2 open={showAddTask} onOpenChange={setShowAddTask} onAdded={refresh} />
       <TaskDetailModal task={selectedTask} open={showTaskDetail} onOpenChange={setShowTaskDetail} />
     </div>
