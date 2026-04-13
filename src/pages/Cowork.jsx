@@ -184,6 +184,7 @@ export default function Cowork() {
   const [attachedImages, setAttachedImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [progress, setProgress] = useState({ current: 0, total: 0, active: false });
   const abortRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -256,10 +257,17 @@ export default function Cowork() {
     if (actions.length > 0) {
       const user = await base44.auth.me();
       const snapshotTasks = await base44.entities.Task.filter({ created_by: user.email });
+      const totalActions = actions.length;
+      let completedActions = 0;
+      setProgress({ current: 0, total: totalActions, active: true });
 
       if (actions.some((a) => a.action === "delete_all")) {
-        await Promise.all(snapshotTasks.map((t) => base44.entities.Task.delete(t.id)));
-        actionCount += snapshotTasks.length;
+        for (const t of snapshotTasks) {
+          await base44.entities.Task.delete(t.id);
+          actionCount++;
+          completedActions++;
+          setProgress({ current: completedActions, total: totalActions, active: true });
+        }
       } else {
         const catActions = actions.filter((a) => a.action === "create_category");
         const folderActions = actions.filter((a) => a.action === "create_folder");
@@ -269,6 +277,8 @@ export default function Cowork() {
           try {
             if (act.label && act.color && act.key) { await base44.entities.Category.create({ label: act.label, color: act.color, key: act.key }); actionCount++; }
           } catch (_) {}
+          completedActions++;
+          setProgress({ current: completedActions, total: totalActions, active: true });
         }
 
         if (folderActions.length > 0) {
@@ -277,20 +287,26 @@ export default function Cowork() {
             const enabledFolders = JSON.parse(localStorage.getItem("pulse_enabled_folders") || "{}");
             for (const act of folderActions) {
               if (act.name) { existing.push({ name: act.name, categoryKeys: act.categoryKeys || [] }); enabledFolders[existing.length - 1] = true; actionCount++; }
+              completedActions++;
+              setProgress({ current: completedActions, total: totalActions, active: true });
             }
             localStorage.setItem("pulse_category_folders", JSON.stringify(existing));
             localStorage.setItem("pulse_enabled_folders", JSON.stringify(enabledFolders));
           } catch (_) {}
         }
 
-        await Promise.all(taskActions.map(async (act) => {
+        for (const act of taskActions) {
           try {
             if (act.action === "create") { const { action, ...data } = act; await base44.entities.Task.create({ status: "todo", priority: "medium", ...data }); actionCount++; }
             else if (act.action === "update" && act.id) { await base44.entities.Task.update(act.id, act.fields || {}); actionCount++; }
             else if (act.action === "delete" && act.id) { await base44.entities.Task.delete(act.id); actionCount++; }
           } catch (_) {}
-        }));
+          completedActions++;
+          setProgress({ current: completedActions, total: totalActions, active: true });
+        }
       }
+
+      setProgress({ current: totalActions, total: totalActions, active: false });
 
       // Refresh sidebar data
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -321,6 +337,24 @@ export default function Cowork() {
             {sidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
           </button>
         </div>
+
+        {/* Progress Bar */}
+        {(progress.active || progress.total > 0) && (
+          <div className="px-4 py-2.5 border-b border-white/[0.06] bg-[#232425] shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] font-medium text-gray-400">
+                {progress.active ? "Working..." : "Done"}
+              </span>
+              <span className="text-[11px] text-gray-500">{progress.current} of {progress.total}</span>
+            </div>
+            <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${progress.active ? "bg-blue-500" : "bg-emerald-500"}`}
+                style={{ width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
