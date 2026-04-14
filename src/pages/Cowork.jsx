@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, ArrowLeft, FolderPlus, CheckCircle2, ExternalLink, ChevronRight, ChevronDown, Globe, FileText, FolderOpen, ListChecks, PanelRightOpen, PanelRightClose, Plus } from "lucide-react";
+import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, ArrowLeft, FolderPlus, CheckCircle2, ExternalLink, ChevronRight, ChevronDown, Globe, FileText, FolderOpen, ListChecks, PanelRightOpen, PanelRightClose, Plus, Mic, MicOff } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -189,14 +189,55 @@ export default function Cowork() {
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [progress, setProgress] = useState({ current: 0, total: 0, active: false });
+  const [isRecording, setIsRecording] = useState(false);
+  const [voiceSupported] = useState(() => typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window));
   const abortRef = useRef(null);
   const bottomRef = useRef(null);
   const fileInputRef = useRef(null);
   const inputRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  const toggleVoice = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognitionRef.current = recognition;
+
+    let finalTranscript = input;
+
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += (finalTranscript ? " " : "") + text;
+        } else {
+          interim = text;
+        }
+      }
+      setInput(finalTranscript + (interim ? " " + interim : ""));
+    };
+
+    recognition.onerror = () => setIsRecording(false);
+    recognition.onend = () => setIsRecording(false);
+
+    recognition.start();
+    setIsRecording(true);
+  };
 
   const hasMessages = messages.length > 0;
 
@@ -489,13 +530,22 @@ export default function Cowork() {
                 className="flex-1 bg-transparent text-sm text-gray-200 placeholder-gray-600 resize-none focus:outline-none min-h-[24px] max-h-[120px] py-0.5"
                 onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
               />
+              {voiceSupported && (
+                <button
+                  onClick={toggleVoice}
+                  className={`p-1 rounded-md shrink-0 mb-0.5 transition-colors ${isRecording ? "bg-red-500/20 text-red-400 animate-pulse" : "hover:bg-white/5 text-gray-500 hover:text-gray-300"}`}
+                  title={isRecording ? "Stop recording" : "Voice input"}
+                >
+                  {isRecording ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+                </button>
+              )}
               {loading ? (
                 <button onClick={handleStop} className="p-1 rounded-md bg-red-600 hover:bg-red-500 shrink-0 mb-0.5">
                   <Square className="h-3.5 w-3.5 text-white" />
                 </button>
               ) : (
                 <button
-                  onClick={() => handleSend()}
+                  onClick={() => { if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); } handleSend(); }}
                   disabled={!input.trim() && attachedImages.length === 0}
                   className="p-1 rounded-md bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:hover:bg-blue-600 shrink-0 mb-0.5 transition-colors"
                 >
