@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 
-import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear } from "date-fns";
+import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear, parseISO, differenceInCalendarDays, isWithinInterval } from "date-fns";
 import { CheckCircle2, Circle, Clock, X } from "lucide-react";
 import TaskContextMenu from "./TaskContextMenu";
 import { base44 } from "@/api/base44Client";
@@ -18,7 +18,55 @@ const DAY_HEADERS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
 function getTasksForDate(tasks, date) {
   const dateStr = format(date, "yyyy-MM-dd");
-  return tasks.filter((t) => t.due_date === dateStr);
+  return tasks.filter((t) => t.due_date === dateStr && (!t.end_date || t.end_date === t.due_date));
+}
+
+// Returns multi-day events that overlap any day in the given week
+function computeMultiDaySpansForWeek(tasks, weekDays) {
+  const weekStart = weekDays[0];
+  const weekEnd = weekDays[6];
+  const spans = [];
+  for (const t of tasks) {
+    if (!t.due_date || !t.end_date || t.end_date === t.due_date) continue;
+    let start, end;
+    try {
+      start = parseISO(t.due_date);
+      end = parseISO(t.end_date);
+    } catch {
+      continue;
+    }
+    if (end < start) continue;
+    if (end < weekStart || start > weekEnd) continue;
+
+    const clippedStart = start < weekStart ? weekStart : start;
+    const clippedEnd = end > weekEnd ? weekEnd : end;
+    const startCol = differenceInCalendarDays(clippedStart, weekStart);
+    const endCol = differenceInCalendarDays(clippedEnd, weekStart);
+    spans.push({
+      task: t,
+      startCol: Math.max(0, startCol),
+      endCol: Math.min(6, endCol),
+      continuesLeft: start < weekStart,
+      continuesRight: end > weekEnd,
+    });
+  }
+  // Sort longer spans first so they get lower lanes
+  spans.sort((a, b) => (b.endCol - b.startCol) - (a.endCol - a.startCol));
+
+  // Assign lanes greedily
+  const lanes = [];
+  for (const span of spans) {
+    let laneIdx = lanes.findIndex(lane =>
+      !lane.some(s => s.startCol <= span.endCol && s.endCol >= span.startCol)
+    );
+    if (laneIdx === -1) {
+      laneIdx = lanes.length;
+      lanes.push([]);
+    }
+    lanes[laneIdx].push(span);
+    span.lane = laneIdx;
+  }
+  return spans;
 }
 
 function useContextMenu(onUpdated, categories) {
@@ -179,54 +227,102 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
             <div key={d} className="py-2 text-center text-[10px] font-medium text-gray-500 tracking-widest">{d}</div>
           ))}
         </div>
-        <div className="grid grid-cols-7 flex-1" style={{ gridTemplateRows: `repeat(${calDays.length / 7}, minmax(100px, 1fr))` }}>
-          {calDays.map((date, idx) => {
-            const dayTasks = getTasksForDate(tasks, date);
-            const isCurrentMonth = isSameMonth(date, currentMonth);
-            const isSelected = isSameDay(date, selectedDate);
-            const todayFlag = isSameDay(date, new Date());
-            const dateStr = format(date, "yyyy-MM-dd");
-            const isDragOver = dragOverDate === dateStr;
+        <div className="flex-1 flex flex-col">
+          {Array.from({ length: calDays.length / 7 }).map((_, weekIdx) => {
+            const weekDays = calDays.slice(weekIdx * 7, weekIdx * 7 + 7);
+            const spans = computeMultiDaySpansForWeek(tasks, weekDays);
+            const laneCount = spans.length === 0 ? 0 : Math.max(...spans.map(s => s.lane)) + 1;
+            const laneOffset = 28; // px reserved at top of cell for day number
+            const laneHeight = 20; // px per multi-day bar
+            const topPadForSingleDay = laneOffset + laneCount * laneHeight + 4;
+
             return (
-              <div
-                key={idx}
-                onClick={() => setSelectedDate(date)}
-                onContextMenu={(e) => {
-                  if (e.target.closest('[draggable="true"]')) return;
-                  e.preventDefault();
-                  setDayContextMenu({ x: e.clientX, y: e.clientY, date });
-                }}
-                onDragOver={(e) => onDragOver(e, dateStr)}
-                onDrop={(e) => onDrop(e, dateStr)}
-                onDragLeave={onDragLeave}
-                className={`p-1.5 border-b border-r border-white/[0.07] cursor-pointer transition-colors ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
-              >
-                <div className="flex justify-end mb-1">
-                  <span
-                    className={`h-6 w-6 flex items-center justify-center rounded-full text-xs font-medium transition-colors ${
-                      todayFlag
-                        ? "bg-blue-500 text-white"
-                        : isSelected
-                        ? "bg-white/10 text-gray-200"
-                        : "text-gray-400"
-                    }`}
-                  >
-                    {format(date, "d")}
-                  </span>
-                </div>
-                <div className="space-y-0.5">
-                  {dayTasks.slice(0, 6).map((task) => (
-                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
-                  ))}
-                  {dayTasks.length > 6 && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setOverflowDay({ date, tasks: dayTasks }); }}
-                      className="text-[10px] text-blue-400 hover:text-blue-300 px-1 transition-colors"
+              <div key={weekIdx} className="grid grid-cols-7 relative flex-1" style={{ minHeight: "100px" }}>
+                {/* Day cells */}
+                {weekDays.map((date, idx) => {
+                  const dayTasks = getTasksForDate(tasks, date);
+                  const isCurrentMonth = isSameMonth(date, currentMonth);
+                  const isSelected = isSameDay(date, selectedDate);
+                  const todayFlag = isSameDay(date, new Date());
+                  const dateStr = format(date, "yyyy-MM-dd");
+                  const isDragOver = dragOverDate === dateStr;
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => setSelectedDate(date)}
+                      onContextMenu={(e) => {
+                        if (e.target.closest('[draggable="true"]')) return;
+                        e.preventDefault();
+                        setDayContextMenu({ x: e.clientX, y: e.clientY, date });
+                      }}
+                      onDragOver={(e) => onDragOver(e, dateStr)}
+                      onDrop={(e) => onDrop(e, dateStr)}
+                      onDragLeave={onDragLeave}
+                      className={`p-1.5 border-b border-r border-white/[0.07] cursor-pointer transition-colors ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
                     >
-                      +{dayTasks.length - 6} more
-                    </button>
-                  )}
-                </div>
+                      <div className="flex justify-end mb-1">
+                        <span
+                          className={`h-6 w-6 flex items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                            todayFlag
+                              ? "bg-blue-500 text-white"
+                              : isSelected
+                              ? "bg-white/10 text-gray-200"
+                              : "text-gray-400"
+                          }`}
+                        >
+                          {format(date, "d")}
+                        </span>
+                      </div>
+                      <div className="space-y-0.5" style={{ marginTop: laneCount > 0 ? `${laneCount * laneHeight + 4}px` : 0 }}>
+                        {dayTasks.slice(0, 6 - laneCount).map((task) => (
+                          <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
+                        ))}
+                        {dayTasks.length > 6 - laneCount && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setOverflowDay({ date, tasks: dayTasks }); }}
+                            className="text-[10px] text-blue-400 hover:text-blue-300 px-1 transition-colors"
+                          >
+                            +{dayTasks.length - (6 - laneCount)} more
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Multi-day event bars overlay */}
+                {spans.map((span) => {
+                  const catMap = Object.fromEntries(categories.map(c => [c.key, c.color]));
+                  const color = catMap[span.task.category] || DEFAULT_CATEGORY_COLORS[span.task.category]?.bg || defaultColor.bg;
+                  const isDone = span.task.status === "done";
+                  return (
+                    <div
+                      key={span.task.id}
+                      draggable
+                      onDragStart={(e) => { e.stopPropagation(); onDragStart(span.task); }}
+                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(e, span.task); }}
+                      onClick={(e) => { e.stopPropagation(); onTaskClick?.(span.task); }}
+                      className="absolute flex items-center text-[10px] font-semibold truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 px-1.5"
+                      style={{
+                        left: `calc(${(span.startCol / 7) * 100}% + 4px)`,
+                        width: `calc(${((span.endCol - span.startCol + 1) / 7) * 100}% - 8px)`,
+                        top: `${laneOffset + span.lane * laneHeight}px`,
+                        height: `${laneHeight - 2}px`,
+                        backgroundColor: isDone ? "rgba(255,255,255,0.05)" : color,
+                        color: isDone ? "#666" : "#fff",
+                        opacity: isDone ? 0.4 : 0.92,
+                        textDecoration: isDone ? "line-through" : "none",
+                        borderTopLeftRadius: span.continuesLeft ? 0 : 4,
+                        borderBottomLeftRadius: span.continuesLeft ? 0 : 4,
+                        borderTopRightRadius: span.continuesRight ? 0 : 4,
+                        borderBottomRightRadius: span.continuesRight ? 0 : 4,
+                        zIndex: 5,
+                      }}
+                    >
+                      {span.continuesLeft ? "← " : ""}{span.task.title}{span.continuesRight ? " →" : ""}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}

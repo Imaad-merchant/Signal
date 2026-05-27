@@ -28,13 +28,17 @@ function EventForm({ form, set, onSubmit, onClose, saving, accentColor, categori
       />
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Date *</label>
+          <label className="text-xs text-gray-400 mb-1 block">Start date *</label>
           <Input type="date" value={form.due_date} onChange={e => set("due_date", e.target.value)} className="rounded-xl h-11 bg-[#2d2e30] border-white/10 text-gray-100" />
         </div>
         <div>
-          <label className="text-xs text-gray-400 mb-1 block">Duration (min)</label>
-          <Input type="number" placeholder="e.g. 60" value={form.estimated_minutes} onChange={e => set("estimated_minutes", e.target.value)} className="rounded-xl h-11 bg-[#2d2e30] border-white/10 text-gray-100 placeholder:text-gray-600" min={1} />
+          <label className="text-xs text-gray-400 mb-1 block">End date</label>
+          <Input type="date" value={form.end_date} min={form.due_date || undefined} onChange={e => set("end_date", e.target.value)} className="rounded-xl h-11 bg-[#2d2e30] border-white/10 text-gray-100" />
         </div>
+      </div>
+      <div>
+        <label className="text-xs text-gray-400 mb-1 block">Duration (min) — for single-day events</label>
+        <Input type="number" placeholder="e.g. 60" value={form.estimated_minutes} onChange={e => set("estimated_minutes", e.target.value)} className="rounded-xl h-11 bg-[#2d2e30] border-white/10 text-gray-100 placeholder:text-gray-600" min={1} />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -76,7 +80,7 @@ function EventForm({ form, set, onSubmit, onClose, saving, accentColor, categori
 
 export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdded, categories: propCategories }) {
   const [categories, setCategories] = useState(propCategories || []);
-  const [form, setForm] = useState({ title: "", description: "", due_date: defaultDate || "", category: "", priority: "medium", estimated_minutes: "" });
+  const [form, setForm] = useState({ title: "", description: "", due_date: defaultDate || "", end_date: "", category: "", priority: "medium", estimated_minutes: "" });
   const [saving, setSaving] = useState(false);
   const isMobile = useIsMobile();
   const accentColor = localStorage.getItem("pulse_secondary") || "#f59e0b";
@@ -110,11 +114,14 @@ export default function AddEventDialog({ open, onOpenChange, defaultDate, onAdde
     e.preventDefault();
     if (!form.title.trim()) return;
     setSaving(true);
-    await base44.entities.Task.create({ ...form, estimated_minutes: form.estimated_minutes ? Number(form.estimated_minutes) : undefined, status: "todo" });
+    const payload = { ...form, estimated_minutes: form.estimated_minutes ? Number(form.estimated_minutes) : undefined, status: "todo" };
+    // Drop end_date if empty or same as start
+    if (!payload.end_date || payload.end_date === payload.due_date) payload.end_date = undefined;
+    await base44.entities.Task.create(payload);
     setSaving(false);
     onAdded?.();
     onOpenChange(false);
-    setForm({ title: "", description: "", due_date: defaultDate || "", category: categories[0]?.key || "", priority: "medium", estimated_minutes: "" });
+    setForm({ title: "", description: "", due_date: defaultDate || "", end_date: "", category: categories[0]?.key || "", priority: "medium", estimated_minutes: "" });
   };
 
   const formProps = { form, set, onSubmit: handleSubmit, onClose: () => onOpenChange(false), saving, accentColor, categories };

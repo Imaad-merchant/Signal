@@ -13,6 +13,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
     priority: task.priority || "medium",
     status: task.status || "todo",
     due_date: task.due_date || "",
+    end_date: task.end_date || "",
     estimated_minutes: task.estimated_minutes || "",
   });
   const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved
@@ -27,6 +28,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
     const payload = {
       ...data,
       estimated_minutes: data.estimated_minutes ? Number(data.estimated_minutes) : undefined,
+      end_date: data.end_date && data.end_date !== data.due_date ? data.end_date : undefined,
     };
     await base44.entities.Task.update(task.id, payload);
     onUpdated();
@@ -125,7 +127,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             </select>
           </div>
           <div>
-            <label className="text-xs text-gray-400 mb-1 block">Due Date</label>
+            <label className="text-xs text-gray-400 mb-1 block">Start Date</label>
             <input
               type="date"
               value={form.due_date}
@@ -133,6 +135,18 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
               className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
             />
           </div>
+        </div>
+
+        {/* End date (for multi-day events) */}
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">End Date (leave blank for single day)</label>
+          <input
+            type="date"
+            value={form.end_date}
+            min={form.due_date || undefined}
+            onChange={e => set("end_date", e.target.value)}
+            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
+          />
         </div>
 
         {/* Estimated minutes */}
