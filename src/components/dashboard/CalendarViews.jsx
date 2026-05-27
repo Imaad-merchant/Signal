@@ -85,7 +85,7 @@ function useContextMenu(onUpdated, categories) {
       task={menu.task}
       position={menu.position}
       onClose={closeMenu}
-      onUpdated={() => { onUpdated(); closeMenu(); }}
+      onUpdated={onUpdated}
       categories={categories}
     />
   ) : null;
