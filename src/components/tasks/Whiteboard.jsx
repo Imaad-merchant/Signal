@@ -202,26 +202,31 @@ function Minimap({ objects, viewport, containerSize, setViewport, contentBounds 
     };
   }, [dragging]);
 
-  const handleWheel = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const delta = -e.deltaY * 0.001;
-    setViewport(v => {
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
-      // Keep center
-      const cx = containerSize.w / 2;
-      const cy = containerSize.h / 2;
-      const worldCx = (cx - v.x) / v.zoom;
-      const worldCy = (cy - v.y) / v.zoom;
-      return { x: cx - worldCx * newZoom, y: cy - worldCy * newZoom, zoom: newZoom };
-    });
-  };
+  // Wheel on minimap zooms the main canvas — non-passive so we can prevent scroll
+  useEffect(() => {
+    const el = mapRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = -e.deltaY * 0.001;
+      setViewport(v => {
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
+        const cx = containerSize.w / 2;
+        const cy = containerSize.h / 2;
+        const worldCx = (cx - v.x) / v.zoom;
+        const worldCy = (cy - v.y) / v.zoom;
+        return { x: cx - worldCx * newZoom, y: cy - worldCy * newZoom, zoom: newZoom };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [containerSize.w, containerSize.h, setViewport]);
 
   return (
     <div
       ref={mapRef}
       onMouseDown={handleMouseDown}
-      onWheel={handleWheel}
       className="absolute bottom-3 right-3 z-30 bg-[#2a2b2d]/95 backdrop-blur border border-white/[0.08] rounded-lg overflow-hidden shadow-2xl cursor-pointer"
       style={{ width: mapWidth, height: mapHeight }}
       title="Click or drag to navigate • Scroll to zoom"
@@ -502,7 +507,10 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         });
         pushHistory(objects);
       } else {
+        // Click on empty space → start panning the canvas
         setSelectedIds([]);
+        setPanning(true);
+        e.currentTarget.setPointerCapture?.(e.pointerId);
       }
       return;
     }
@@ -614,24 +622,31 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     }
   };
 
-  // Wheel: zoom
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const rect = containerRef.current.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    const delta = -e.deltaY * 0.0015;
-    setViewport(v => {
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
-      // Keep point under cursor stable
-      const worldX = (mx - v.x) / v.zoom;
-      const worldY = (my - v.y) / v.zoom;
-      const newX = mx - worldX * newZoom;
-      const newY = my - worldY * newZoom;
-      return { x: newX, y: newY, zoom: newZoom };
-    });
-  };
+  // Wheel: zoom — attached via useEffect with passive:false so preventDefault works
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      // Block ALL wheel events from bubbling to the page
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      // Trackpad pinch-zoom shows as ctrlKey wheel events; standard wheel = zoom too
+      const delta = -e.deltaY * 0.0015;
+      setViewport(v => {
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
+        const worldX = (mx - v.x) / v.zoom;
+        const worldY = (my - v.y) / v.zoom;
+        const newX = mx - worldX * newZoom;
+        const newY = my - worldY * newZoom;
+        return { x: newX, y: newY, zoom: newZoom };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const handleClear = () => {
     if (objects.length === 0) return;
@@ -671,7 +686,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const cursorClass = (() => {
     if (panning) return "cursor-grabbing";
     if (tool === "hand") return "cursor-grab";
-    if (tool === "select") return "cursor-default";
+    if (tool === "select") return "cursor-default"; // becomes grab on empty-space hover via SVG hit area
     if (tool === "eraser") return "cursor-cell";
     if (tool === "text") return "cursor-text";
     return "cursor-crosshair";
@@ -699,7 +714,6 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
         style={{
           backgroundColor: "#1a1b1c",
