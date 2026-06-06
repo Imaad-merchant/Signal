@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Wand2, Undo2 } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Wand2, Undo2, Pencil, Palette, CornerUpLeft } from "lucide-react";
 
 const ICON_OPTIONS = [
   { key: "file", icon: FileText, color: "text-gray-400" },
@@ -14,14 +14,111 @@ const ICON_OPTIONS = [
 
 export const ICON_MAP = Object.fromEntries(ICON_OPTIONS.map(o => [o.key, o]));
 
-function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDelete }) {
+// Right-click context menu (positioned absolutely at cursor)
+function PageContextMenu({ position, page, onClose, onSelect, onRename, onChangeIcon, onMoveToRoot, onDelete }) {
+  const ref = useRef(null);
+  const [iconSubOpen, setIconSubOpen] = useState(false);
+  const [adjustedPos, setAdjustedPos] = useState(position);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const pad = 8;
+    let x = position.x;
+    let y = position.y;
+    if (x + rect.width + pad > window.innerWidth) x = Math.max(pad, window.innerWidth - rect.width - pad);
+    if (y + rect.height + pad > window.innerHeight) y = Math.max(pad, window.innerHeight - rect.height - pad);
+    setAdjustedPos({ x, y });
+  }, [position, iconSubOpen]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  const style = { position: "fixed", top: adjustedPos.y, left: adjustedPos.x, zIndex: 9999 };
+
+  return (
+    <div ref={ref} style={style} className="w-48 bg-[#2d2e30] border border-white/[0.12] rounded-xl shadow-2xl overflow-hidden text-sm">
+      <div className="px-3 py-2 border-b border-white/[0.06]">
+        <p className="text-[11px] text-gray-500 truncate">{page.title || "Untitled"}</p>
+      </div>
+
+      {iconSubOpen ? (
+        <div className="p-2">
+          <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1.5">Pick an icon</p>
+          <div className="grid grid-cols-4 gap-1">
+            {Object.entries(ICON_MAP).map(([key, cfg]) => {
+              const I = cfg.icon;
+              return (
+                <button
+                  key={key}
+                  onClick={() => { onChangeIcon(key); onClose(); }}
+                  className={`p-1.5 rounded-md hover:bg-white/[0.06] ${page.icon === key ? "bg-white/[0.08]" : ""}`}
+                  title={key}
+                >
+                  <I className={`h-4 w-4 ${cfg.color} mx-auto`} />
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => setIconSubOpen(false)}
+            className="w-full mt-1 px-2 py-1 text-[11px] text-gray-500 hover:text-gray-300 text-left"
+          >
+            ← Back
+          </button>
+        </div>
+      ) : (
+        <div className="p-1">
+          <button
+            onClick={() => { onSelect(); onClose(); }}
+            className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md hover:bg-white/[0.05] text-gray-300 text-xs"
+          >
+            <FileText className="h-3.5 w-3.5 text-gray-500" /> Open
+          </button>
+          <button
+            onClick={() => { onRename(); onClose(); }}
+            className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md hover:bg-white/[0.05] text-gray-300 text-xs"
+          >
+            <Pencil className="h-3.5 w-3.5 text-gray-500" /> Rename
+          </button>
+          <button
+            onClick={() => setIconSubOpen(true)}
+            className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md hover:bg-white/[0.05] text-gray-300 text-xs"
+          >
+            <Palette className="h-3.5 w-3.5 text-gray-500" /> Change icon
+          </button>
+          {page.parent_id && (
+            <button
+              onClick={() => { onMoveToRoot(); onClose(); }}
+              className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md hover:bg-white/[0.05] text-gray-300 text-xs"
+            >
+              <CornerUpLeft className="h-3.5 w-3.5 text-gray-500" /> Move to root
+            </button>
+          )}
+          <div className="border-t border-white/[0.06] my-1" />
+          <button
+            onClick={() => { onDelete(); onClose(); }}
+            className="flex items-center gap-2.5 w-full px-3 py-1.5 rounded-md hover:bg-red-500/15 text-rose-400 text-xs"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDelete, onRename, onChangeIcon, onUpdate, onOpenContextMenu, draggingId, setDraggingId, onMove, dragOverId, setDragOverId }) {
   const children = useMemo(() => allPages.filter(p => p.parent_id === page.id), [allPages, page.id]);
   const hasChildren = children.length > 0;
   const [expanded, setExpanded] = useState(() => {
     try { return localStorage.getItem(`pulse_page_expanded_${page.id}`) === "true"; } catch { return false; }
   });
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(page.title || "");
 
   const toggleExpand = (e) => {
     e.stopPropagation();
@@ -30,12 +127,73 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
     try { localStorage.setItem(`pulse_page_expanded_${page.id}`, String(next)); } catch {}
   };
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
+  const startRename = () => {
+    setRenameValue(page.title || "");
+    setRenaming(true);
+  };
+
+  const commitRename = () => {
+    setRenaming(false);
+    const v = renameValue.trim();
+    if (v !== (page.title || "")) onUpdate(page.id, { title: v });
+  };
+
+  // Drag handlers
+  const handleDragStart = (e) => {
+    e.stopPropagation();
+    setDraggingId(page.id);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", page.id);
+  };
+  const handleDragEnd = () => {
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (draggingId && draggingId !== page.id) {
+      // prevent dropping onto a descendant
+      let cur = page;
+      let safe = true;
+      const all = allPages;
+      const visited = new Set();
+      while (cur?.parent_id && !visited.has(cur.id)) {
+        visited.add(cur.id);
+        if (cur.parent_id === draggingId) { safe = false; break; }
+        cur = all.find(p => p.id === cur.parent_id);
+      }
+      if (safe) setDragOverId(page.id);
+    }
+  };
+  const handleDragLeave = (e) => {
+    e.stopPropagation();
+    if (dragOverId === page.id) setDragOverId(null);
+  };
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverId(null);
+    if (draggingId && draggingId !== page.id) {
+      // also prevent descendant drop
+      let cur = page;
+      let safe = true;
+      const visited = new Set();
+      while (cur?.parent_id && !visited.has(cur.id)) {
+        visited.add(cur.id);
+        if (cur.parent_id === draggingId) { safe = false; break; }
+        cur = allPages.find(p => p.id === cur.parent_id);
+      }
+      if (safe) {
+        onMove(draggingId, page.id);
+        if (!expanded) {
+          setExpanded(true);
+          try { localStorage.setItem(`pulse_page_expanded_${page.id}`, "true"); } catch {}
+        }
+      }
+    }
+    setDraggingId(null);
+  };
 
   // If this page has sub-pages, show it as a folder
   let Icon, iconColor;
@@ -49,14 +207,27 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
   }
 
   const isSelected = selectedId === page.id;
+  const isDragOver = dragOverId === page.id;
+  const isDragging = draggingId === page.id;
 
   return (
     <div className="relative">
       <div
-        onClick={() => onSelect(page)}
+        draggable
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={() => !renaming && onSelect(page)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onOpenContextMenu(page, { x: e.clientX, y: e.clientY }, { startRename });
+        }}
         className={`group flex items-center gap-1 pr-1 rounded-md cursor-pointer transition-colors ${
-          isSelected ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
-        }`}
+          isDragOver ? "bg-blue-500/20 ring-1 ring-blue-500/40" : isSelected ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
+        } ${isDragging ? "opacity-40" : ""}`}
         style={{ paddingLeft: `${4 + depth * 12}px` }}
       >
         <button
@@ -66,35 +237,46 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </button>
         <Icon className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} />
-        <span className={`flex-1 text-[13px] truncate py-1 ${hasChildren ? "text-gray-200 font-medium" : "text-gray-300"}`}>
-          {page.title || "Untitled"}
-        </span>
-        {hasChildren && (
+        {renaming ? (
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+              if (e.key === "Escape") { setRenameValue(page.title || ""); setRenaming(false); }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 bg-[#1e1f20] border border-white/[0.12] rounded px-1 py-0.5 text-[12.5px] text-gray-200 focus:outline-none focus:border-blue-500/40"
+          />
+        ) : (
+          <span className={`flex-1 text-[13px] truncate py-1 ${hasChildren ? "text-gray-200 font-medium" : "text-gray-300"}`}>
+            {page.title || "Untitled"}
+          </span>
+        )}
+        {hasChildren && !renaming && (
           <span className="text-[10px] text-gray-600 mr-1">{children.length}</span>
         )}
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
-          <button
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
-            className="p-0.5 rounded hover:bg-white/[0.08] text-gray-500"
-            title="More"
-          >
-            <MoreHorizontal className="h-3 w-3" />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onCreate(page.id); }}
-            className="p-0.5 rounded hover:bg-white/[0.08] text-gray-500"
-            title="Add sub-page"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-        {menuOpen && (
-          <div ref={menuRef} className="absolute right-2 mt-6 z-50 bg-[#2d2e30] border border-white/[0.1] rounded-lg shadow-2xl py-1 min-w-[140px]">
+        {!renaming && (
+          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
             <button
-              onClick={(e) => { e.stopPropagation(); onDelete(page); setMenuOpen(false); }}
-              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-rose-400 hover:bg-white/[0.05]"
+              onClick={(e) => {
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                onOpenContextMenu(page, { x: rect.right, y: rect.bottom }, { startRename });
+              }}
+              className="p-0.5 rounded hover:bg-white/[0.08] text-gray-500"
+              title="More"
             >
-              <Trash2 className="h-3 w-3" /> Delete
+              <MoreHorizontal className="h-3 w-3" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onCreate(page.id); }}
+              className="p-0.5 rounded hover:bg-white/[0.08] text-gray-500"
+              title="Add sub-page"
+            >
+              <Plus className="h-3 w-3" />
             </button>
           </div>
         )}
@@ -111,6 +293,15 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
               onSelect={onSelect}
               onCreate={onCreate}
               onDelete={onDelete}
+              onRename={onRename}
+              onChangeIcon={onChangeIcon}
+              onUpdate={onUpdate}
+              onOpenContextMenu={onOpenContextMenu}
+              draggingId={draggingId}
+              setDraggingId={setDraggingId}
+              onMove={onMove}
+              dragOverId={dragOverId}
+              setDragOverId={setDragOverId}
             />
           ))}
         </div>
@@ -127,6 +318,7 @@ export default function NotionSidebar({
   onSelectPage,
   onCreatePage,
   onDeletePage,
+  onUpdatePage,
   selectedPageId,
   aiAutoOrganize,
   onToggleAutoOrganize,
@@ -146,6 +338,33 @@ export default function NotionSidebar({
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Drag state
+  const [draggingId, setDraggingId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const [rootDragOver, setRootDragOver] = useState(false);
+
+  // Context menu state
+  const [ctxMenu, setCtxMenu] = useState(null); // { page, position, startRename }
+
+  const openContextMenu = (page, position, helpers) => {
+    setCtxMenu({ page, position, startRename: helpers?.startRename });
+  };
+  const closeContextMenu = () => setCtxMenu(null);
+
+  const handleMove = (draggedId, newParentId) => {
+    if (draggedId === newParentId) return;
+    onUpdatePage(draggedId, { parent_id: newParentId });
+  };
+
+  const handleDropRoot = (e) => {
+    e.preventDefault();
+    setRootDragOver(false);
+    if (draggingId) {
+      onUpdatePage(draggingId, { parent_id: null });
+    }
+    setDraggingId(null);
+  };
 
   const filteredSearch = searchQuery
     ? pages.filter(p => (p.title || "").toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 8)
@@ -254,7 +473,20 @@ export default function NotionSidebar({
       </div>
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto px-2 py-1 space-y-3">
+      <div
+        className="flex-1 overflow-y-auto px-2 py-1 space-y-3"
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (draggingId) {
+            const page = pages.find(p => p.id === draggingId);
+            if (page?.parent_id) setRootDragOver(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          if (e.currentTarget === e.target) setRootDragOver(false);
+        }}
+        onDrop={handleDropRoot}
+      >
         {/* Recents */}
         {recents.length > 0 && (
           <div>
@@ -267,7 +499,12 @@ export default function NotionSidebar({
                   <button
                     key={p.id}
                     onClick={() => onSelectPage(p)}
-                    className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[12.5px] transition-colors ${
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openContextMenu(p, { x: e.clientX, y: e.clientY });
+                    }}
+                    className={`flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[12.5px] transition-colors text-left ${
                       selectedPageId === p.id ? "bg-white/[0.06] text-gray-100" : "text-gray-400 hover:bg-white/[0.03] hover:text-gray-200"
                     }`}
                   >
@@ -290,7 +527,7 @@ export default function NotionSidebar({
         )}
 
         {/* Private section */}
-        <div>
+        <div className={rootDragOver ? "rounded-md ring-1 ring-blue-500/30 bg-blue-500/[0.04] -mx-1 px-1" : ""}>
           <div className="flex items-center justify-between px-2 py-1">
             <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Private</p>
             <button
@@ -319,11 +556,32 @@ export default function NotionSidebar({
                 onSelect={onSelectPage}
                 onCreate={onCreatePage}
                 onDelete={onDeletePage}
+                onUpdate={onUpdatePage}
+                onOpenContextMenu={openContextMenu}
+                draggingId={draggingId}
+                setDraggingId={setDraggingId}
+                onMove={handleMove}
+                dragOverId={dragOverId}
+                setDragOverId={setDragOverId}
               />
             ))
           )}
         </div>
       </div>
+
+      {/* Context Menu */}
+      {ctxMenu && (
+        <PageContextMenu
+          page={ctxMenu.page}
+          position={ctxMenu.position}
+          onClose={closeContextMenu}
+          onSelect={() => onSelectPage(ctxMenu.page)}
+          onRename={() => ctxMenu.startRename?.()}
+          onChangeIcon={(iconKey) => onUpdatePage(ctxMenu.page.id, { icon: iconKey })}
+          onMoveToRoot={() => onUpdatePage(ctxMenu.page.id, { parent_id: null })}
+          onDelete={() => onDeletePage(ctxMenu.page)}
+        />
+      )}
     </div>
   );
 }

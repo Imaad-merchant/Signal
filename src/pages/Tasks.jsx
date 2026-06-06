@@ -168,6 +168,15 @@ export default function Tasks() {
     await base44.entities.Page.update(selectedPageId, patch);
   };
 
+  // Generic version for sidebar actions (rename, move, change icon)
+  const handleUpdatePageById = async (pageId, patch) => {
+    if (!pageId) return;
+    queryClient.setQueryData(["pages", user?.email], (old = []) =>
+      old.map(p => p.id === pageId ? { ...p, ...patch, updated_date: new Date().toISOString() } : p)
+    );
+    try { await base44.entities.Page.update(pageId, patch); } catch (e) { console.error(e); }
+  };
+
   const handleDeletePage = async (page) => {
     if (!confirm(`Delete "${page.title || 'Untitled'}"?`)) return;
     // Also delete sub-pages
@@ -530,6 +539,7 @@ export default function Tasks() {
           onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); }}
           onCreatePage={handleCreatePage}
           onDeletePage={handleDeletePage}
+          onUpdatePage={handleUpdatePageById}
           aiAutoOrganize={aiAutoOrganize}
           onToggleAutoOrganize={setAiAutoOrganize}
           onOrganizeNow={runAIOrganize}
