@@ -194,6 +194,29 @@ export default function Tasks() {
     try { await base44.entities.Page.update(pageId, patch); } catch (e) { console.error(e); }
   };
 
+  // AI edit document (reorganize / summarize / expand / custom)
+  const handleAIEditDoc = async (mode, currentHtml, instruction) => {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = currentHtml || "";
+    const plain = (tmp.textContent || "").trim();
+    if (!plain) {
+      alert("Add some text first.");
+      return null;
+    }
+    try {
+      const res = await base44.functions.invoke("aiEditDoc", {
+        text: currentHtml || plain,
+        mode,
+        instruction,
+      });
+      return res.data?.html || null;
+    } catch (err) {
+      console.error("aiEditDoc failed:", err);
+      alert("AI edit failed. Please try again.");
+      return null;
+    }
+  };
+
   // AI Visualize — turn the current document's notes into a whiteboard page
   const [aiVisualizing, setAiVisualizing] = useState(false);
   const handleAIVisualize = async (notesText) => {
@@ -682,7 +705,7 @@ export default function Tasks() {
               return (
                 <>
                   {header}
-                  <DocumentView page={selectedPage} onUpdate={handleUpdatePage} onAIVisualize={handleAIVisualize} />
+                  <DocumentView page={selectedPage} onUpdate={handleUpdatePage} onAIVisualize={handleAIVisualize} onAIEdit={handleAIEditDoc} />
                 </>
               );
             }

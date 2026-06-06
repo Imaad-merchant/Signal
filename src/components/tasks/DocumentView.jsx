@@ -32,7 +32,7 @@ function legacyToHTML(s) {
   }).join("");
 }
 
-export default function DocumentView({ page, onUpdate, onAIVisualize }) {
+export default function DocumentView({ page, onUpdate, onAIVisualize, onAIEdit }) {
   const [html, setHtml] = useState(() => legacyToHTML(page.content || ""));
   const saveTimer = useRef(null);
   const loadedRef = useRef(false);
@@ -56,12 +56,22 @@ export default function DocumentView({ page, onUpdate, onAIVisualize }) {
     }, 600);
   }, [onUpdate]);
 
+  const handleAIEdit = useCallback(async (mode, currentHtml, instruction) => {
+    const newHtml = await onAIEdit?.(mode, currentHtml, instruction);
+    if (newHtml) {
+      setHtml(newHtml);
+      lastSavedRef.current = newHtml;
+      onUpdate({ content: newHtml });
+    }
+  }, [onAIEdit, onUpdate]);
+
   return (
     <RichTextEditor
       value={html}
       onChange={handleChange}
       placeholder="Start writing..."
       onAIVisualize={onAIVisualize}
+      onAIEdit={onAIEdit ? handleAIEdit : undefined}
     />
   );
 }

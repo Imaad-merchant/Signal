@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Minus, Grid3x3, Eye, EyeOff, Palette as PaletteIcon, ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered } from "lucide-react";
+import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Minus, Grid3x3, Eye, EyeOff, Palette as PaletteIcon, ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Sparkles } from "lucide-react";
+import AIPromptDialog from "./AIPromptDialog";
+import { base44 } from "@/api/base44Client";
 
 // ─── Constants ─────────────────────────────────────────────────────
 const COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
@@ -51,7 +53,7 @@ function MoreShapesDropdown({ moreShapes, tool, setTool }) {
 }
 
 // ─── Toolbar (Google Docs–inspired) ────────────────────────────────
-function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, setFontSize, showGrid, setShowGrid }) {
+function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, setFontSize, showGrid, setShowGrid, onAIOpen }) {
   const tools = [
     { key: "select", icon: MousePointer2, label: "Select (V)" },
     { key: "hand", icon: Hand, label: "Pan (H)" },
@@ -236,6 +238,20 @@ function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, 
         title="Clear board"
       >
         <Trash2 className="h-3.5 w-3.5" />
+      </button>
+
+      <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
+
+      {/* AI button */}
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onAIOpen(); }}
+        className="flex items-center gap-1 px-2 py-1 rounded-md bg-gradient-to-r from-purple-500/15 to-pink-500/15 border border-purple-500/25 text-purple-300 text-[11px] font-medium hover:from-purple-500/25 hover:to-pink-500/25 transition-all"
+        title="Ask AI to draw or reorganize"
+      >
+        <Sparkles className="h-3 w-3" />
+        AI
       </button>
     </div>
   );
@@ -1062,6 +1078,44 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const loadedRef = useRef(false);
   const editingTextRef = useRef(null);
 
+  // ─── AI prompt state ─────────────────────────────────────────────
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const runAI = useCallback(async (prompt, mode = "create") => {
+    setAiLoading(true);
+    try {
+      const res = await base44.functions.invoke("aiCanvas", {
+        prompt,
+        existingObjects: objects,
+        mode,
+      });
+      const actions = res.data?.actions || [];
+      if (actions.length === 0) { setAiLoading(false); setAiOpen(false); return; }
+      setObjects(prev => {
+        let next = [...prev];
+        for (const a of actions) {
+          if (a.action === "add" && a.object) {
+            next.push(a.object);
+          } else if (a.action === "move" && a.id) {
+            next = next.map(o => o.id === a.id ? { ...o, ...(a.x !== undefined ? { x: a.x } : {}), ...(a.y !== undefined ? { y: a.y } : {}), ...(a.w !== undefined ? { w: a.w } : {}), ...(a.h !== undefined ? { h: a.h } : {}) } : o);
+          }
+        }
+        return next;
+      });
+      // push history AFTER (we already have prev snapshot in stack? push manually)
+      undoStack.current.push(JSON.parse(JSON.stringify(objects)));
+      if (undoStack.current.length > 50) undoStack.current.shift();
+      redoStack.current = [];
+      setAiOpen(false);
+    } catch (e) {
+      console.error("aiCanvas failed", e);
+      alert("AI failed. Try again.");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [objects]);
+
   // ─── Context menu + clipboard ────────────────────────────────────
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, target: object | null }
   const clipboardRef = useRef([]);
@@ -1720,6 +1774,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           canRedo={redoStack.current.length > 0}
           showGrid={showGrid}
           setShowGrid={setShowGrid}
+          onAIOpen={() => setAiOpen(true)}
         />
 
         {/* Whiteboard right-click context menu */}
@@ -2094,6 +2149,25 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           viewport={viewport}
           setViewport={setViewport}
           containerSize={containerSize}
+        />
+
+        {/* AI Prompt Dialog */}
+        <AIPromptDialog
+          open={aiOpen}
+          onClose={() => setAiOpen(false)}
+          loading={aiLoading}
+          title="Ask AI on this canvas"
+          subtitle="Generate diagrams, charts, or reorganize what's here"
+          placeholder="e.g. Build a flowchart for user signup, or 'Make a kanban with To Do / Doing / Done'"
+          presets={[
+            { label: "↻ Reorganize", prompt: "Reorganize the existing canvas into a clean, aligned layout. Group related items and add connector arrows.", mode: "reorganize" },
+            { label: "🧠 Mind map", prompt: "Build a mind map about the central topic. Add a central node and 4-6 branches." },
+            { label: "📊 Flow chart", prompt: "Create a flowchart for a typical process. Use rectangles for steps, diamonds for decisions, arrows for flow." },
+            { label: "📅 Timeline", prompt: "Create a horizontal timeline with 5 milestones." },
+            { label: "🏗 Building blocks", prompt: "Create a stacked building-blocks diagram with 4 layers." },
+            { label: "📋 Kanban", prompt: "Create a kanban board with To Do, In Progress, Done columns." },
+          ]}
+          onSubmit={(p) => runAI(p, p.toLowerCase().includes("reorganize") ? "reorganize" : "create")}
         />
 
         {/* Empty hint */}

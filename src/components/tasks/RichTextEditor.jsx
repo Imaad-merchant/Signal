@@ -68,7 +68,7 @@ function RbBtn({ onClick, active, title, children, disabled }) {
   );
 }
 
-export default function RichTextEditor({ value, onChange, placeholder = "Start typing...", onAIVisualize }) {
+export default function RichTextEditor({ value, onChange, placeholder = "Start typing...", onAIVisualize, onAIEdit }) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
@@ -113,6 +113,16 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [ctxMenu]);
+
+  // AI menu state
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const aiMenuRef = useRef(null);
+  useEffect(() => {
+    if (!aiMenuOpen) return;
+    const h = (e) => { if (aiMenuRef.current && !aiMenuRef.current.contains(e.target)) setAiMenuOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [aiMenuOpen]);
 
   if (!editor) {
     return <div className="flex-1 flex items-center justify-center text-gray-600 text-xs">Loading editor...</div>;
@@ -248,19 +258,46 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           <RemoveFormatting className="h-3.5 w-3.5" />
         </RbBtn>
 
-        {onAIVisualize && (
+        {(onAIVisualize || onAIEdit) && (
           <>
             <div className="flex-1" />
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onAIVisualize(editor.getText())}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 text-[11px] text-purple-200 hover:from-purple-500/30 hover:to-pink-500/30 transition-all"
-              title="Turn notes into a visual whiteboard with AI"
-            >
-              <Sparkles className="h-3 w-3" />
-              AI Visualize
-            </button>
+            <div className="relative" ref={aiMenuRef}>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setAiMenuOpen(o => !o)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 text-[11px] text-purple-200 hover:from-purple-500/30 hover:to-pink-500/30 transition-all"
+                title="AI options"
+              >
+                <Sparkles className="h-3 w-3" />
+                AI
+                <ChevronDown className="h-2.5 w-2.5" />
+              </button>
+              {aiMenuOpen && (
+                <div className="absolute top-full right-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[220px] z-50">
+                  {onAIEdit && (
+                    <>
+                      <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-gray-600">Edit document</p>
+                      <AIMenuItem icon="↻" label="Reorganize & clean up" desc="Sections, headings, lists" onClick={() => { onAIEdit("reorganize", editor.getHTML()); setAiMenuOpen(false); }} />
+                      <AIMenuItem icon="∑" label="Summarize" desc="Tighter, ~30% length" onClick={() => { onAIEdit("summarize", editor.getHTML()); setAiMenuOpen(false); }} />
+                      <AIMenuItem icon="⤴" label="Expand into paragraphs" desc="Flesh out bullets" onClick={() => { onAIEdit("expand", editor.getHTML()); setAiMenuOpen(false); }} />
+                      <AIMenuItem icon="✎" label="Custom instruction..." desc="Tell AI what to do" onClick={() => {
+                        const instruction = window.prompt("What should AI do with this document?", "Rewrite in a friendlier tone");
+                        if (instruction && instruction.trim()) onAIEdit("custom", editor.getHTML(), instruction);
+                        setAiMenuOpen(false);
+                      }} />
+                    </>
+                  )}
+                  {onAIVisualize && (
+                    <>
+                      {onAIEdit && <div className="border-t border-white/[0.06] my-1" />}
+                      <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-gray-600">Convert</p>
+                      <AIMenuItem icon="📊" label="Visualize as diagram" desc="New canvas page from notes" onClick={() => { onAIVisualize(editor.getText()); setAiMenuOpen(false); }} />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -370,6 +407,22 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
         </div>
       )}
     </div>
+  );
+}
+
+function AIMenuItem({ icon, label, desc, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-start gap-2.5 w-full px-3 py-2 text-left hover:bg-white/[0.05] transition-colors"
+    >
+      <span className="text-[14px] mt-0.5 w-4 text-purple-300">{icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-medium text-gray-200">{label}</p>
+        {desc && <p className="text-[10px] text-gray-500">{desc}</p>}
+      </div>
+    </button>
   );
 }
 
