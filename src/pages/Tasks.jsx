@@ -9,7 +9,8 @@ import { AnimatePresence } from "framer-motion";
 import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import NotionSidebar from "../components/tasks/NotionSidebar";
-import NotionPageView from "../components/tasks/NotionPageView";
+import Whiteboard from "../components/tasks/Whiteboard";
+import { ICON_MAP } from "../components/tasks/NotionSidebar";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { format, isSameDay, isToday, parseISO } from "date-fns";
@@ -578,17 +579,32 @@ export default function Tasks() {
           )}
         </div>
 
-        {/* Body — Home tasks view OR Notion page */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Body — Home tasks view OR Whiteboard for pages */}
+        <div className="flex-1 overflow-hidden flex flex-col">
           {view === "page" && selectedPage ? (
-            <NotionPageView
+            <Whiteboard
               key={selectedPage.id}
               page={selectedPage}
               onUpdate={handleUpdatePage}
-              onDelete={() => handleDeletePage(selectedPage)}
+              headerSlot={
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.05] bg-[#1c1d1e] shrink-0">
+                  {(() => {
+                    const iconCfg = ICON_MAP[selectedPage.icon] || ICON_MAP.file;
+                    const Icon = iconCfg.icon;
+                    return <Icon className={`h-4 w-4 ${iconCfg.color}`} />;
+                  })()}
+                  <input
+                    value={selectedPage.title || ""}
+                    onChange={(e) => handleUpdatePage({ title: e.target.value })}
+                    placeholder="Untitled"
+                    className="flex-1 bg-transparent text-sm font-medium text-gray-100 placeholder-gray-600 focus:outline-none"
+                  />
+                  <span className="text-[10px] text-gray-600 uppercase tracking-wider">Whiteboard</span>
+                </div>
+              }
             />
           ) : (
-            homeContent
+            <div className="flex-1 overflow-y-auto">{homeContent}</div>
           )}
         </div>
       </div>
