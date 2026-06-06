@@ -1120,7 +1120,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     });
     setObjects(prev => [...prev, ...newObjs]);
     setSelectedIds(newObjs.map(o => o.id));
-  }, [objects, pushHistory]);
+  }, [objects]);
 
   const duplicateSelection = useCallback(() => {
     copySelection();
@@ -1132,7 +1132,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     pushHistory(objects);
     setObjects(prev => prev.filter(o => !effectiveSelectionIds.includes(o.id)));
     setSelectedIds([]);
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   // Layering
   const bringToFront = useCallback(() => {
@@ -1143,7 +1143,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const rest = prev.filter(o => !effectiveSelectionIds.includes(o.id));
       return [...rest, ...sel];
     });
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   const sendToBack = useCallback(() => {
     if (effectiveSelectionIds.length === 0) return;
@@ -1153,7 +1153,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const rest = prev.filter(o => !effectiveSelectionIds.includes(o.id));
       return [...sel, ...rest];
     });
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   const bringForward = useCallback(() => {
     if (effectiveSelectionIds.length === 0) return;
@@ -1167,7 +1167,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       }
       return arr;
     });
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   const sendBackward = useCallback(() => {
     if (effectiveSelectionIds.length === 0) return;
@@ -1181,13 +1181,13 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       }
       return arr;
     });
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   // Lock / unlock
   const toggleLock = useCallback(() => {
     pushHistory(objects);
     setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, locked: !o.locked } : o));
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   // Group / Ungroup
   const groupSelection = useCallback(() => {
@@ -1195,12 +1195,12 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     pushHistory(objects);
     const groupId = uid();
     setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, groupId } : o));
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   const ungroupSelection = useCallback(() => {
     pushHistory(objects);
     setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, groupId: undefined } : o));
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   // Alignment
   const alignSelection = useCallback((axis) => {
@@ -1220,7 +1220,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       else if (axis === "middle") dy = (Math.min(...bounds.map(x => x.b.y)) + Math.max(...bounds.map(x => x.b.y + x.b.h))) / 2 - (b.y + b.h / 2);
       return shiftObj(o, dx, dy);
     }));
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   const distributeSelection = useCallback((axis) => {
     if (effectiveSelectionIds.length < 3) return;
@@ -1242,14 +1242,14 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const dy = axis === "v" ? (targets[o.id] - b.y) : 0;
       return shiftObj(o, dx, dy);
     }));
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   // Apply per-object property to selection (fill, opacity, color, strokeWidth)
   const setSelectionProp = useCallback((patch) => {
     if (effectiveSelectionIds.length === 0) return;
     pushHistory(objects);
     setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, ...patch } : o));
-  }, [effectiveSelectionIds, objects, pushHistory]);
+  }, [effectiveSelectionIds, objects]);
 
   // Add quick shape at point
   const addQuickShape = useCallback((shapeType, atX, atY) => {
@@ -1261,7 +1261,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       : { id: uid(), type: shapeType, x: atX, y: atY, w: 120, h: 80, color, strokeWidth };
     setObjects(prev => [...prev, newObj]);
     setSelectedIds([newObj.id]);
-  }, [color, fontSize, strokeWidth, objects, pushHistory]);
+  }, [color, fontSize, strokeWidth, objects]);
 
   // Export functions
   const exportSVG = useCallback(() => {
@@ -1413,7 +1413,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleUndo, handleRedo, selectedIds, objects, pushHistory, editingTextId]);
+  }, [handleUndo, handleRedo, selectedIds, objects, editingTextId]);
 
   // ─── Pointer handlers ────────────────────────────────────────────
   const handlePointerDown = (e) => {
