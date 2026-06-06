@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,9 @@ import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import NotionSidebar from "../components/tasks/NotionSidebar";
 import Whiteboard from "../components/tasks/Whiteboard";
+import NotionPageView from "../components/tasks/NotionPageView";
+import DocumentView from "../components/tasks/DocumentView";
+import TemplatePicker from "../components/tasks/TemplatePicker";
 import { ICON_MAP } from "../components/tasks/NotionSidebar";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -147,15 +150,28 @@ export default function Tasks() {
 
   const refreshPages = () => queryClient.invalidateQueries({ queryKey: ["pages"] });
 
-  const handleCreatePage = async (parentId = null, section = "private") => {
-    const newPage = await base44.entities.Page.create({
-      title: "",
-      icon: "file",
-      parent_id: parentId || null,
-      section,
+  // Template picker state
+  const [templatePicker, setTemplatePicker] = useState(null); // { parentId, section } | null
+
+  const handleCreatePage = (parentId = null, section = "private") => {
+    // Open template picker instead of creating immediately
+    setTemplatePicker({ parentId, section });
+  };
+
+  const handleCreateFromTemplate = async (template) => {
+    const ctx = templatePicker || { parentId: null, section: "private" };
+    setTemplatePicker(null);
+    const payload = {
+      title: template.title || "",
+      icon: template.icon || "file",
+      parent_id: ctx.parentId || null,
+      section: ctx.section || "private",
       status: "not_started",
-      content: "",
-    });
+      type: template.type || "whiteboard",
+      content: template.content || "",
+      whiteboard: template.whiteboard || "",
+    };
+    const newPage = await base44.entities.Page.create(payload);
     refreshPages();
     setSelectedPageId(newPage.id);
     setView("page");
@@ -561,6 +577,14 @@ export default function Tasks() {
           >
             {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
           </button>
+          <button
+            onClick={() => navigate(createPageUrl("Dashboard"))}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-gray-400 hover:text-gray-100 text-[11.5px] transition-colors"
+            title="Back to calendar"
+          >
+            <CalendarIcon className="h-3 w-3" />
+            Calendar
+          </button>
           {view === "page" && selectedPage && (
             <div className="flex items-center gap-1.5 text-[12.5px] text-gray-500">
               <span className="text-gray-700">/</span>
@@ -579,34 +603,58 @@ export default function Tasks() {
           )}
         </div>
 
-        {/* Body — Home tasks view OR Whiteboard for pages */}
+        {/* Body — Home tasks view OR page editor based on type */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {view === "page" && selectedPage ? (
-            <Whiteboard
-              key={selectedPage.id}
-              page={selectedPage}
-              onUpdate={handleUpdatePage}
-              headerSlot={
-                <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.05] bg-[#1c1d1e] shrink-0">
-                  {(() => {
-                    const iconCfg = ICON_MAP[selectedPage.icon] || ICON_MAP.file;
-                    const Icon = iconCfg.icon;
-                    return <Icon className={`h-4 w-4 ${iconCfg.color}`} />;
-                  })()}
-                  <input
-                    value={selectedPage.title || ""}
-                    onChange={(e) => handleUpdatePage({ title: e.target.value })}
-                    placeholder="Untitled"
-                    className="flex-1 bg-transparent text-sm font-medium text-gray-100 placeholder-gray-600 focus:outline-none"
-                  />
-                  <span className="text-[10px] text-gray-600 uppercase tracking-wider">Whiteboard</span>
-                </div>
-              }
-            />
-          ) : (
+          {view === "page" && selectedPage ? (() => {
+            const pageType = selectedPage.type || "whiteboard";
+            const iconCfg = ICON_MAP[selectedPage.icon] || ICON_MAP.file;
+            const PageIcon = iconCfg.icon;
+            const header = (
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.05] bg-[#1c1d1e] shrink-0">
+                <PageIcon className={`h-4 w-4 ${iconCfg.color}`} />
+                <input
+                  value={selectedPage.title || ""}
+                  onChange={(e) => handleUpdatePage({ title: e.target.value })}
+                  placeholder="Untitled"
+                  className="flex-1 bg-transparent text-sm font-medium text-gray-100 placeholder-gray-600 focus:outline-none"
+                />
+                <span className="text-[10px] text-gray-600 uppercase tracking-wider">
+                  {pageType === "notion" ? "Page" : pageType === "document" ? "Document" : "Whiteboard"}
+                </span>
+              </div>
+            );
+
+            if (pageType === "notion") {
+              return (
+                <>
+                  {header}
+                  <div className="flex-1 overflow-y-auto">
+                    <NotionPageView page={selectedPage} onUpdate={handleUpdatePage} onDelete={() => handleDeletePage(selectedPage)} />
+                  </div>
+                </>
+              );
+            }
+            if (pageType === "document") {
+              return (
+                <>
+                  {header}
+                  <DocumentView page={selectedPage} onUpdate={handleUpdatePage} />
+                </>
+              );
+            }
+            // Default: whiteboard
+            return <Whiteboard key={selectedPage.id} page={selectedPage} onUpdate={handleUpdatePage} headerSlot={header} />;
+          })() : (
             <div className="flex-1 overflow-y-auto">{homeContent}</div>
           )}
         </div>
+
+        {/* Template Picker Modal */}
+        <TemplatePicker
+          open={!!templatePicker}
+          onClose={() => setTemplatePicker(null)}
+          onCreate={handleCreateFromTemplate}
+        />
       </div>
     </div>
   );
