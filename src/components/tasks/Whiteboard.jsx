@@ -600,11 +600,8 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
     if (tool === "text") {
       pushHistory(objects);
-      const newObj = { id: uid(), type: "text", x, y, w: 200, h: fontSize * 1.5, text: "", color, fontSize };
-      setObjects(prev => [...prev, newObj]);
-      setEditingTextId(newObj.id);
-      setSelectedIds([newObj.id]);
-      setTool("select");
+      // Start a drag-create for the text box (like rect)
+      setDrawingObject({ id: uid(), type: "text", x, y, w: 0, h: 0, text: "", color, fontSize });
       return;
     }
 
@@ -665,7 +662,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const { x, y } = screenToWorld(e.clientX, e.clientY);
       if (drawingObject.type === "path") {
         setDrawingObject(o => ({ ...o, points: [...o.points, { x, y }] }));
-      } else if (drawingObject.type === "rect" || drawingObject.type === "ellipse") {
+      } else if (drawingObject.type === "rect" || drawingObject.type === "ellipse" || drawingObject.type === "text") {
         setDrawingObject(o => ({ ...o, w: x - o.x, h: y - o.y }));
       } else if (drawingObject.type === "arrow" || drawingObject.type === "line") {
         setDrawingObject(o => ({ ...o, x2: x, y2: y }));
@@ -685,11 +682,29 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     if (panning) { setPanning(false); return; }
     if (draggingSelection) { setDraggingSelection(null); return; }
     if (drawingObject) {
-      const obj = drawingObject;
+      let obj = drawingObject;
       setDrawingObject(null);
-      // Don't add zero-size objects
+
       if (obj.type === "rect" || obj.type === "ellipse") {
         if (Math.abs(obj.w) < 2 && Math.abs(obj.h) < 2) return;
+        // Normalize negative dimensions
+        if (obj.w < 0) obj = { ...obj, x: obj.x + obj.w, w: -obj.w };
+        if (obj.h < 0) obj = { ...obj, y: obj.y + obj.h, h: -obj.h };
+      }
+      if (obj.type === "text") {
+        // If user only clicked (no drag), use default size
+        if (Math.abs(obj.w) < 10 || Math.abs(obj.h) < 10) {
+          obj = { ...obj, w: 220, h: (obj.fontSize || 18) * 1.6 };
+        } else {
+          // Normalize negative dimensions
+          if (obj.w < 0) obj = { ...obj, x: obj.x + obj.w, w: -obj.w };
+          if (obj.h < 0) obj = { ...obj, y: obj.y + obj.h, h: -obj.h };
+        }
+        setObjects(prev => [...prev, obj]);
+        setEditingTextId(obj.id);
+        setSelectedIds([obj.id]);
+        setTool("select");
+        return;
       }
       if (obj.type === "line" || obj.type === "arrow") {
         if (Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1) < 2) return;
@@ -954,18 +969,51 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
               }
               if (o.type === "text") {
                 if (editingTextId === o.id) return null;
+                // Drag preview (in-progress text box)
+                if (drawingObject && drawingObject.id === o.id) {
+                  const x = Math.min(o.x, o.x + o.w);
+                  const y = Math.min(o.y, o.y + o.h);
+                  const w = Math.abs(o.w);
+                  const h = Math.abs(o.h);
+                  return (
+                    <rect
+                      key={o.id}
+                      x={x} y={y} width={w} height={h}
+                      fill="rgba(59,130,246,0.04)"
+                      stroke="rgba(59,130,246,0.7)"
+                      strokeWidth={1.5}
+                      strokeDasharray="6 4"
+                      rx={3}
+                    />
+                  );
+                }
+                // Use foreignObject to allow text wrapping within the box width
+                const tw = Math.max(o.w || 200, 50);
+                const th = Math.max(o.h || (o.fontSize || 18) * 1.6, 20);
                 return (
-                  <text
+                  <foreignObject
                     key={o.id}
                     x={o.x}
-                    y={o.y + (o.fontSize || 18)}
-                    fill={o.color}
-                    fontSize={o.fontSize || 18}
-                    fontFamily="Inter, system-ui, sans-serif"
-                    style={selStyle}
+                    y={o.y}
+                    width={tw}
+                    height={th}
+                    style={{ ...selStyle, overflow: "visible" }}
                   >
-                    {o.text || ""}
-                  </text>
+                    <div
+                      xmlns="http://www.w3.org/1999/xhtml"
+                      style={{
+                        color: o.color,
+                        fontSize: `${o.fontSize || 18}px`,
+                        fontFamily: "Inter, system-ui, sans-serif",
+                        lineHeight: 1.3,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        padding: "2px",
+                      }}
+                    >
+                      {o.text || ""}
+                    </div>
+                  </foreignObject>
                 );
               }
               return null;
@@ -988,15 +1036,16 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 if (e.key === "Escape") { e.target.blur(); }
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.target.blur(); }
               }}
-              className="absolute bg-[#2a2b2d]/80 border border-blue-400/40 rounded px-1 py-0.5 outline-none resize text-gray-100 overflow-hidden"
+              className="absolute bg-[#1e1f20]/95 border-2 border-blue-400/60 rounded px-1.5 py-1 outline-none text-gray-100 resize-none"
               style={{
                 left: sx,
                 top: sy,
+                width: Math.max(o.w * viewport.zoom, 80),
+                height: Math.max(o.h * viewport.zoom, (o.fontSize || 18) * viewport.zoom * 1.4),
                 color: o.color,
                 fontSize: (o.fontSize || 18) * viewport.zoom,
                 fontFamily: "Inter, system-ui, sans-serif",
-                minWidth: 100 * viewport.zoom,
-                lineHeight: 1.2,
+                lineHeight: 1.3,
               }}
               placeholder="Type something..."
             />
