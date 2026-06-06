@@ -10,6 +10,46 @@ const MAX_ZOOM = 5;
 // Generate a stable id
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+// More shapes dropdown
+function MoreShapesDropdown({ moreShapes, tool, setTool }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const active = moreShapes.some(s => s.key === tool);
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        className={`p-1.5 rounded-md transition-all ${active ? "bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
+        title="More shapes"
+      >
+        <span className="text-[10px] font-bold">◇</span>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[140px] z-50">
+          {moreShapes.map(s => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setTool(s.key); setOpen(false); }}
+              className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.05] ${tool === s.key ? "text-blue-300" : "text-gray-300"}`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Toolbar (Google Docs–inspired) ────────────────────────────────
 function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, setFontSize, showGrid, setShowGrid }) {
   const tools = [
@@ -24,6 +64,12 @@ function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, 
     { key: "arrow", icon: ArrowRight, label: "Arrow (A)" },
     { key: "line", icon: Minus, label: "Line (L)" },
     { key: "eraser", icon: Eraser, label: "Eraser (E)" },
+  ];
+  const moreShapes = [
+    { key: "triangle", label: "Triangle" },
+    { key: "diamond", label: "Diamond" },
+    { key: "roundedRect", label: "Rounded rect" },
+    { key: "star", label: "Star" },
   ];
 
   const [colorOpen, setColorOpen] = useState(false);
@@ -88,6 +134,9 @@ function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, 
 
       {/* Drawing tools */}
       {drawTools.map(t => <ToolBtn key={t.key} t={t} />)}
+
+      {/* More shapes dropdown */}
+      <MoreShapesDropdown moreShapes={moreShapes} tool={tool} setTool={setTool} />
 
       <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
 
@@ -188,6 +237,294 @@ function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, 
       >
         <Trash2 className="h-3.5 w-3.5" />
       </button>
+    </div>
+  );
+}
+
+// ─── Selection Action Bar ────────────────────────────────────────
+function SelectionBar({ count, selected, locked, fill, opacity, onSetFill, onSetOpacity, onAlign, onDistribute, onBringToFront, onSendToBack, onBringForward, onSendBackward, onGroup, onUngroup, onToggleLock, onDuplicate, onDelete, onExportPNG, onExportSVG }) {
+  const [fillOpen, setFillOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const fillRef = useRef(null);
+  const moreRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (fillRef.current && !fillRef.current.contains(e.target)) setFillOpen(false);
+      if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const Btn = ({ onClick, title, children, active }) => (
+    <button
+      type="button"
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      title={title}
+      className={`p-1.5 rounded-md transition-colors ${active ? "bg-blue-500/25 text-blue-200" : "text-gray-300 hover:bg-white/[0.07] hover:text-gray-100"}`}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="absolute top-[60px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl"
+    >
+      <span className="text-[10px] text-gray-500 px-2">{count} selected</span>
+      <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* Fill */}
+      <div className="relative" ref={fillRef}>
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setFillOpen(o => !o); }}
+          className="flex items-center gap-1 p-1.5 rounded-md hover:bg-white/[0.07] text-gray-300"
+          title="Fill color"
+        >
+          <div className="h-4 w-4 rounded border border-white/20 relative overflow-hidden" style={{ backgroundColor: fill === "transparent" ? "transparent" : fill }}>
+            {fill === "transparent" && <div className="absolute inset-0 bg-gradient-to-br from-transparent via-rose-500/50 to-transparent" />}
+          </div>
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+        {fillOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl p-2 z-50 min-w-[180px]">
+            <button
+              type="button"
+              onClick={() => { onSetFill("transparent"); setFillOpen(false); }}
+              className="block w-full px-2 py-1.5 text-xs text-left text-gray-300 hover:bg-white/[0.05] rounded mb-1"
+            >
+              ⊘ No fill
+            </button>
+            <div className="grid grid-cols-5 gap-1.5">
+              {["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"].map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onSetFill(c); setFillOpen(false); }}
+                  className={`h-5 w-5 rounded-full hover:scale-110 transition-transform ${fill === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-2 px-1">
+              <span className="text-[10px] text-gray-500">Custom:</span>
+              <input
+                type="color"
+                value={fill === "transparent" ? "#000000" : fill}
+                onChange={(e) => onSetFill(e.target.value)}
+                className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Opacity slider */}
+      <div className="flex items-center gap-1 px-2">
+        <span className="text-[10px] text-gray-500">α</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round((opacity ?? 1) * 100)}
+          onChange={(e) => onSetOpacity(Number(e.target.value) / 100)}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="w-16 h-1 accent-blue-500"
+        />
+        <span className="text-[10px] text-gray-500 w-7 text-right">{Math.round((opacity ?? 1) * 100)}%</span>
+      </div>
+
+      <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* Alignment */}
+      {count >= 2 && (
+        <>
+          <Btn onClick={() => onAlign("left")} title="Align left"><AlignLeft className="h-3.5 w-3.5" /></Btn>
+          <Btn onClick={() => onAlign("center")} title="Align center horizontal"><AlignCenter className="h-3.5 w-3.5" /></Btn>
+          <Btn onClick={() => onAlign("right")} title="Align right"><AlignRight className="h-3.5 w-3.5" /></Btn>
+        </>
+      )}
+      {count >= 3 && (
+        <>
+          <Btn onClick={() => onDistribute("h")} title="Distribute horizontally"><span className="text-[10px] font-bold">⇿</span></Btn>
+          <Btn onClick={() => onDistribute("v")} title="Distribute vertically"><span className="text-[10px] font-bold">⇕</span></Btn>
+        </>
+      )}
+
+      {count >= 2 && <div className="w-px h-5 bg-white/[0.08] mx-1" />}
+
+      {/* Layering */}
+      <Btn onClick={onBringToFront} title="Bring to front"><span className="text-[9px] font-bold">F</span></Btn>
+      <Btn onClick={onSendToBack} title="Send to back"><span className="text-[9px] font-bold">B</span></Btn>
+
+      <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* Lock / Duplicate / Delete */}
+      <Btn onClick={onToggleLock} title={locked ? "Unlock" : "Lock"} active={locked}>
+        <span className="text-[10px]">{locked ? "🔒" : "🔓"}</span>
+      </Btn>
+      <Btn onClick={onDuplicate} title="Duplicate (⌘D)"><span className="text-[10px] font-bold">⎘</span></Btn>
+      <Btn onClick={onDelete} title="Delete"><Trash2 className="h-3.5 w-3.5" /></Btn>
+
+      <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* More */}
+      <div className="relative" ref={moreRef}>
+        <Btn onClick={() => setMoreOpen(o => !o)} title="More">
+          <span className="text-[10px] font-bold">⋯</span>
+        </Btn>
+        {moreOpen && (
+          <div className="absolute top-full right-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[160px] z-50">
+            <button onClick={() => { onBringForward(); setMoreOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]">Bring forward</button>
+            <button onClick={() => { onSendBackward(); setMoreOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]">Send backward</button>
+            <div className="border-t border-white/[0.06] my-1" />
+            <button onClick={() => { onGroup(); setMoreOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]">Group (⌘G)</button>
+            <button onClick={() => { onUngroup(); setMoreOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]">Ungroup (⌘⇧G)</button>
+            <div className="border-t border-white/[0.06] my-1" />
+            <button onClick={() => { onExportPNG(); setMoreOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]">Export as PNG</button>
+            <button onClick={() => { onExportSVG(); setMoreOpen(false); }} className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]">Export as SVG</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Whiteboard Context Menu ──────────────────────────────────────
+function WhiteboardContextMenu({ menu, onClose, onAction }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState({ x: menu.x, y: menu.y });
+  const [subOpen, setSubOpen] = useState(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    let x = menu.x, y = menu.y;
+    if (x + rect.width + 8 > window.innerWidth) x = window.innerWidth - rect.width - 8;
+    if (y + rect.height + 8 > window.innerHeight) y = window.innerHeight - rect.height - 8;
+    setPos({ x, y });
+  }, [menu]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  const target = menu.target;
+
+  const MenuItem = ({ icon: Icon, label, shortcut, onClick, danger }) => (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); onClose(); }}
+      className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-xs transition-colors ${danger ? "text-rose-400 hover:bg-rose-500/15" : "text-gray-200 hover:bg-white/[0.06]"}`}
+    >
+      {Icon && <Icon className="h-3.5 w-3.5" />}
+      <span className="flex-1 text-left">{label}</span>
+      {shortcut && <span className="text-[10px] text-gray-600">{shortcut}</span>}
+    </button>
+  );
+
+  const SubMenuTrigger = ({ icon: Icon, label, subKey, children }) => (
+    <div className="relative" onMouseEnter={() => setSubOpen(subKey)} onMouseLeave={() => setSubOpen(null)}>
+      <button
+        type="button"
+        className="flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-xs text-gray-200 hover:bg-white/[0.06]"
+      >
+        {Icon && <Icon className="h-3.5 w-3.5" />}
+        <span className="flex-1 text-left">{label}</span>
+        <span className="text-gray-600">›</span>
+      </button>
+      {subOpen === subKey && (
+        <div className="absolute left-full top-0 ml-1 bg-[#2d2e30] border border-white/[0.1] rounded-lg shadow-2xl py-1 min-w-[160px]">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+
+  const Sep = () => <div className="border-t border-white/[0.06] my-1" />;
+
+  return (
+    <div
+      ref={ref}
+      onClick={(e) => e.stopPropagation()}
+      style={{ position: "fixed", top: pos.y, left: pos.x, zIndex: 10000 }}
+      className="w-52 bg-[#2a2b2d] border border-white/[0.1] rounded-xl shadow-2xl py-1"
+    >
+      {target ? (
+        <>
+          {target.type === "text" && <MenuItem label="Edit text" onClick={() => onAction("editText", target)} />}
+          <MenuItem label="Cut" shortcut="⌘X" onClick={() => onAction("cut")} />
+          <MenuItem label="Copy" shortcut="⌘C" onClick={() => onAction("copy")} />
+          <MenuItem label="Paste" shortcut="⌘V" onClick={() => onAction("paste")} />
+          <MenuItem label="Duplicate" shortcut="⌘D" onClick={() => onAction("duplicate")} />
+          <MenuItem label="Delete" shortcut="Del" onClick={() => onAction("delete")} danger />
+          <Sep />
+          <MenuItem label="Bring to front" onClick={() => onAction("bringToFront")} />
+          <MenuItem label="Bring forward" onClick={() => onAction("bringForward")} />
+          <MenuItem label="Send backward" onClick={() => onAction("sendBackward")} />
+          <MenuItem label="Send to back" onClick={() => onAction("sendToBack")} />
+          <Sep />
+          <MenuItem label={target.locked ? "Unlock" : "Lock"} onClick={() => onAction("toggleLock")} />
+          <MenuItem label="Group" shortcut="⌘G" onClick={() => onAction("group")} />
+          <MenuItem label="Ungroup" shortcut="⌘⇧G" onClick={() => onAction("ungroup")} />
+          <Sep />
+          <SubMenuTrigger label="Color" subKey="color">
+            <div className="grid grid-cols-5 gap-1 p-2">
+              {["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"].map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onAction("setColor", c); onClose(); }}
+                  className="h-5 w-5 rounded-full hover:scale-110 transition-transform"
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </SubMenuTrigger>
+          <SubMenuTrigger label="Stroke width" subKey="stroke">
+            <div className="py-1">
+              {[1.5, 3, 5, 8].map(w => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onAction("setStrokeWidth", w); onClose(); }}
+                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.06]"
+                >
+                  <div className="rounded-full bg-gray-300" style={{ height: w, width: 24 }} />
+                  <span>{w}px</span>
+                </button>
+              ))}
+            </div>
+          </SubMenuTrigger>
+        </>
+      ) : (
+        <>
+          <MenuItem label="Paste" shortcut="⌘V" onClick={() => onAction("pasteAt")} />
+          <MenuItem label="Select all" shortcut="⌘A" onClick={() => onAction("selectAll")} />
+          <Sep />
+          <MenuItem label="Toggle grid" onClick={() => onAction("toggleGrid")} />
+          <MenuItem label="Reset zoom" onClick={() => onAction("resetZoom")} />
+          <MenuItem label="Zoom to fit" onClick={() => onAction("zoomToFit")} />
+          <Sep />
+          <SubMenuTrigger label="Add" subKey="add">
+            <MenuItem label="Sticky note" onClick={() => onAction("addAt", "sticky")} />
+            <MenuItem label="Text" onClick={() => onAction("addAt", "text")} />
+            <MenuItem label="Rectangle" onClick={() => onAction("addAt", "rect")} />
+            <MenuItem label="Ellipse" onClick={() => onAction("addAt", "ellipse")} />
+            <MenuItem label="Triangle" onClick={() => onAction("addAt", "triangle")} />
+            <MenuItem label="Diamond" onClick={() => onAction("addAt", "diamond")} />
+            <MenuItem label="Star" onClick={() => onAction("addAt", "star")} />
+          </SubMenuTrigger>
+        </>
+      )}
     </div>
   );
 }
@@ -605,12 +942,37 @@ function Minimap({ objects, viewport, containerSize, setViewport, contentBounds 
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────
+function shiftObj(o, dx, dy) {
+  if (dx === 0 && dy === 0) return o;
+  switch (o.type) {
+    case "text":
+    case "rect":
+    case "ellipse":
+    case "triangle":
+    case "diamond":
+    case "roundedRect":
+    case "star":
+      return { ...o, x: o.x + dx, y: o.y + dy };
+    case "line":
+    case "arrow":
+      return { ...o, x1: o.x1 + dx, y1: o.y1 + dy, x2: o.x2 + dx, y2: o.y2 + dy };
+    case "path":
+      return { ...o, points: (o.points || []).map(p => ({ x: p.x + dx, y: p.y + dy })) };
+    default:
+      return o;
+  }
+}
+
 function objectBounds(o) {
   switch (o.type) {
     case "text":
       return { x: o.x, y: o.y, w: o.w || 200, h: o.h || (o.fontSize || 18) * 1.4 };
     case "rect":
     case "ellipse":
+    case "triangle":
+    case "diamond":
+    case "roundedRect":
+    case "star":
       return { x: Math.min(o.x, o.x + o.w), y: Math.min(o.y, o.y + o.h), w: Math.abs(o.w), h: Math.abs(o.h) };
     case "line":
     case "arrow":
@@ -648,6 +1010,10 @@ function hitTest(o, x, y, tolerance = 8) {
     case "text":
     case "rect":
     case "ellipse":
+    case "triangle":
+    case "diamond":
+    case "roundedRect":
+    case "star":
       return pointInBounds(x, y, objectBounds(o), tolerance);
     case "line":
     case "arrow":
@@ -695,6 +1061,243 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const saveTimer = useRef(null);
   const loadedRef = useRef(false);
   const editingTextRef = useRef(null);
+
+  // ─── Context menu + clipboard ────────────────────────────────────
+  const [ctxMenu, setCtxMenu] = useState(null); // { x, y, target: object | null }
+  const clipboardRef = useRef([]);
+  const [snapToGrid, setSnapToGrid] = useState(() => localStorage.getItem("pulse_wb_snap") === "true");
+  const [fill, setFill] = useState("transparent");
+  const [opacity, setOpacity] = useState(1);
+
+  useEffect(() => { localStorage.setItem("pulse_wb_snap", String(snapToGrid)); }, [snapToGrid]);
+
+  // Helper: get all object IDs in the same group as the given id
+  const groupMembers = useCallback((id) => {
+    const o = objects.find(x => x.id === id);
+    if (!o || !o.groupId) return [id];
+    return objects.filter(x => x.groupId === o.groupId).map(x => x.id);
+  }, [objects]);
+
+  // Selection that respects groups
+  const effectiveSelectionIds = useMemo(() => {
+    const set = new Set(selectedIds);
+    for (const id of selectedIds) {
+      for (const m of groupMembers(id)) set.add(m);
+    }
+    return Array.from(set);
+  }, [selectedIds, groupMembers]);
+
+  // Copy / Paste / Duplicate
+  const copySelection = useCallback(() => {
+    const sel = objects.filter(o => effectiveSelectionIds.includes(o.id));
+    if (sel.length === 0) return;
+    clipboardRef.current = sel.map(o => JSON.parse(JSON.stringify(o)));
+  }, [objects, effectiveSelectionIds]);
+
+  const pasteClipboard = useCallback((atWorldX = null, atWorldY = null) => {
+    if (clipboardRef.current.length === 0) return;
+    pushHistory(objects);
+    const idMap = {};
+    const offset = 16;
+    const newObjs = clipboardRef.current.map(o => {
+      const newId = uid();
+      idMap[o.id] = newId;
+      const clone = { ...JSON.parse(JSON.stringify(o)), id: newId };
+      // Shift positions
+      if (clone.x !== undefined) clone.x += offset;
+      if (clone.y !== undefined) clone.y += offset;
+      if (clone.x1 !== undefined) { clone.x1 += offset; clone.y1 += offset; clone.x2 += offset; clone.y2 += offset; }
+      if (clone.points) clone.points = clone.points.map(p => ({ x: p.x + offset, y: p.y + offset }));
+      return clone;
+    });
+    // Reassign group ids so pasted group stays a group of its own
+    const groupMap = {};
+    newObjs.forEach(o => {
+      if (o.groupId) {
+        if (!groupMap[o.groupId]) groupMap[o.groupId] = uid();
+        o.groupId = groupMap[o.groupId];
+      }
+    });
+    setObjects(prev => [...prev, ...newObjs]);
+    setSelectedIds(newObjs.map(o => o.id));
+  }, [objects, pushHistory]);
+
+  const duplicateSelection = useCallback(() => {
+    copySelection();
+    pasteClipboard();
+  }, [copySelection, pasteClipboard]);
+
+  const deleteSelection = useCallback(() => {
+    if (effectiveSelectionIds.length === 0) return;
+    pushHistory(objects);
+    setObjects(prev => prev.filter(o => !effectiveSelectionIds.includes(o.id)));
+    setSelectedIds([]);
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  // Layering
+  const bringToFront = useCallback(() => {
+    if (effectiveSelectionIds.length === 0) return;
+    pushHistory(objects);
+    setObjects(prev => {
+      const sel = prev.filter(o => effectiveSelectionIds.includes(o.id));
+      const rest = prev.filter(o => !effectiveSelectionIds.includes(o.id));
+      return [...rest, ...sel];
+    });
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  const sendToBack = useCallback(() => {
+    if (effectiveSelectionIds.length === 0) return;
+    pushHistory(objects);
+    setObjects(prev => {
+      const sel = prev.filter(o => effectiveSelectionIds.includes(o.id));
+      const rest = prev.filter(o => !effectiveSelectionIds.includes(o.id));
+      return [...sel, ...rest];
+    });
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  const bringForward = useCallback(() => {
+    if (effectiveSelectionIds.length === 0) return;
+    pushHistory(objects);
+    setObjects(prev => {
+      const arr = [...prev];
+      for (let i = arr.length - 2; i >= 0; i--) {
+        if (effectiveSelectionIds.includes(arr[i].id) && !effectiveSelectionIds.includes(arr[i + 1].id)) {
+          [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+        }
+      }
+      return arr;
+    });
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  const sendBackward = useCallback(() => {
+    if (effectiveSelectionIds.length === 0) return;
+    pushHistory(objects);
+    setObjects(prev => {
+      const arr = [...prev];
+      for (let i = 1; i < arr.length; i++) {
+        if (effectiveSelectionIds.includes(arr[i].id) && !effectiveSelectionIds.includes(arr[i - 1].id)) {
+          [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
+        }
+      }
+      return arr;
+    });
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  // Lock / unlock
+  const toggleLock = useCallback(() => {
+    pushHistory(objects);
+    setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, locked: !o.locked } : o));
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  // Group / Ungroup
+  const groupSelection = useCallback(() => {
+    if (effectiveSelectionIds.length < 2) return;
+    pushHistory(objects);
+    const groupId = uid();
+    setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, groupId } : o));
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  const ungroupSelection = useCallback(() => {
+    pushHistory(objects);
+    setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, groupId: undefined } : o));
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  // Alignment
+  const alignSelection = useCallback((axis) => {
+    if (effectiveSelectionIds.length < 2) return;
+    pushHistory(objects);
+    const sel = objects.filter(o => effectiveSelectionIds.includes(o.id));
+    const bounds = sel.map(o => ({ id: o.id, b: objectBounds(o) }));
+    setObjects(prev => prev.map(o => {
+      if (!effectiveSelectionIds.includes(o.id)) return o;
+      const b = objectBounds(o);
+      let dx = 0, dy = 0;
+      if (axis === "left") dx = Math.min(...bounds.map(x => x.b.x)) - b.x;
+      else if (axis === "right") dx = Math.max(...bounds.map(x => x.b.x + x.b.w)) - (b.x + b.w);
+      else if (axis === "center") dx = (Math.min(...bounds.map(x => x.b.x)) + Math.max(...bounds.map(x => x.b.x + x.b.w))) / 2 - (b.x + b.w / 2);
+      else if (axis === "top") dy = Math.min(...bounds.map(x => x.b.y)) - b.y;
+      else if (axis === "bottom") dy = Math.max(...bounds.map(x => x.b.y + x.b.h)) - (b.y + b.h);
+      else if (axis === "middle") dy = (Math.min(...bounds.map(x => x.b.y)) + Math.max(...bounds.map(x => x.b.y + x.b.h))) / 2 - (b.y + b.h / 2);
+      return shiftObj(o, dx, dy);
+    }));
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  const distributeSelection = useCallback((axis) => {
+    if (effectiveSelectionIds.length < 3) return;
+    pushHistory(objects);
+    const sel = objects.filter(o => effectiveSelectionIds.includes(o.id)).map(o => ({ id: o.id, b: objectBounds(o) }));
+    sel.sort((a, b) => axis === "h" ? a.b.x - b.b.x : a.b.y - b.b.y);
+    const first = sel[0].b;
+    const last = sel[sel.length - 1].b;
+    const totalSpan = axis === "h" ? (last.x - first.x) : (last.y - first.y);
+    const step = totalSpan / (sel.length - 1);
+    const targets = {};
+    sel.forEach((s, i) => {
+      targets[s.id] = axis === "h" ? first.x + step * i : first.y + step * i;
+    });
+    setObjects(prev => prev.map(o => {
+      if (!effectiveSelectionIds.includes(o.id)) return o;
+      const b = objectBounds(o);
+      const dx = axis === "h" ? (targets[o.id] - b.x) : 0;
+      const dy = axis === "v" ? (targets[o.id] - b.y) : 0;
+      return shiftObj(o, dx, dy);
+    }));
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  // Apply per-object property to selection (fill, opacity, color, strokeWidth)
+  const setSelectionProp = useCallback((patch) => {
+    if (effectiveSelectionIds.length === 0) return;
+    pushHistory(objects);
+    setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, ...patch } : o));
+  }, [effectiveSelectionIds, objects, pushHistory]);
+
+  // Add quick shape at point
+  const addQuickShape = useCallback((shapeType, atX, atY) => {
+    pushHistory(objects);
+    const newObj = shapeType === "text"
+      ? { id: uid(), type: "text", x: atX, y: atY, w: 220, h: fontSize * 1.6, text: "Text", color, fontSize }
+      : shapeType === "sticky"
+      ? { id: uid(), type: "rect", x: atX, y: atY, w: 160, h: 160, color: "#fde047", strokeWidth: 2, fill: "rgba(253, 224, 71, 0.2)" }
+      : { id: uid(), type: shapeType, x: atX, y: atY, w: 120, h: 80, color, strokeWidth };
+    setObjects(prev => [...prev, newObj]);
+    setSelectedIds([newObj.id]);
+  }, [color, fontSize, strokeWidth, objects, pushHistory]);
+
+  // Export functions
+  const exportSVG = useCallback(() => {
+    const svgEl = containerRef.current?.querySelector("svg");
+    if (!svgEl) return;
+    const clone = svgEl.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([svgStr], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${page.title || "whiteboard"}.svg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [page.title]);
+
+  const exportPNG = useCallback(async () => {
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const el = containerRef.current;
+      if (!el) return;
+      const canvas = await html2canvas(el, { backgroundColor: "#1a1b1c" });
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${page.title || "whiteboard"}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    } catch (e) {
+      console.error("PNG export failed", e);
+    }
+  }, [page.title]);
 
   // Load objects from page
   useEffect(() => {
@@ -782,12 +1385,17 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
       if (mod && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
+      if (mod && e.key === "c") { e.preventDefault(); copySelection(); return; }
+      if (mod && e.key === "v") { e.preventDefault(); pasteClipboard(); return; }
+      if (mod && e.key === "x") { e.preventDefault(); copySelection(); deleteSelection(); return; }
+      if (mod && e.key === "d") { e.preventDefault(); duplicateSelection(); return; }
+      if (mod && e.key === "a") { e.preventDefault(); setSelectedIds(objects.filter(o => !o.locked).map(o => o.id)); return; }
+      if (mod && e.key === "g" && !e.shiftKey) { e.preventDefault(); groupSelection(); return; }
+      if (mod && e.key === "g" && e.shiftKey) { e.preventDefault(); ungroupSelection(); return; }
       if (e.key === "Backspace" || e.key === "Delete") {
         if (selectedIds.length > 0) {
           e.preventDefault();
-          pushHistory(objects);
-          setObjects(prev => prev.filter(o => !selectedIds.includes(o.id)));
-          setSelectedIds([]);
+          deleteSelection();
         }
       }
       // Tool shortcuts
@@ -809,6 +1417,8 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
   // ─── Pointer handlers ────────────────────────────────────────────
   const handlePointerDown = (e) => {
+    // Right-click handled by onContextMenu, not here
+    if (e.button === 2) return;
     if (e.button === 1 || (tool === "hand" && e.button === 0)) {
       setPanning(true);
       e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -818,16 +1428,24 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     const { x, y } = screenToWorld(e.clientX, e.clientY);
 
     if (tool === "select") {
-      // Hit test
-      const hit = [...objects].reverse().find(o => hitTest(o, x, y));
+      // Hit test (skip locked unless directly clicked already-selected)
+      const hit = [...objects].reverse().find(o => !o.locked && hitTest(o, x, y));
       if (hit) {
-        if (!selectedIds.includes(hit.id)) {
-          setSelectedIds(e.shiftKey ? [...selectedIds, hit.id] : [hit.id]);
+        // Expand to group members
+        const expanded = [];
+        if (hit.groupId) {
+          const memberIds = objects.filter(o => o.groupId === hit.groupId).map(o => o.id);
+          expanded.push(...memberIds);
+        } else {
+          expanded.push(hit.id);
         }
+        const newSelection = e.shiftKey ? [...new Set([...selectedIds, ...expanded])] : expanded;
+        setSelectedIds(newSelection);
+        const dragIds = selectedIds.includes(hit.id) && !e.shiftKey ? selectedIds : expanded;
         setDraggingSelection({
           startX: x,
           startY: y,
-          originals: objects.filter(o => (e.shiftKey ? [...selectedIds, hit.id] : selectedIds.includes(hit.id) ? selectedIds : [hit.id]).includes(o.id))
+          originals: objects.filter(o => dragIds.includes(o.id))
             .map(o => ({ id: o.id, snapshot: JSON.parse(JSON.stringify(o)) })),
         });
         pushHistory(objects);
@@ -853,9 +1471,9 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       return;
     }
 
-    if (tool === "rect" || tool === "ellipse") {
+    if (["rect", "ellipse", "triangle", "diamond", "roundedRect", "star"].includes(tool)) {
       pushHistory(objects);
-      setDrawingObject({ id: uid(), type: tool, x, y, w: 0, h: 0, color, strokeWidth });
+      setDrawingObject({ id: uid(), type: tool, x, y, w: 0, h: 0, color, strokeWidth, fill, opacity });
       return;
     }
 
@@ -910,7 +1528,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const { x, y } = screenToWorld(e.clientX, e.clientY);
       if (drawingObject.type === "path") {
         setDrawingObject(o => ({ ...o, points: [...o.points, { x, y }] }));
-      } else if (drawingObject.type === "rect" || drawingObject.type === "ellipse" || drawingObject.type === "text") {
+      } else if (["rect", "ellipse", "text", "triangle", "diamond", "roundedRect", "star"].includes(drawingObject.type)) {
         setDrawingObject(o => ({ ...o, w: x - o.x, h: y - o.y }));
       } else if (drawingObject.type === "arrow" || drawingObject.type === "line") {
         setDrawingObject(o => ({ ...o, x2: x, y2: y }));
@@ -933,7 +1551,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       let obj = drawingObject;
       setDrawingObject(null);
 
-      if (obj.type === "rect" || obj.type === "ellipse") {
+      if (["rect", "ellipse", "triangle", "diamond", "roundedRect", "star"].includes(obj.type)) {
         if (Math.abs(obj.w) < 2 && Math.abs(obj.h) < 2) return;
         // Normalize negative dimensions
         if (obj.w < 0) obj = { ...obj, x: obj.x + obj.w, w: -obj.w };
@@ -1057,7 +1675,23 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        onContextMenu={(e) => e.preventDefault()}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (editingTextId) return;
+          const { x, y } = screenToWorld(e.clientX, e.clientY);
+          const hit = [...objects].reverse().find(o => hitTest(o, x, y));
+          if (hit) {
+            // Select if not already selected (respect groups)
+            const expanded = hit.groupId
+              ? objects.filter(o => o.groupId === hit.groupId).map(o => o.id)
+              : [hit.id];
+            if (!selectedIds.includes(hit.id)) setSelectedIds(expanded);
+            setCtxMenu({ x: e.clientX, y: e.clientY, target: hit, worldX: x, worldY: y });
+          } else {
+            setSelectedIds([]);
+            setCtxMenu({ x: e.clientX, y: e.clientY, target: null, worldX: x, worldY: y });
+          }
+        }}
         style={showGrid ? {
           backgroundColor: "#1a1b1c",
           backgroundImage: `
@@ -1088,23 +1722,89 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           setShowGrid={setShowGrid}
         />
 
-        {/* Text formatting ribbon — shown when a text object is selected or being edited */}
+        {/* Whiteboard right-click context menu */}
+        {ctxMenu && (
+          <WhiteboardContextMenu
+            menu={ctxMenu}
+            onClose={() => setCtxMenu(null)}
+            onAction={(action, payload) => {
+              switch (action) {
+                case "editText":
+                  setEditingTextId(payload.id);
+                  setSelectedIds([payload.id]);
+                  break;
+                case "copy": copySelection(); break;
+                case "cut": copySelection(); deleteSelection(); break;
+                case "paste": pasteClipboard(); break;
+                case "pasteAt": pasteClipboard(ctxMenu.worldX, ctxMenu.worldY); break;
+                case "duplicate": duplicateSelection(); break;
+                case "delete": deleteSelection(); break;
+                case "bringToFront": bringToFront(); break;
+                case "bringForward": bringForward(); break;
+                case "sendBackward": sendBackward(); break;
+                case "sendToBack": sendToBack(); break;
+                case "toggleLock": toggleLock(); break;
+                case "group": groupSelection(); break;
+                case "ungroup": ungroupSelection(); break;
+                case "setColor": setSelectionProp({ color: payload }); break;
+                case "setStrokeWidth": setSelectionProp({ strokeWidth: payload }); break;
+                case "selectAll": setSelectedIds(objects.filter(o => !o.locked).map(o => o.id)); break;
+                case "toggleGrid": setShowGrid(g => !g); break;
+                case "resetZoom": setViewport({ x: 0, y: 0, zoom: 1 }); break;
+                case "zoomToFit": fitToContent(); break;
+                case "addAt": addQuickShape(payload, ctxMenu.worldX, ctxMenu.worldY); break;
+                default: break;
+              }
+            }}
+          />
+        )}
+
+        {/* Text formatting ribbon OR selection action bar */}
         {(() => {
           const focusedTextId = editingTextId || (selectedIds.length === 1 ? selectedIds[0] : null);
-          if (!focusedTextId) return null;
-          const focusedText = objects.find(o => o.id === focusedTextId && o.type === "text");
-          if (!focusedText) return null;
-          return (
-            <TextRibbon
-              textObject={focusedText}
-              isEditing={editingTextId === focusedTextId}
-              editingTextRef={editingTextRef}
-              onUpdate={(patch) => {
-                pushHistory(objects);
-                setObjects(prev => prev.map(o => o.id === focusedTextId ? { ...o, ...patch } : o));
-              }}
-            />
-          );
+          const focusedText = focusedTextId ? objects.find(o => o.id === focusedTextId && o.type === "text") : null;
+          if (focusedText) {
+            return (
+              <TextRibbon
+                textObject={focusedText}
+                isEditing={editingTextId === focusedTextId}
+                editingTextRef={editingTextRef}
+                onUpdate={(patch) => {
+                  pushHistory(objects);
+                  setObjects(prev => prev.map(o => o.id === focusedTextId ? { ...o, ...patch } : o));
+                }}
+              />
+            );
+          }
+          // Show selection action bar when 1+ non-text objects are selected
+          if (selectedIds.length > 0) {
+            const first = objects.find(o => o.id === selectedIds[0]);
+            return (
+              <SelectionBar
+                count={selectedIds.length}
+                selected={objects.filter(o => selectedIds.includes(o.id))}
+                locked={!!first?.locked}
+                fill={first?.fill ?? "transparent"}
+                opacity={first?.opacity ?? 1}
+                onSetFill={(c) => setSelectionProp({ fill: c })}
+                onSetOpacity={(v) => setSelectionProp({ opacity: v })}
+                onAlign={alignSelection}
+                onDistribute={distributeSelection}
+                onBringToFront={bringToFront}
+                onBringForward={bringForward}
+                onSendBackward={sendBackward}
+                onSendToBack={sendToBack}
+                onGroup={groupSelection}
+                onUngroup={ungroupSelection}
+                onToggleLock={toggleLock}
+                onDuplicate={duplicateSelection}
+                onDelete={deleteSelection}
+                onExportPNG={exportPNG}
+                onExportSVG={exportSVG}
+              />
+            );
+          }
+          return null;
         })()}
 
         {/* Zoom controls */}
@@ -1164,7 +1864,11 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
               const isSel = selectedIds.includes(o.id);
               const selStyle = isSel ? { filter: "drop-shadow(0 0 4px rgba(59,130,246,0.8))" } : {};
 
-              if (o.type === "rect") {
+              const objOpacity = o.opacity ?? 1;
+              const objFill = o.fill && o.fill !== "transparent" ? o.fill : (o.color + "20");
+              const lockedStyle = o.locked ? { ...selStyle, opacity: 0.7 } : selStyle;
+
+              if (o.type === "rect" || o.type === "roundedRect") {
                 const x = Math.min(o.x, o.x + o.w);
                 const y = Math.min(o.y, o.y + o.h);
                 const w = Math.abs(o.w);
@@ -1173,12 +1877,52 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                   <rect
                     key={o.id}
                     x={x} y={y} width={w} height={h}
-                    fill={o.color + "20"}
+                    fill={objFill}
+                    fillOpacity={objOpacity}
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
-                    rx={4}
-                    style={selStyle}
+                    strokeOpacity={objOpacity}
+                    rx={o.type === "roundedRect" ? Math.min(w, h) / 4 : 4}
+                    style={lockedStyle}
                   />
+                );
+              }
+              if (o.type === "triangle") {
+                const x = Math.min(o.x, o.x + o.w);
+                const y = Math.min(o.y, o.y + o.h);
+                const w = Math.abs(o.w);
+                const h = Math.abs(o.h);
+                const pts = `${x + w / 2},${y} ${x},${y + h} ${x + w},${y + h}`;
+                return (
+                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} style={lockedStyle} />
+                );
+              }
+              if (o.type === "diamond") {
+                const x = Math.min(o.x, o.x + o.w);
+                const y = Math.min(o.y, o.y + o.h);
+                const w = Math.abs(o.w);
+                const h = Math.abs(o.h);
+                const pts = `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
+                return (
+                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} style={lockedStyle} />
+                );
+              }
+              if (o.type === "star") {
+                const x = Math.min(o.x, o.x + o.w);
+                const y = Math.min(o.y, o.y + o.h);
+                const w = Math.abs(o.w);
+                const h = Math.abs(o.h);
+                const cx = x + w / 2, cy = y + h / 2;
+                const outerR = Math.min(w, h) / 2;
+                const innerR = outerR * 0.4;
+                const pts = [];
+                for (let i = 0; i < 10; i++) {
+                  const r = i % 2 === 0 ? outerR : innerR;
+                  const a = (Math.PI / 5) * i - Math.PI / 2;
+                  pts.push(`${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`);
+                }
+                return (
+                  <polygon key={o.id} points={pts.join(" ")} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} style={lockedStyle} />
                 );
               }
               if (o.type === "ellipse") {
@@ -1190,10 +1934,12 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                   <ellipse
                     key={o.id}
                     cx={cx} cy={cy} rx={rx} ry={ry}
-                    fill={o.color + "20"}
+                    fill={objFill}
+                    fillOpacity={objOpacity}
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
-                    style={selStyle}
+                    strokeOpacity={objOpacity}
+                    style={lockedStyle}
                   />
                 );
               }
