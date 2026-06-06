@@ -128,9 +128,21 @@ export default function Tasks() {
   const [selectedPageId, setSelectedPageId] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("pulse_notion_sidebar") !== "false");
 
+  // AI Organizer state
+  const [aiAutoOrganize, setAiAutoOrganize] = useState(() => localStorage.getItem("pulse_ai_auto_organize") === "true");
+  const [aiOrganizing, setAiOrganizing] = useState(false);
+  const [aiUndoStack, setAiUndoStack] = useState([]); // stack of { actions: [{pageId, prevParentId}], createdFolderIds: [] }
+  const aiAutoTimer = useRef(null);
+  const aiLastRunHash = useRef("");
+  const [aiBanner, setAiBanner] = useState(null); // { reasoning, count }
+
   useEffect(() => {
     localStorage.setItem("pulse_notion_sidebar", String(sidebarOpen));
   }, [sidebarOpen]);
+
+  useEffect(() => {
+    localStorage.setItem("pulse_ai_auto_organize", String(aiAutoOrganize));
+  }, [aiAutoOrganize]);
 
   const refreshPages = () => queryClient.invalidateQueries({ queryKey: ["pages"] });
 
@@ -170,6 +182,97 @@ export default function Tasks() {
   };
 
   const selectedPage = pages.find(p => p.id === selectedPageId);
+
+  // ─── AI Organizer ─────────────────────────────────────────────────
+  const runAIOrganize = useCallback(async () => {
+    if (aiOrganizing || pages.length < 2) return;
+    setAiOrganizing(true);
+    try {
+      const res = await base44.functions.invoke("organizePages", { pages });
+      const result = res.data || {};
+      const actions = result.actions || [];
+      if (actions.length === 0) {
+        setAiBanner({ reasoning: result.reasoning || "Nothing to reorganize", count: 0 });
+        setTimeout(() => setAiBanner(null), 3500);
+        return;
+      }
+
+      // Process create_folder actions first; map tempId → real id
+      const tempToReal = {};
+      const createdFolderIds = [];
+      for (const act of actions) {
+        if (act.action === "create_folder" && act.tempId) {
+          const newFolder = await base44.entities.Page.create({
+            title: act.title || "New Folder",
+            icon: act.icon || "folder",
+            parent_id: null,
+            section: "private",
+            status: "not_started",
+            content: "",
+          });
+          tempToReal[act.tempId] = newFolder.id;
+          createdFolderIds.push(newFolder.id);
+        }
+      }
+
+      // Capture previous parents for undo, then apply set_parent
+      const reverseActions = [];
+      for (const act of actions) {
+        if (act.action === "set_parent" && act.pageId) {
+          const page = pages.find(p => p.id === act.pageId);
+          if (!page) continue;
+          const newParentId = act.newParentId && tempToReal[act.newParentId] ? tempToReal[act.newParentId] : (act.newParentId || null);
+          if (page.parent_id === newParentId) continue;
+          reverseActions.push({ pageId: page.id, prevParentId: page.parent_id || null });
+          await base44.entities.Page.update(page.id, { parent_id: newParentId });
+        }
+      }
+
+      if (reverseActions.length > 0 || createdFolderIds.length > 0) {
+        setAiUndoStack(prev => [...prev, { actions: reverseActions, createdFolderIds }].slice(-10));
+      }
+
+      refreshPages();
+      setAiBanner({ reasoning: result.reasoning || "Pages reorganized", count: reverseActions.length + createdFolderIds.length });
+      setTimeout(() => setAiBanner(null), 5000);
+    } catch (err) {
+      console.error("AI organize failed:", err);
+      setAiBanner({ reasoning: "AI organize failed", count: 0 });
+      setTimeout(() => setAiBanner(null), 3000);
+    } finally {
+      setAiOrganizing(false);
+    }
+  }, [pages, aiOrganizing]);
+
+  const undoAIOrganize = useCallback(async () => {
+    if (aiUndoStack.length === 0) return;
+    const last = aiUndoStack[aiUndoStack.length - 1];
+    setAiUndoStack(prev => prev.slice(0, -1));
+    // Revert parent assignments
+    for (const { pageId, prevParentId } of last.actions) {
+      try { await base44.entities.Page.update(pageId, { parent_id: prevParentId }); } catch {}
+    }
+    // Delete folders the AI created
+    for (const folderId of last.createdFolderIds) {
+      try { await base44.entities.Page.delete(folderId); } catch {}
+    }
+    refreshPages();
+    setAiBanner({ reasoning: "Undid last AI organization", count: last.actions.length });
+    setTimeout(() => setAiBanner(null), 3000);
+  }, [aiUndoStack]);
+
+  // Auto-organize debouncer when toggle is on
+  useEffect(() => {
+    if (!aiAutoOrganize || pages.length < 2) return;
+    const hash = pages.map(p => `${p.id}:${p.title}:${p.parent_id || ""}`).sort().join("|");
+    if (hash === aiLastRunHash.current) return;
+    if (aiAutoTimer.current) clearTimeout(aiAutoTimer.current);
+    aiAutoTimer.current = setTimeout(() => {
+      aiLastRunHash.current = hash;
+      runAIOrganize();
+    }, 8000); // wait 8s of no changes before auto-organize
+    return () => { if (aiAutoTimer.current) clearTimeout(aiAutoTimer.current); };
+  }, [aiAutoOrganize, pages, runAIOrganize]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
@@ -427,6 +530,12 @@ export default function Tasks() {
           onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); }}
           onCreatePage={handleCreatePage}
           onDeletePage={handleDeletePage}
+          aiAutoOrganize={aiAutoOrganize}
+          onToggleAutoOrganize={setAiAutoOrganize}
+          onOrganizeNow={runAIOrganize}
+          onUndoAI={undoAIOrganize}
+          canUndoAI={aiUndoStack.length > 0}
+          aiOrganizing={aiOrganizing}
         />
       )}
 
@@ -445,6 +554,16 @@ export default function Tasks() {
             <div className="flex items-center gap-1.5 text-[12.5px] text-gray-500">
               <span className="text-gray-700">/</span>
               <span className="truncate">{selectedPage.title || "Untitled"}</span>
+            </div>
+          )}
+          <div className="flex-1" />
+          {aiBanner && (
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-[11.5px] text-purple-300">
+              {aiOrganizing && <Loader2 className="h-3 w-3 animate-spin" />}
+              <span className="truncate max-w-md">{aiBanner.reasoning}</span>
+              {aiBanner.count > 0 && (
+                <span className="bg-purple-500/20 px-1.5 py-0.5 rounded text-[10px]">{aiBanner.count} change{aiBanner.count !== 1 ? "s" : ""}</span>
+              )}
             </div>
           )}
         </div>

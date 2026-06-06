@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Home, Inbox, MessageCircle, Mic, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Wand2, Undo2 } from "lucide-react";
 
 const ICON_OPTIONS = [
   { key: "file", icon: FileText, color: "text-gray-400" },
@@ -37,12 +37,21 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
     return () => document.removeEventListener("mousedown", handler);
   }, [menuOpen]);
 
-  const iconCfg = ICON_MAP[page.icon] || ICON_MAP.file;
-  const Icon = iconCfg.icon;
+  // If this page has sub-pages, show it as a folder
+  let Icon, iconColor;
+  if (hasChildren) {
+    Icon = expanded ? FolderOpen : Folder;
+    iconColor = "text-amber-400/80";
+  } else {
+    const iconCfg = ICON_MAP[page.icon] || ICON_MAP.file;
+    Icon = iconCfg.icon;
+    iconColor = iconCfg.color;
+  }
+
   const isSelected = selectedId === page.id;
 
   return (
-    <div>
+    <div className="relative">
       <div
         onClick={() => onSelect(page)}
         className={`group flex items-center gap-1 pr-1 rounded-md cursor-pointer transition-colors ${
@@ -52,12 +61,17 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
       >
         <button
           onClick={toggleExpand}
-          className={`shrink-0 p-0.5 rounded hover:bg-white/[0.08] transition-colors ${hasChildren ? "text-gray-500" : "opacity-0"}`}
+          className={`shrink-0 p-0.5 rounded hover:bg-white/[0.08] transition-colors ${hasChildren ? "text-gray-500" : "opacity-0 pointer-events-none"}`}
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </button>
-        <Icon className={`h-3.5 w-3.5 shrink-0 ${iconCfg.color}`} />
-        <span className="flex-1 text-[13px] text-gray-300 truncate py-1">{page.title || "Untitled"}</span>
+        <Icon className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} />
+        <span className={`flex-1 text-[13px] truncate py-1 ${hasChildren ? "text-gray-200 font-medium" : "text-gray-300"}`}>
+          {page.title || "Untitled"}
+        </span>
+        {hasChildren && (
+          <span className="text-[10px] text-gray-600 mr-1">{children.length}</span>
+        )}
         <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5">
           <button
             onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
@@ -105,14 +119,30 @@ function PageNode({ page, allPages, depth, selectedId, onSelect, onCreate, onDel
   );
 }
 
-export default function NotionSidebar({ pages, user, view, onSelectHome, onSelectPage, onCreatePage, onDeletePage, selectedPageId }) {
+export default function NotionSidebar({
+  pages,
+  user,
+  view,
+  onSelectHome,
+  onSelectPage,
+  onCreatePage,
+  onDeletePage,
+  selectedPageId,
+  aiAutoOrganize,
+  onToggleAutoOrganize,
+  onOrganizeNow,
+  onUndoAI,
+  canUndoAI,
+  aiOrganizing,
+}) {
   const rootPages = useMemo(() => pages.filter(p => !p.parent_id), [pages]);
   const recents = useMemo(() => {
     const sorted = [...pages].sort((a, b) => (b.updated_date || "").localeCompare(a.updated_date || ""));
-    return sorted.slice(0, 5);
+    return sorted;
   }, [pages]);
-  const privatePages = rootPages.filter(p => (p.section || "private") === "private");
-  const sharedPages = rootPages.filter(p => p.section === "shared");
+
+  const [recentsExpanded, setRecentsExpanded] = useState(false);
+  const visibleRecents = recentsExpanded ? recents.slice(0, 15) : recents.slice(0, 3);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -186,6 +216,43 @@ export default function NotionSidebar({ pages, user, view, onSelectHome, onSelec
         </div>
       )}
 
+      {/* AI Organizer Banner */}
+      <div className="mx-2 mb-2 rounded-lg border border-purple-500/15 bg-purple-500/[0.05] px-2 py-1.5">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <div className="flex items-center gap-1.5">
+            <Wand2 className="h-3 w-3 text-purple-400" />
+            <span className="text-[11px] font-medium text-purple-300">AI Organizer</span>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer" title="Auto-organize on changes">
+            <input
+              type="checkbox"
+              checked={!!aiAutoOrganize}
+              onChange={(e) => onToggleAutoOrganize(e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-6 h-3.5 bg-gray-700 peer-checked:bg-purple-500 rounded-full peer-checked:after:translate-x-2.5 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-2.5 after:w-2.5 after:transition-all" />
+          </label>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onOrganizeNow}
+            disabled={aiOrganizing || pages.length < 2}
+            className="flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium bg-purple-500/15 text-purple-300 hover:bg-purple-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            <Sparkles className="h-2.5 w-2.5" />
+            {aiOrganizing ? "Organizing..." : "Organize now"}
+          </button>
+          <button
+            onClick={onUndoAI}
+            disabled={!canUndoAI}
+            className="px-2 py-1 rounded text-[10.5px] font-medium bg-white/[0.04] text-gray-400 hover:bg-white/[0.08] hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="Undo last AI organization"
+          >
+            <Undo2 className="h-2.5 w-2.5" />
+          </button>
+        </div>
+      </div>
+
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-2 py-1 space-y-3">
         {/* Recents */}
@@ -193,7 +260,7 @@ export default function NotionSidebar({ pages, user, view, onSelectHome, onSelec
           <div>
             <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider px-2 py-1">Recents</p>
             <div className="space-y-0.5">
-              {recents.map(p => {
+              {visibleRecents.map(p => {
                 const iconCfg = ICON_MAP[p.icon] || ICON_MAP.file;
                 const Icon = iconCfg.icon;
                 return (
@@ -209,6 +276,15 @@ export default function NotionSidebar({ pages, user, view, onSelectHome, onSelec
                   </button>
                 );
               })}
+              {recents.length > 3 && (
+                <button
+                  onClick={() => setRecentsExpanded(!recentsExpanded)}
+                  className="flex items-center gap-1.5 w-full px-2 py-1 rounded-md text-[11px] text-gray-600 hover:text-gray-400 hover:bg-white/[0.03] transition-colors"
+                >
+                  {recentsExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  {recentsExpanded ? "Show less" : `Show ${Math.min(recents.length - 3, 12)} more`}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -225,7 +301,7 @@ export default function NotionSidebar({ pages, user, view, onSelectHome, onSelec
               <Plus className="h-3 w-3" />
             </button>
           </div>
-          {privatePages.length === 0 ? (
+          {rootPages.length === 0 ? (
             <button
               onClick={() => onCreatePage(null, "private")}
               className="flex items-center gap-2 w-full px-2 py-1 rounded-md text-[12.5px] text-gray-600 hover:bg-white/[0.03] hover:text-gray-400 transition-colors"
@@ -233,37 +309,7 @@ export default function NotionSidebar({ pages, user, view, onSelectHome, onSelec
               <Plus className="h-3 w-3" /> Add a page
             </button>
           ) : (
-            privatePages.map(p => (
-              <PageNode
-                key={p.id}
-                page={p}
-                allPages={pages}
-                depth={0}
-                selectedId={selectedPageId}
-                onSelect={onSelectPage}
-                onCreate={onCreatePage}
-                onDelete={onDeletePage}
-              />
-            ))
-          )}
-        </div>
-
-        {/* Shared section */}
-        <div>
-          <div className="flex items-center justify-between px-2 py-1">
-            <p className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Shared</p>
-            <button
-              onClick={() => onCreatePage(null, "shared")}
-              className="p-0.5 rounded hover:bg-white/[0.05] text-gray-500"
-              title="New page"
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
-          {sharedPages.length === 0 ? (
-            <p className="text-[11px] text-gray-700 px-2 py-1">Start collaborating</p>
-          ) : (
-            sharedPages.map(p => (
+            rootPages.map(p => (
               <PageNode
                 key={p.id}
                 page={p}
