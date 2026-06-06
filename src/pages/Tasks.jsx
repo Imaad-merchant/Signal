@@ -194,6 +194,44 @@ export default function Tasks() {
     try { await base44.entities.Page.update(pageId, patch); } catch (e) { console.error(e); }
   };
 
+  // AI Visualize — turn the current document's notes into a whiteboard page
+  const [aiVisualizing, setAiVisualizing] = useState(false);
+  const handleAIVisualize = async (notesText) => {
+    if (!notesText || !notesText.trim()) {
+      alert("Add some notes first, then click AI Visualize.");
+      return;
+    }
+    setAiVisualizing(true);
+    try {
+      const res = await base44.functions.invoke("visualizeNotes", { notes: notesText });
+      const { title, style, objects } = res.data || {};
+      if (!objects || objects.length === 0) {
+        alert("AI couldn't generate a visualization. Try expanding your notes.");
+        setAiVisualizing(false);
+        return;
+      }
+      // Create a new whiteboard page next to the current one with the AI objects
+      const newPage = await base44.entities.Page.create({
+        title: title || `Visual: ${selectedPage?.title || "Notes"}`,
+        icon: "spark",
+        parent_id: selectedPage?.id || null,
+        section: "private",
+        status: "not_started",
+        type: "whiteboard",
+        content: "",
+        whiteboard: JSON.stringify(objects),
+      });
+      refreshPages();
+      setSelectedPageId(newPage.id);
+      setView("page");
+    } catch (err) {
+      console.error("AI Visualize failed:", err);
+      alert("AI Visualize failed. Please try again.");
+    } finally {
+      setAiVisualizing(false);
+    }
+  };
+
   const handleDeletePage = async (page) => {
     if (!confirm(`Delete "${page.title || 'Untitled'}"?`)) return;
     // Also delete sub-pages
@@ -592,6 +630,12 @@ export default function Tasks() {
             </div>
           )}
           <div className="flex-1" />
+          {aiVisualizing && (
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-[11.5px] text-purple-300">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>AI is visualizing your notes...</span>
+            </div>
+          )}
           {aiBanner && (
             <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-[11.5px] text-purple-300">
               {aiOrganizing && <Loader2 className="h-3 w-3 animate-spin" />}
@@ -638,7 +682,7 @@ export default function Tasks() {
               return (
                 <>
                   {header}
-                  <DocumentView page={selectedPage} onUpdate={handleUpdatePage} />
+                  <DocumentView page={selectedPage} onUpdate={handleUpdatePage} onAIVisualize={handleAIVisualize} />
                 </>
               );
             }

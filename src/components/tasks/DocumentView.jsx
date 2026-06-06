@@ -1,69 +1,67 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import { Eye, Edit3 } from "lucide-react";
+import RichTextEditor from "./RichTextEditor";
 
-export default function DocumentView({ page, onUpdate }) {
-  const [content, setContent] = useState(page.content || "");
-  const [mode, setMode] = useState("edit"); // edit | preview
+// Detect if content is HTML (vs. plain text / markdown from older docs)
+function isLikelyHTML(s) {
+  if (!s) return false;
+  const trimmed = s.trim();
+  return /^<[a-z][\s\S]*>/i.test(trimmed) && /<\/[a-z]/i.test(trimmed);
+}
+
+// Convert plain markdown / text to minimal HTML so old docs open gracefully
+function legacyToHTML(s) {
+  if (!s) return "";
+  if (isLikelyHTML(s)) return s;
+  const lines = s.split("\n");
+  return lines.map(line => {
+    const t = line.trimStart();
+    if (/^# /.test(t)) return `<h1>${t.slice(2)}</h1>`;
+    if (/^## /.test(t)) return `<h2>${t.slice(3)}</h2>`;
+    if (/^### /.test(t)) return `<h3>${t.slice(4)}</h3>`;
+    if (/^- \[ \] /.test(t)) return `<p>☐ ${t.slice(6)}</p>`;
+    if (/^- \[x\] /i.test(t)) return `<p>☑ ${t.slice(6)}</p>`;
+    if (/^[-*] /.test(t)) return `<p>• ${t.slice(2)}</p>`;
+    if (t === "") return `<p></p>`;
+    // Inline bold/italic minimal conversion
+    let html = t
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+    return `<p>${html}</p>`;
+  }).join("");
+}
+
+export default function DocumentView({ page, onUpdate, onAIVisualize }) {
+  const [html, setHtml] = useState(() => legacyToHTML(page.content || ""));
   const saveTimer = useRef(null);
   const loadedRef = useRef(false);
+  const lastSavedRef = useRef(html);
 
   useEffect(() => {
-    setContent(page.content || "");
-    setMode("edit");
+    setHtml(legacyToHTML(page.content || ""));
+    lastSavedRef.current = legacyToHTML(page.content || "");
     loadedRef.current = true;
   }, [page.id]);
 
-  useEffect(() => {
+  const handleChange = useCallback((newHtml) => {
+    setHtml(newHtml);
     if (!loadedRef.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      onUpdate({ content });
+      if (newHtml !== lastSavedRef.current) {
+        lastSavedRef.current = newHtml;
+        onUpdate({ content: newHtml });
+      }
     }, 600);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [content, onUpdate]);
+  }, [onUpdate]);
 
   return (
-    <div className="flex-1 flex flex-col bg-[#1a1b1c] overflow-hidden">
-      {/* Mode toggle */}
-      <div className="flex items-center justify-end gap-1 px-4 py-1.5 border-b border-white/[0.05]">
-        <div className="flex items-center bg-[#252628] border border-white/[0.06] rounded-lg p-0.5">
-          <button
-            onClick={() => setMode("edit")}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] transition-colors ${mode === "edit" ? "bg-blue-500/20 text-blue-300" : "text-gray-500 hover:text-gray-300"}`}
-          >
-            <Edit3 className="h-3 w-3" /> Edit
-          </button>
-          <button
-            onClick={() => setMode("preview")}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] transition-colors ${mode === "preview" ? "bg-blue-500/20 text-blue-300" : "text-gray-500 hover:text-gray-300"}`}
-          >
-            <Eye className="h-3 w-3" /> Preview
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-8 py-8">
-          {mode === "edit" ? (
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Start writing... markdown supported"
-              className="w-full bg-transparent text-[14px] text-gray-200 placeholder-gray-700 focus:outline-none resize-none font-mono leading-relaxed"
-              style={{ minHeight: "60vh" }}
-            />
-          ) : (
-            <div className="prose prose-invert prose-sm max-w-none text-gray-200 prose-headings:text-gray-100 prose-strong:text-gray-100 prose-code:text-blue-300 prose-code:bg-white/[0.05] prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-blockquote:border-l-blue-500/40 prose-blockquote:text-gray-400">
-              {content ? (
-                <ReactMarkdown>{content}</ReactMarkdown>
-              ) : (
-                <p className="text-gray-700 italic text-sm">Nothing to preview yet — switch to Edit mode and start writing.</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+    <RichTextEditor
+      value={html}
+      onChange={handleChange}
+      placeholder="Start writing..."
+      onAIVisualize={onAIVisualize}
+    />
   );
 }
