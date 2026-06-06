@@ -1,13 +1,15 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AnimatePresence } from "framer-motion";
 import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
+import NotionSidebar from "../components/tasks/NotionSidebar";
+import NotionPageView from "../components/tasks/NotionPageView";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { format, isSameDay, isToday, parseISO } from "date-fns";
@@ -115,6 +117,60 @@ export default function Tasks() {
     enabled: !!user,
   });
 
+  // ─── Notion-style Pages ────────────────────────────────────────────
+  const { data: pages = [] } = useQuery({
+    queryKey: ["pages", user?.email],
+    queryFn: () => base44.entities.Page.list("-updated_date"),
+    enabled: !!user,
+  });
+
+  const [view, setView] = useState("home"); // "home" or "page"
+  const [selectedPageId, setSelectedPageId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("pulse_notion_sidebar") !== "false");
+
+  useEffect(() => {
+    localStorage.setItem("pulse_notion_sidebar", String(sidebarOpen));
+  }, [sidebarOpen]);
+
+  const refreshPages = () => queryClient.invalidateQueries({ queryKey: ["pages"] });
+
+  const handleCreatePage = async (parentId = null, section = "private") => {
+    const newPage = await base44.entities.Page.create({
+      title: "",
+      icon: "file",
+      parent_id: parentId || null,
+      section,
+      status: "not_started",
+      content: "",
+    });
+    refreshPages();
+    setSelectedPageId(newPage.id);
+    setView("page");
+  };
+
+  const handleUpdatePage = async (patch) => {
+    if (!selectedPageId) return;
+    queryClient.setQueryData(["pages", user?.email], (old = []) =>
+      old.map(p => p.id === selectedPageId ? { ...p, ...patch, updated_date: new Date().toISOString() } : p)
+    );
+    await base44.entities.Page.update(selectedPageId, patch);
+  };
+
+  const handleDeletePage = async (page) => {
+    if (!confirm(`Delete "${page.title || 'Untitled'}"?`)) return;
+    // Also delete sub-pages
+    const toDelete = [page.id];
+    const walk = (parentId) => {
+      pages.filter(p => p.parent_id === parentId).forEach(child => { toDelete.push(child.id); walk(child.id); });
+    };
+    walk(page.id);
+    await Promise.all(toDelete.map(id => base44.entities.Page.delete(id)));
+    if (selectedPageId === page.id) { setSelectedPageId(null); setView("home"); }
+    refreshPages();
+  };
+
+  const selectedPage = pages.find(p => p.id === selectedPageId);
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
   const handleStatusChange = async (task, newStatus) => {
@@ -177,11 +233,12 @@ export default function Tasks() {
   const pullProgress = Math.min(pullY / PULL_THRESHOLD, 1);
   const showPullIndicator = pullY > 8 || refreshing;
 
-  return (
+  // The Home view content (existing Tasks UI)
+  const homeContent = (
     <div
       ref={scrollRef}
       data-scroll-container
-      className="max-w-3xl mx-auto px-4 py-6 space-y-5"
+      className="max-w-3xl mx-auto px-4 py-6 space-y-5 w-full"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -354,6 +411,58 @@ export default function Tasks() {
       </div>
 
       <AddTaskDialog open={showAdd} onOpenChange={setShowAdd} onCreated={refresh} />
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-[#1e1f20] overflow-hidden">
+      {/* Notion-style Sidebar */}
+      {sidebarOpen && (
+        <NotionSidebar
+          pages={pages}
+          user={user}
+          view={view}
+          selectedPageId={selectedPageId}
+          onSelectHome={() => { setView("home"); setSelectedPageId(null); }}
+          onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); }}
+          onCreatePage={handleCreatePage}
+          onDeletePage={handleDeletePage}
+        />
+      )}
+
+      {/* Main content area */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Top bar with sidebar toggle */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.04] shrink-0">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-1.5 rounded hover:bg-white/[0.05] text-gray-500 transition-colors"
+            title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+          >
+            {sidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+          </button>
+          {view === "page" && selectedPage && (
+            <div className="flex items-center gap-1.5 text-[12.5px] text-gray-500">
+              <span className="text-gray-700">/</span>
+              <span className="truncate">{selectedPage.title || "Untitled"}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Body — Home tasks view OR Notion page */}
+        <div className="flex-1 overflow-y-auto">
+          {view === "page" && selectedPage ? (
+            <NotionPageView
+              key={selectedPage.id}
+              page={selectedPage}
+              onUpdate={handleUpdatePage}
+              onDelete={() => handleDeletePage(selectedPage)}
+            />
+          ) : (
+            homeContent
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -169,6 +169,7 @@ export const base44 = {
     Category: createEntityHandler("categories"),
     DailyLog: createEntityHandler("dailyLogs"),
     FocusSession: createEntityHandler("focusSessions"),
+    Page: createEntityHandler("pages"),
   },
 
   functions: {
