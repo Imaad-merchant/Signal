@@ -18,12 +18,19 @@ export default function AIPromptDialog({ open, onClose, title, subtitle, presets
 
   return (
     <div
+      data-ai-dialog
       className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
       onClick={onClose}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onWheel={(e) => e.stopPropagation()}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       <div
         className="w-full max-w-lg bg-[#1e1f20] border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06] bg-gradient-to-r from-purple-500/10 to-pink-500/10">
           <div className="flex items-center gap-2">
@@ -60,7 +67,12 @@ export default function AIPromptDialog({ open, onClose, title, subtitle, presets
             autoFocus
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmit(); }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmit();
+            }}
+            onKeyUp={(e) => e.stopPropagation()}
+            onPaste={(e) => e.stopPropagation()}
             placeholder={placeholder || "Type your instruction..."}
             rows={3}
             disabled={loading}

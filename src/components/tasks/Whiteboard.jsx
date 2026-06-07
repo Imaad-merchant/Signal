@@ -1436,6 +1436,11 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   useEffect(() => {
     const handler = (e) => {
       if (editingTextId) return;
+      // Skip if the user is typing in an input, textarea, contentEditable, or any modal
+      const t = e.target;
+      const tag = (t?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || t?.isContentEditable) return;
+      if (t?.closest && t.closest("[data-ai-dialog]")) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
       if (mod && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
