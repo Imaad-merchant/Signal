@@ -17,6 +17,7 @@ import { ICON_MAP } from "../components/tasks/NotionSidebar";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { format, isSameDay, isToday, parseISO } from "date-fns";
+import { useIsMobile } from "../components/useIsMobile";
 
 const PULL_THRESHOLD = 70;
 
@@ -128,9 +129,15 @@ export default function Tasks() {
     enabled: !!user,
   });
 
+  const isMobile = useIsMobile();
   const [view, setView] = useState("home"); // "home" or "page"
   const [selectedPageId, setSelectedPageId] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("pulse_notion_sidebar") !== "false");
+  // On mobile the sidebar is an overlay — start it closed regardless of the saved
+  // desktop preference so it doesn't cover the whole screen on load.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (window.innerWidth < 768) return false;
+    return localStorage.getItem("pulse_notion_sidebar") !== "false";
+  });
 
   // AI Organizer state
   const [aiAutoOrganize, setAiAutoOrganize] = useState(() => localStorage.getItem("pulse_ai_auto_organize") === "true");
@@ -141,6 +148,8 @@ export default function Tasks() {
   const [aiBanner, setAiBanner] = useState(null); // { reasoning, count }
 
   useEffect(() => {
+    // Don't persist the mobile overlay's open/closed state over the desktop preference.
+    if (window.innerWidth < 768) return;
     localStorage.setItem("pulse_notion_sidebar", String(sidebarOpen));
   }, [sidebarOpen]);
 
@@ -606,15 +615,25 @@ export default function Tasks() {
 
   return (
     <div className="flex h-screen bg-[#1e1f20] overflow-hidden">
-      {/* Notion-style Sidebar */}
+      {/* Notion-style Sidebar — inline on desktop, slide-over overlay on mobile */}
+      {sidebarOpen && isMobile && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       {sidebarOpen && (
+        <div
+          className={isMobile ? "fixed top-0 bottom-0 left-0 z-50" : "contents"}
+          style={isMobile ? { paddingTop: "env(safe-area-inset-top)" } : undefined}
+        >
         <NotionSidebar
           pages={pages}
           user={user}
           view={view}
           selectedPageId={selectedPageId}
-          onSelectHome={() => { setView("home"); setSelectedPageId(null); }}
-          onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); }}
+          onSelectHome={() => { setView("home"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
+          onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); if (isMobile) setSidebarOpen(false); }}
           onCreatePage={handleCreatePage}
           onDeletePage={handleDeletePage}
           onUpdatePage={handleUpdatePageById}
@@ -625,6 +644,7 @@ export default function Tasks() {
           canUndoAI={aiUndoStack.length > 0}
           aiOrganizing={aiOrganizing}
         />
+        </div>
       )}
 
       {/* Main content area */}
@@ -712,7 +732,7 @@ export default function Tasks() {
             // Default: whiteboard
             return <Whiteboard key={selectedPage.id} page={selectedPage} onUpdate={handleUpdatePage} headerSlot={header} />;
           })() : (
-            <div className="flex-1 overflow-y-auto">{homeContent}</div>
+            <div className="flex-1 overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">{homeContent}</div>
           )}
         </div>
 

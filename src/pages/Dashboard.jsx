@@ -87,7 +87,9 @@ export default function Dashboard() {
   const [selectedTask, setSelectedTask] = useState(null);
   const [showTaskDetail, setShowTaskDetail] = useState(false);
   const [view, setView] = useState("Month");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Sidebar is an inline panel on desktop but an overlay on mobile — start closed on
+  // small screens so it doesn't squeeze the calendar to a sliver.
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [importMenuOpen, setImportMenuOpen] = useState(false);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -306,14 +308,28 @@ export default function Dashboard() {
 
       {/* Left Sidebar */}
       <AnimatePresence>
+        {sidebarOpen && isMobile && (
+          <motion.div
+            key="sidebar-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => setSidebarOpen(false)}
+            className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          />
+        )}
         {sidebarOpen && (
           <motion.aside
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 240, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
+            key="sidebar"
+            initial={isMobile ? { x: -240, opacity: 0 } : { width: 0, opacity: 0 }}
+            animate={isMobile ? { x: 0, opacity: 1 } : { width: 240, opacity: 1 }}
+            exit={isMobile ? { x: -240, opacity: 0 } : { width: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="flex-shrink-0 border-r border-white/[0.08] flex flex-col overflow-hidden bg-[#232425]"
-            style={{ width: 240 }}
+            className={`border-r border-white/[0.08] flex flex-col overflow-hidden bg-[#232425] ${
+              isMobile ? "fixed top-0 bottom-0 left-0 z-50" : "flex-shrink-0"
+            }`}
+            style={{ width: 240, paddingTop: isMobile ? "env(safe-area-inset-top)" : undefined }}
           >
             {/* Create button */}
             <div className="p-3 pt-4 relative">
@@ -349,7 +365,7 @@ export default function Dashboard() {
             <MiniCalendar
               currentMonth={currentMonth}
               selectedDate={selectedDate}
-              setSelectedDate={(date) => { setSelectedDate(date); setCurrentMonth(date); }}
+              setSelectedDate={(date) => { setSelectedDate(date); setCurrentMonth(date); if (isMobile) setSidebarOpen(false); }}
               onMonthChange={setCurrentMonth}
             />
 
@@ -698,10 +714,10 @@ export default function Dashboard() {
             <Link to="/cowork" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="AI Co-pilot">
               <Sparkles className="h-5 w-5" />
             </Link>
-            <Link to={createPageUrl("Tasks")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
+            <Link to={createPageUrl("Tasks")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
               <CheckSquare className="h-5 w-5" />
             </Link>
-            <Link to={createPageUrl("Settings")} className="p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
+            <Link to={createPageUrl("Settings")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
               <Settings className="h-5 w-5" />
             </Link>
           </div>
@@ -711,7 +727,7 @@ export default function Dashboard() {
          <div
            ref={calBodyRef}
            data-scroll-container
-           className="flex-1 overflow-auto relative"
+           className="flex-1 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
            onTouchStart={handleCalTouchStart}
            onTouchMove={handleCalTouchMove}
            onTouchEnd={handleCalTouchEnd}
