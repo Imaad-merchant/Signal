@@ -614,7 +614,7 @@ export default function Tasks() {
   );
 
   return (
-    <div className="flex h-screen bg-[#1e1f20] overflow-hidden">
+    <div className="flex h-full bg-[#1e1f20] overflow-hidden">
       {/* Notion-style Sidebar — inline on desktop, slide-over overlay on mobile */}
       {sidebarOpen && isMobile && (
         <div

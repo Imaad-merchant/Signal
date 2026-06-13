@@ -12,8 +12,10 @@ export default function Layout({ children, currentPageName }) {
     return () => { window.removeEventListener("storage", sync); window.removeEventListener("focus", sync); };
   }, []);
 
+  const isFullHeight = currentPageName === "Dashboard" || currentPageName === "Tasks";
+
   return (
-    <div className="min-h-screen bg-[#1e1f20]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+    <div className="min-h-[100dvh] bg-[#1e1f20]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       <style>{`
         * { -webkit-font-smoothing: antialiased; }
         body {
@@ -37,7 +39,8 @@ export default function Layout({ children, currentPageName }) {
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -16 }}
           transition={{ duration: 0.18, ease: "easeInOut" }}
-          className={(currentPageName === "Dashboard" || currentPageName === "Tasks") ? "h-screen overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}
+          className={isFullHeight ? "overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}
+          style={isFullHeight ? { height: "calc(100dvh - env(safe-area-inset-top))" } : undefined}
         >
           {children}
         </motion.main>
