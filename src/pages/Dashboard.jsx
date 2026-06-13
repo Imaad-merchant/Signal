@@ -14,7 +14,7 @@ import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
 import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
-import TaskDetailModal from "../components/dashboard/TaskDetailModal";
+import EditTaskDialog from "../components/dashboard/EditTaskDialog";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 import { useIsMobile } from "../components/useIsMobile";
 
@@ -85,6 +85,7 @@ export default function Dashboard() {
   const [showAddTask, setShowAddTask] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [showTaskDetail, setShowTaskDetail] = useState(false);
+  const [fabOpen, setFabOpen] = useState(false);
   const [view, setView] = useState("Month");
   // Sidebar is an inline panel on desktop but an overlay on mobile — start closed on
   // small screens so it doesn't squeeze the calendar to a sliver.
@@ -303,7 +304,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex h-screen bg-[#1e1f20] text-gray-100 overflow-hidden">
+    <div className="flex h-full bg-[#1e1f20] text-gray-100 overflow-hidden">
 
       {/* Left Sidebar */}
       <AnimatePresence>
@@ -726,7 +727,7 @@ export default function Dashboard() {
          <div
            ref={calBodyRef}
            data-scroll-container
-           className="flex-1 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+           className="flex-1 min-h-0 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
            onTouchStart={handleCalTouchStart}
            onTouchMove={handleCalTouchMove}
            onTouchEnd={handleCalTouchEnd}
@@ -784,10 +785,51 @@ export default function Dashboard() {
          </div>
       </div>
 
+      {/* Mobile floating create button (FAB) */}
+      <div className="md:hidden">
+        {fabOpen && <div className="fixed inset-0 z-40" onClick={() => setFabOpen(false)} />}
+        <div
+          className="fixed right-4 z-40 flex flex-col items-end gap-2"
+          style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 1rem)" }}
+        >
+          {fabOpen && (
+            <>
+              <button
+                onClick={() => { setShowAddEvent(true); setFabOpen(false); }}
+                className="flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-full bg-[#2d2e30] border border-white/10 text-sm font-medium text-gray-100 shadow-xl active:scale-95 transition-transform"
+              >
+                <CalendarDays className="h-4 w-4 text-blue-400" /> Event
+              </button>
+              <button
+                onClick={() => { setShowAddTask(true); setFabOpen(false); }}
+                className="flex items-center gap-2 pl-3 pr-4 py-2.5 rounded-full bg-[#2d2e30] border border-white/10 text-sm font-medium text-gray-100 shadow-xl active:scale-95 transition-transform"
+              >
+                <ListTodo className="h-4 w-4 text-amber-400" /> Task
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setFabOpen(o => !o)}
+            className="h-14 w-14 rounded-full shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+            style={{ backgroundColor: "var(--pulse-theme, #4285f4)" }}
+            aria-label="Create"
+          >
+            <Plus className={`h-7 w-7 text-white transition-transform ${fabOpen ? "rotate-45" : ""}`} />
+          </button>
+        </div>
+      </div>
+
       <AIAssistantDialog open={showAIAssistant} onOpenChange={setShowAIAssistant} onUpdated={refresh} categories={categories} />
       <AddEventDialog open={showAddEvent} onOpenChange={(v) => { setShowAddEvent(v); if (!v) setAddEventDate(null); }} defaultDate={addEventDate || format(selectedDate, "yyyy-MM-dd")} onAdded={refresh} categories={categories} />
       <AddTaskDialog2 open={showAddTask} onOpenChange={setShowAddTask} onAdded={refresh} />
-      <TaskDetailModal task={selectedTask} open={showTaskDetail} onOpenChange={setShowTaskDetail} />
+      {showTaskDetail && selectedTask && (
+        <EditTaskDialog
+          task={selectedTask}
+          categories={categories}
+          onClose={() => { setShowTaskDetail(false); setSelectedTask(null); }}
+          onUpdated={refresh}
+        />
+      )}
     </div>
   );
 }

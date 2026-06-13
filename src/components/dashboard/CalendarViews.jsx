@@ -239,7 +239,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
             const maxRows = compact ? 4 : 6; // max stacked items per cell before "+N more"
 
             return (
-              <div key={weekIdx} className="grid grid-cols-7 relative flex-1" style={{ minHeight: compact ? "76px" : "100px" }}>
+              <div key={weekIdx} className="grid grid-cols-7 relative flex-1 min-h-0" style={{ minHeight: compact ? 0 : "100px" }}>
                 {/* Day cells */}
                 {weekDays.map((date, idx) => {
                   const dayTasks = getTasksForDate(tasks, date);
@@ -260,7 +260,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                       onDragOver={(e) => onDragOver(e, dateStr)}
                       onDrop={(e) => onDrop(e, dateStr)}
                       onDragLeave={onDragLeave}
-                      className={`border-b border-r border-white/[0.07] cursor-pointer transition-colors ${compact ? "p-0.5" : "p-1.5"} ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
+                      className={`border-b border-r border-white/[0.07] cursor-pointer transition-colors ${compact ? "p-0.5 overflow-hidden" : "p-1.5"} ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
                     >
                       <div className={`flex mb-1 ${compact ? "justify-start" : "justify-end"}`}>
                         <span

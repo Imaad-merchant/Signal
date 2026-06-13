@@ -50,9 +50,10 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/60" onMouseDown={onClose}>
       <div
-        className="w-full max-w-md bg-[#2d2e30] border border-white/15 rounded-2xl shadow-2xl p-6 space-y-4"
+        className="w-full sm:max-w-md bg-[#2d2e30] border border-white/15 rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 sm:p-6 space-y-4 max-h-[90dvh] overflow-y-auto"
+        style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom))" }}
         onMouseDown={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -70,10 +71,9 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
         <div>
           <label className="text-xs text-gray-400 mb-1 block">Title</label>
           <input
-            autoFocus
             value={form.title}
             onChange={e => set("title", e.target.value)}
-            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/30"
+            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/30"
           />
         </div>
 
@@ -84,7 +84,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             value={form.description}
             onChange={e => set("description", e.target.value)}
             rows={2}
-            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/30 resize-none"
+            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/30 resize-none"
           />
         </div>
 
@@ -95,7 +95,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             <select
               value={form.category}
               onChange={e => set("category", e.target.value)}
-              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
+              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 focus:outline-none focus:border-white/30"
             >
               {categories.map(c => (
                 <option key={c.key} value={c.key}>{c.label}</option>
@@ -107,7 +107,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             <select
               value={form.priority}
               onChange={e => set("priority", e.target.value)}
-              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
+              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 focus:outline-none focus:border-white/30"
             >
               {PRIORITIES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
             </select>
@@ -121,7 +121,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             <select
               value={form.status}
               onChange={e => set("status", e.target.value)}
-              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
+              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 focus:outline-none focus:border-white/30"
             >
               {STATUSES.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
             </select>
@@ -132,7 +132,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
               type="date"
               value={form.due_date}
               onChange={e => set("due_date", e.target.value)}
-              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
+              className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 focus:outline-none focus:border-white/30"
             />
           </div>
         </div>
@@ -145,7 +145,7 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             value={form.end_date}
             min={form.due_date || undefined}
             onChange={e => set("end_date", e.target.value)}
-            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-white/30"
+            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 focus:outline-none focus:border-white/30"
           />
         </div>
 
@@ -158,21 +158,21 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
             value={form.estimated_minutes}
             onChange={e => set("estimated_minutes", e.target.value)}
             placeholder="e.g. 30"
-            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/30"
+            className="w-full bg-[#1e1f20] border border-white/10 rounded-lg px-3 py-2.5 text-base sm:text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/30"
           />
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between gap-3 pt-1">
           <button
             onClick={handleDelete}
-            className="text-xs text-red-400 hover:text-red-300 transition-colors px-2 py-1 rounded hover:bg-red-500/10"
+            className="text-sm text-red-400 hover:text-red-300 transition-colors px-3 py-2.5 rounded-lg hover:bg-red-500/10"
           >
-            Delete task
+            Delete
           </button>
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/10 transition-colors"
+            className="px-5 py-2.5 text-sm font-medium text-white rounded-xl bg-blue-600 hover:bg-blue-500 transition-colors"
           >
             Done
           </button>
