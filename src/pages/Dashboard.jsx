@@ -16,7 +16,6 @@ import AddEventDialog from "../components/dashboard/AddEventDialog";
 import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import TaskDetailModal from "../components/dashboard/TaskDetailModal";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
-import AgendaView from "../components/dashboard/AgendaView";
 import { useIsMobile } from "../components/useIsMobile";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
@@ -742,23 +741,17 @@ export default function Dashboard() {
              </div>
            )}
            {internalView === "Monthly" && (
-              isMobile
-                ? <AgendaView
-                    currentMonth={currentMonth}
-                    tasks={filteredTasks}
-                    categories={categories}
-                    onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
-                  />
-                : <MonthlyView
-                    currentMonth={currentMonth}
-                    selectedDate={selectedDate}
-                    setSelectedDate={setSelectedDate}
-                    tasks={filteredTasks}
-                    onUpdated={refresh}
-                    categories={categories}
-                    onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
-                    onAddEvent={(dateStr) => { setAddEventDate(dateStr); setSelectedDate(new Date(dateStr + "T12:00:00")); setShowAddEvent(true); }}
-                  />
+              <MonthlyView
+                currentMonth={currentMonth}
+                selectedDate={selectedDate}
+                setSelectedDate={setSelectedDate}
+                tasks={filteredTasks}
+                onUpdated={refresh}
+                categories={categories}
+                onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+                onAddEvent={(dateStr) => { setAddEventDate(dateStr); setSelectedDate(new Date(dateStr + "T12:00:00")); setShowAddEvent(true); }}
+                compact={isMobile}
+              />
             )}
            {internalView === "Weekly" && (
              <WeeklyView

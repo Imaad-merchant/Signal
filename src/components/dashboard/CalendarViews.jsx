@@ -93,7 +93,7 @@ function useContextMenu(onUpdated, categories) {
   return { openMenu, menuEl };
 }
 
-function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = [] }) {
+function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = [], compact = false }) {
   const categoryMap = Object.fromEntries(categories.map(c => [c.key, { bg: c.color, text: "#fff" }]));
   const c = categoryMap[task.category] || DEFAULT_CATEGORY_COLORS[task.category] || defaultColor;
   const isDone = task.status === "done";
@@ -103,7 +103,7 @@ function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = 
       onDragStart={(e) => { e.stopPropagation(); onDragStart(task); }}
       onContextMenu={(e) => onContextMenu(e, task)}
       onClick={(e) => { e.stopPropagation(); onTaskClick?.(task); }}
-      className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-[3px] rounded-[4px] truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125"
+      className={`flex items-center gap-1 font-semibold rounded-[4px] truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1 py-[1px]" : "text-[10px] px-1.5 py-[3px]"}`}
       style={{
         backgroundColor: isDone ? "rgba(255,255,255,0.04)" : c.bg,
         color: isDone ? "#555" : c.text,
@@ -179,7 +179,7 @@ function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, 
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
-export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick, onAddEvent }) {
+export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick, onAddEvent, compact = false }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
@@ -224,7 +224,9 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
       <div className="h-full flex flex-col relative">
         <div className="grid grid-cols-7 border-b border-white/10">
           {DAY_HEADERS.map((d) => (
-            <div key={d} className="py-2 text-center text-[10px] font-medium text-gray-500 tracking-widest">{d}</div>
+            <div key={d} className={`text-center font-medium text-gray-500 ${compact ? "py-1.5 text-[10px] tracking-wider" : "py-2 text-[10px] tracking-widest"}`}>
+              {compact ? d.charAt(0) : d}
+            </div>
           ))}
         </div>
         <div className="flex-1 flex flex-col">
@@ -232,12 +234,12 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
             const weekDays = calDays.slice(weekIdx * 7, weekIdx * 7 + 7);
             const spans = computeMultiDaySpansForWeek(tasks, weekDays);
             const laneCount = spans.length === 0 ? 0 : Math.max(...spans.map(s => s.lane)) + 1;
-            const laneOffset = 28; // px reserved at top of cell for day number
-            const laneHeight = 20; // px per multi-day bar
-            const topPadForSingleDay = laneOffset + laneCount * laneHeight + 4;
+            const laneOffset = compact ? 22 : 28; // px reserved at top of cell for day number
+            const laneHeight = compact ? 15 : 20; // px per multi-day bar
+            const maxRows = compact ? 4 : 6; // max stacked items per cell before "+N more"
 
             return (
-              <div key={weekIdx} className="grid grid-cols-7 relative flex-1" style={{ minHeight: "100px" }}>
+              <div key={weekIdx} className="grid grid-cols-7 relative flex-1" style={{ minHeight: compact ? "76px" : "100px" }}>
                 {/* Day cells */}
                 {weekDays.map((date, idx) => {
                   const dayTasks = getTasksForDate(tasks, date);
@@ -258,11 +260,11 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                       onDragOver={(e) => onDragOver(e, dateStr)}
                       onDrop={(e) => onDrop(e, dateStr)}
                       onDragLeave={onDragLeave}
-                      className={`p-1.5 border-b border-r border-white/[0.07] cursor-pointer transition-colors ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
+                      className={`border-b border-r border-white/[0.07] cursor-pointer transition-colors ${compact ? "p-0.5" : "p-1.5"} ${!isCurrentMonth ? "opacity-30" : ""} ${isDragOver ? "bg-blue-500/10" : "hover:bg-white/[0.03]"}`}
                     >
-                      <div className="flex justify-end mb-1">
+                      <div className={`flex mb-1 ${compact ? "justify-start" : "justify-end"}`}>
                         <span
-                          className={`h-6 w-6 flex items-center justify-center rounded-full text-xs font-medium transition-colors ${
+                          className={`flex items-center justify-center rounded-full font-medium transition-colors ${compact ? "h-5 w-5 text-[11px]" : "h-6 w-6 text-xs"} ${
                             todayFlag
                               ? "bg-blue-500 text-white"
                               : isSelected
@@ -274,15 +276,15 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                         </span>
                       </div>
                       <div className="space-y-0.5" style={{ marginTop: laneCount > 0 ? `${laneCount * laneHeight + 4}px` : 0 }}>
-                        {dayTasks.slice(0, 6 - laneCount).map((task) => (
-                          <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
+                        {dayTasks.slice(0, maxRows - laneCount).map((task) => (
+                          <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} compact={compact} />
                         ))}
-                        {dayTasks.length > 6 - laneCount && (
+                        {dayTasks.length > maxRows - laneCount && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setOverflowDay({ date, tasks: dayTasks }); }}
-                            className="text-[10px] text-blue-400 hover:text-blue-300 px-1 transition-colors"
+                            className={`text-blue-400 hover:text-blue-300 transition-colors ${compact ? "text-[9px] px-0.5" : "text-[10px] px-1"}`}
                           >
-                            +{dayTasks.length - (6 - laneCount)} more
+                            +{dayTasks.length - (maxRows - laneCount)} more
                           </button>
                         )}
                       </div>
@@ -302,7 +304,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                       onDragStart={(e) => { e.stopPropagation(); onDragStart(span.task); }}
                       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(e, span.task); }}
                       onClick={(e) => { e.stopPropagation(); onTaskClick?.(span.task); }}
-                      className="absolute flex items-center text-[10px] font-semibold truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 px-1.5"
+                      className={`absolute flex items-center font-semibold truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1" : "text-[10px] px-1.5"}`}
                       style={{
                         left: `calc(${(span.startCol / 7) * 100}% + 4px)`,
                         width: `calc(${((span.endCol - span.startCol + 1) / 7) * 100}% - 8px)`,
