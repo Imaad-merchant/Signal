@@ -1150,7 +1150,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         } : { backgroundColor: "#1a1b1c" }}
       >
         {/* Two-row top toolbar: Row 1 persistent tools, Row 2 contextual formatting */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]">
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-[calc(100vw-1.5rem)]">
           <Toolbar
             tool={tool}
             setTool={setTool}
