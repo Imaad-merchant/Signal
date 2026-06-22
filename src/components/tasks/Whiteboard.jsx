@@ -1091,8 +1091,9 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const [drawingObject, setDrawingObject] = useState(null);
   const [panning, setPanning] = useState(false);
   const [draggingSelection, setDraggingSelection] = useState(null); // { startX, startY, originals }
-  const [transforming, setTransforming] = useState(null); // { mode: "resize"|"rotate", handle, id, oc, snapshot, startAngle, startRotation }
   const lastPointer = useRef(null); // last screen pointer pos, for touch-friendly panning
+  const pointers = useRef(new Map()); // active pointers (for pinch-zoom)
+  const pinchRef = useRef(null); // { startDist, startMid, startViewport }
   const [editingTextId, setEditingTextId] = useState(null);
 
   const saveTimer = useRef(null);
@@ -1499,6 +1500,25 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const handlePointerDown = (e) => {
     // Right-click handled by onContextMenu, not here
     if (e.button === 2) return;
+
+    // Track pointers for pinch-zoom
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      // Second finger down → start a pinch, cancelling any single-finger action.
+      const pts = [...pointers.current.values()];
+      const rect = containerRef.current.getBoundingClientRect();
+      pinchRef.current = {
+        startDist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1,
+        startMid: { x: (pts[0].x + pts[1].x) / 2 - rect.left, y: (pts[0].y + pts[1].y) / 2 - rect.top },
+        startViewport: { ...viewport },
+      };
+      setPanning(false);
+      setDraggingSelection(null);
+      setDrawingObject(null);
+      return;
+    }
+    if (pinchRef.current) return; // already pinching
+
     if (e.button === 1 || (tool === "hand" && e.button === 0)) {
       setPanning(true);
       lastPointer.current = { x: e.clientX, y: e.clientY };
@@ -1576,6 +1596,21 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   };
 
   const handlePointerMove = (e) => {
+    // Two-finger pinch: zoom + pan around the fingers' midpoint (TradingView-style).
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinchRef.current && pointers.current.size >= 2) {
+      const pts = [...pointers.current.values()];
+      const curDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+      const rect = containerRef.current.getBoundingClientRect();
+      const curMid = { x: (pts[0].x + pts[1].x) / 2 - rect.left, y: (pts[0].y + pts[1].y) / 2 - rect.top };
+      const { startDist, startMid, startViewport } = pinchRef.current;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, startViewport.zoom * (curDist / startDist)));
+      const wx = (startMid.x - startViewport.x) / startViewport.zoom;
+      const wy = (startMid.y - startViewport.y) / startViewport.zoom;
+      setViewport({ x: curMid.x - wx * newZoom, y: curMid.y - wy * newZoom, zoom: newZoom });
+      return;
+    }
+
     if (panning) {
       // Track delta manually — pointer movementX/Y is unreliable for touch.
       const last = lastPointer.current || { x: e.clientX, y: e.clientY };
@@ -1583,33 +1618,6 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const dy = e.clientY - last.y;
       lastPointer.current = { x: e.clientX, y: e.clientY };
       setViewport(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
-      return;
-    }
-
-    if (transforming) {
-      const { x, y } = screenToWorld(e.clientX, e.clientY);
-      const t = transforming;
-      const oc = t.oc;
-      if (t.mode === "rotate") {
-        const ang = Math.atan2(y - oc.y, x - oc.x) * 180 / Math.PI;
-        let rotation = t.startRotation + (ang - t.startAngle);
-        if (e.shiftKey) rotation = Math.round(rotation / 15) * 15;
-        setObjects(prev => prev.map(o => o.id === t.id ? { ...o, rotation } : o));
-      } else {
-        // Resize from center: inverse-rotate pointer into the object's local frame.
-        const lp = rotatePt(x, y, oc.x, oc.y, -t.startRotation);
-        const minHalf = 4;
-        let halfW = Math.max(minHalf, Math.abs(lp.x - oc.x));
-        let halfH = Math.max(minHalf, Math.abs(lp.y - oc.y));
-        const h = t.handle;
-        const horiz = h === "e" || h === "w";
-        const vert = h === "n" || h === "s";
-        if (horiz) halfH = t.snapshot.h / 2;   // edge handle: lock the other axis
-        if (vert) halfW = t.snapshot.w / 2;
-        setObjects(prev => prev.map(o => o.id === t.id
-          ? { ...o, x: oc.x - halfW, y: oc.y - halfH, w: halfW * 2, h: halfH * 2 }
-          : o));
-      }
       return;
     }
 
@@ -1659,8 +1667,9 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   };
 
   const handlePointerUp = (e) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinchRef.current = null;
     if (panning) { setPanning(false); lastPointer.current = null; return; }
-    if (transforming) { setTransforming(null); return; }
     if (draggingSelection) { setDraggingSelection(null); return; }
     if (drawingObject) {
       let obj = drawingObject;
@@ -1695,24 +1704,64 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     }
   };
 
+  // Per-handle anchor config: ax/ay = anchor point as fraction of the box,
+  // sx/sy = direction from anchor to center, dimX/dimY = which dimensions resize.
+  const HANDLE_CFG = {
+    se: { ax: 0,   ay: 0,   sx: 1,  sy: 1,  dimX: 1, dimY: 1 },
+    sw: { ax: 1,   ay: 0,   sx: -1, sy: 1,  dimX: 1, dimY: 1 },
+    ne: { ax: 0,   ay: 1,   sx: 1,  sy: -1, dimX: 1, dimY: 1 },
+    nw: { ax: 1,   ay: 1,   sx: -1, sy: -1, dimX: 1, dimY: 1 },
+    e:  { ax: 0,   ay: 0.5, sx: 1,  sy: 0,  dimX: 1, dimY: 0 },
+    w:  { ax: 1,   ay: 0.5, sx: -1, sy: 0,  dimX: 1, dimY: 0 },
+    n:  { ax: 0.5, ay: 1,   sx: 0,  sy: -1, dimX: 0, dimY: 1 },
+    s:  { ax: 0.5, ay: 0,   sx: 0,  sy: 1,  dimX: 0, dimY: 1 },
+  };
+
   // Start a resize/rotate gesture from a selection handle (mouse or touch).
+  // Uses document listeners so it's robust against implicit touch pointer capture.
   const startTransform = (e, mode, handle, obj) => {
     e.stopPropagation();
+    e.preventDefault?.();
     pushHistory(objects);
     const b = objectBounds(obj);
     const oc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
-    const { x, y } = screenToWorld(e.clientX, e.clientY);
-    containerRef.current?.setPointerCapture?.(e.pointerId);
-    setSelectedIds([obj.id]);
-    setTransforming({
-      mode,
-      handle,
-      id: obj.id,
-      oc,
-      snapshot: { x: b.x, y: b.y, w: b.w, h: b.h },
-      startRotation: obj.rotation || 0,
-      startAngle: Math.atan2(y - oc.y, x - oc.x) * 180 / Math.PI,
-    });
+    const r = obj.rotation || 0;
+    const id = obj.id;
+    const start = screenToWorld(e.clientX, e.clientY);
+    const startAngle = Math.atan2(start.y - oc.y, start.x - oc.x) * 180 / Math.PI;
+    setSelectedIds([id]);
+
+    const onMove = (ev) => {
+      const { x, y } = screenToWorld(ev.clientX, ev.clientY);
+      if (mode === "rotate") {
+        const ang = Math.atan2(y - oc.y, x - oc.x) * 180 / Math.PI;
+        let rotation = r + (ang - startAngle);
+        if (ev.shiftKey) rotation = Math.round(rotation / 15) * 15;
+        setObjects(prev => prev.map(o => o.id === id ? { ...o, rotation } : o));
+        return;
+      }
+      // Anchored (PowerPoint-style) resize: the opposite corner/edge stays put.
+      const cfg = HANDLE_CFG[handle];
+      const anchorStored = { x: b.x + cfg.ax * b.w, y: b.y + cfg.ay * b.h };
+      const anchorVisual = rotatePt(anchorStored.x, anchorStored.y, oc.x, oc.y, r);
+      const d = rotatePt(x - anchorVisual.x, y - anchorVisual.y, 0, 0, -r); // un-rotate the drag vector
+      const newW = cfg.dimX ? Math.max(8, Math.abs(d.x)) : b.w;
+      const newH = cfg.dimY ? Math.max(8, Math.abs(d.y)) : b.h;
+      const offWorld = rotatePt(cfg.sx * newW / 2, cfg.sy * newH / 2, 0, 0, r);
+      const cx = anchorVisual.x + offWorld.x;
+      const cy = anchorVisual.y + offWorld.y;
+      setObjects(prev => prev.map(o => o.id === id
+        ? { ...o, x: cx - newW / 2, y: cy - newH / 2, w: newW, h: newH }
+        : o));
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   };
 
   // Wheel: zoom — attached via useEffect with passive:false so preventDefault works
@@ -2227,17 +2276,21 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 return (
                   <div key={hd.k}
                     onPointerDown={(e) => startTransform(e, "resize", hd.k, o)}
-                    className="absolute z-40 rounded-[3px] bg-white border-2 border-blue-500 shadow"
-                    style={{ left: s.left, top: s.top, width: 16, height: 16, transform: "translate(-50%,-50%)", cursor: cursorFor[hd.k], touchAction: "none" }}
-                  />
+                    className="absolute z-40 flex items-center justify-center"
+                    style={{ left: s.left, top: s.top, width: 28, height: 28, transform: "translate(-50%,-50%)", cursor: cursorFor[hd.k], touchAction: "none" }}
+                  >
+                    <div className="rounded-[3px] bg-white border-2 border-blue-500 shadow" style={{ width: 14, height: 14 }} />
+                  </div>
                 );
               })}
               <div
                 onPointerDown={(e) => startTransform(e, "rotate", null, o)}
-                className="absolute z-40 rounded-full bg-white border-2 border-blue-500 shadow flex items-center justify-center"
-                style={{ left: rotPos.left, top: rotPos.top, width: 20, height: 20, transform: "translate(-50%,-50%)", cursor: "grab", touchAction: "none" }}
+                className="absolute z-40 flex items-center justify-center"
+                style={{ left: rotPos.left, top: rotPos.top, width: 32, height: 32, transform: "translate(-50%,-50%)", cursor: "grab", touchAction: "none" }}
               >
-                <RotateCw className="h-3 w-3 text-blue-600" />
+                <div className="rounded-full bg-white border-2 border-blue-500 shadow flex items-center justify-center" style={{ width: 20, height: 20 }}>
+                  <RotateCw className="h-3 w-3 text-blue-600" />
+                </div>
               </div>
             </>
           );
