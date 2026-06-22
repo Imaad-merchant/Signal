@@ -134,3 +134,31 @@ export function hitTest(o, x, y, tolerance = 8) {
 export function worldToScreen(wx, wy, viewport) {
   return { x: wx * viewport.zoom + viewport.x, y: wy * viewport.zoom + viewport.y };
 }
+
+export const GRID_SIZE = 20;
+
+// Snap a single scalar to the grid.
+export function snap(v, size = GRID_SIZE) {
+  return Math.round(v / size) * size;
+}
+
+// Snap an object's coordinates to the grid (box, line/arrow, path).
+export function snapObj(o, size = GRID_SIZE) {
+  switch (o.type) {
+    case "text":
+    case "rect":
+    case "ellipse":
+    case "triangle":
+    case "diamond":
+    case "roundedRect":
+    case "star":
+      return { ...o, x: snap(o.x, size), y: snap(o.y, size) };
+    case "line":
+    case "arrow":
+      return { ...o, x1: snap(o.x1, size), y1: snap(o.y1, size), x2: snap(o.x2, size), y2: snap(o.y2, size) };
+    case "path":
+      return { ...o, points: (o.points || []).map(p => ({ x: snap(p.x, size), y: snap(p.y, size) })) };
+    default:
+      return o;
+  }
+}
