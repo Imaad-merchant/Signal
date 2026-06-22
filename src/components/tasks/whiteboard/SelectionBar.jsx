@@ -1,21 +1,65 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Trash2, ChevronDown, AlignLeft, AlignCenter, AlignRight } from "lucide-react";
+import { BOX_TYPES } from "./geometry";
+
+// Small labeled numeric input used for X/Y/W/H/rotation.
+function NumField({ label, value, onCommit, title }) {
+  const [draft, setDraft] = useState(String(value));
+  // Re-sync from props when not focused (e.g. after a drag-resize).
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(String(value));
+  }, [value]);
+  const commit = () => {
+    const n = Number(draft);
+    if (Number.isFinite(n) && n !== value) onCommit(n);
+    else setDraft(String(value));
+  };
+  return (
+    <label className="flex items-center gap-0.5" title={title}>
+      <span className="text-[9px] text-gray-500">{label}</span>
+      <input
+        type="number"
+        value={draft}
+        onFocus={() => { focusedRef.current = true; }}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { focusedRef.current = false; commit(); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.currentTarget.blur(); }
+          else if (e.key === "Escape") { setDraft(String(value)); e.currentTarget.blur(); }
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="w-10 bg-white/[0.06] border border-white/[0.1] rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none focus:border-blue-400/60"
+      />
+    </label>
+  );
+}
 
 // ─── Selection Action Bar ────────────────────────────────────────
-export default function SelectionBar({ count, selected, locked, fill, opacity, onSetFill, onSetOpacity, onAlign, onDistribute, onBringToFront, onSendToBack, onBringForward, onSendBackward, onGroup, onUngroup, onToggleLock, onDuplicate, onDelete, onExportPNG, onExportSVG }) {
+export default function SelectionBar({ count, selected, locked, fill, opacity, fillOpacity, strokeOpacity, strokeStyle, cornerRadius, arrowHeads, singleType, singleBounds, singleRotation, onSetFill, onSetOpacity, onSetFillOpacity, onSetStrokeOpacity, onSetStrokeStyle, onSetCornerRadius, onSetArrowHeads, onSetGeometry, onAlign, onDistribute, onBringToFront, onSendToBack, onBringForward, onSendBackward, onGroup, onUngroup, onToggleLock, onDuplicate, onDelete, onExportPNG, onExportSVG }) {
   const [fillOpen, setFillOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
   const fillRef = useRef(null);
   const moreRef = useRef(null);
+  const styleRef = useRef(null);
+
+  const isRectLike = singleType === "rect" || singleType === "roundedRect";
+  const isArrow = singleType === "arrow";
+  const canRotate = !!singleType && BOX_TYPES.includes(singleType);
 
   useEffect(() => {
     const handler = (e) => {
       if (fillRef.current && !fillRef.current.contains(e.target)) setFillOpen(false);
       if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false);
+      if (styleRef.current && !styleRef.current.contains(e.target)) setStyleOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  const STROKE_DASH_PREVIEW = { solid: "", dashed: "6 4", dotted: "2 4" };
 
   const Btn = ({ onClick, title, children, active }) => (
     <button
@@ -85,22 +129,123 @@ export default function SelectionBar({ count, selected, locked, fill, opacity, o
         )}
       </div>
 
-      {/* Opacity slider */}
-      <div className="flex items-center gap-1 px-2">
-        <span className="text-[10px] text-gray-500">α</span>
+      {/* Fill opacity slider */}
+      <div className="flex items-center gap-1 px-1.5" title="Fill opacity">
+        <span className="text-[9px] text-gray-500">Fill</span>
         <input
           type="range"
           min={0}
           max={100}
-          value={Math.round((opacity ?? 1) * 100)}
-          onChange={(e) => onSetOpacity(Number(e.target.value) / 100)}
+          value={Math.round((fillOpacity ?? opacity ?? 1) * 100)}
+          onChange={(e) => onSetFillOpacity(Number(e.target.value) / 100)}
           onMouseDown={(e) => e.stopPropagation()}
-          className="w-16 h-1 accent-blue-500"
+          className="w-12 h-1 accent-blue-500"
         />
-        <span className="text-[10px] text-gray-500 w-7 text-right">{Math.round((opacity ?? 1) * 100)}%</span>
       </div>
 
+      {/* Stroke opacity slider */}
+      <div className="flex items-center gap-1 px-1.5" title="Stroke opacity">
+        <span className="text-[9px] text-gray-500">Line</span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round((strokeOpacity ?? opacity ?? 1) * 100)}
+          onChange={(e) => onSetStrokeOpacity(Number(e.target.value) / 100)}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="w-12 h-1 accent-blue-500"
+        />
+      </div>
+
+      {/* Stroke style (solid / dashed / dotted) */}
+      <div className="relative" ref={styleRef}>
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setStyleOpen(o => !o); }}
+          className="flex items-center gap-1 p-1.5 rounded-md hover:bg-white/[0.07] text-gray-300"
+          title="Stroke style"
+        >
+          <svg width="18" height="8" className="overflow-visible">
+            <line x1="1" y1="4" x2="17" y2="4" stroke="currentColor" strokeWidth="2" strokeDasharray={STROKE_DASH_PREVIEW[strokeStyle] || ""} strokeLinecap="round" />
+          </svg>
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+        {styleOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[120px] z-50">
+            {["solid", "dashed", "dotted"].map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onSetStrokeStyle(s); setStyleOpen(false); }}
+                className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.05] ${strokeStyle === s ? "text-blue-300" : "text-gray-200"}`}
+              >
+                <svg width="28" height="8" className="overflow-visible">
+                  <line x1="1" y1="4" x2="27" y2="4" stroke="currentColor" strokeWidth="2" strokeDasharray={STROKE_DASH_PREVIEW[s] || ""} strokeLinecap="round" />
+                </svg>
+                <span className="capitalize">{s}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Corner radius (rect / roundedRect only) */}
+      {isRectLike && (() => {
+        const minDim = Math.min(singleBounds?.w ?? 0, singleBounds?.h ?? 0);
+        const value = Math.round(cornerRadius ?? (singleType === "roundedRect" ? minDim / 4 : 4));
+        // Cap at half the shorter side (matches the render clamp), but never below
+        // the current value so a previously-large radius isn't visually clamped.
+        const sliderMax = Math.max(Math.round(minDim / 2), value, 1);
+        return (
+          <div className="flex items-center gap-1 px-1.5" title="Corner radius">
+            <span className="text-[9px] text-gray-500">⌜</span>
+            <input
+              type="range"
+              min={0}
+              max={sliderMax}
+              value={value}
+              onChange={(e) => onSetCornerRadius(Number(e.target.value))}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="w-12 h-1 accent-blue-500"
+            />
+          </div>
+        );
+      })()}
+
+      {/* Arrowheads (arrow only) */}
+      {isArrow && (
+        <select
+          value={arrowHeads ?? "end"}
+          onChange={(e) => onSetArrowHeads(e.target.value)}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="bg-white/[0.06] border border-white/[0.1] rounded px-1 py-0.5 text-[10px] text-gray-200 outline-none focus:border-blue-400/60"
+          title="Arrowheads"
+        >
+          <option value="end">End →</option>
+          <option value="start">← Start</option>
+          <option value="both">↔ Both</option>
+          <option value="none">— None</option>
+        </select>
+      )}
+
       <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* Numeric geometry (single selection) */}
+      {singleBounds && onSetGeometry && (
+        <>
+          <div className="flex items-center gap-1">
+            <NumField label="X" value={Math.round(singleBounds.x)} onCommit={(v) => onSetGeometry("x", v)} title="X position" />
+            <NumField label="Y" value={Math.round(singleBounds.y)} onCommit={(v) => onSetGeometry("y", v)} title="Y position" />
+            <NumField label="W" value={Math.round(singleBounds.w)} onCommit={(v) => onSetGeometry("w", v)} title="Width" />
+            <NumField label="H" value={Math.round(singleBounds.h)} onCommit={(v) => onSetGeometry("h", v)} title="Height" />
+            {canRotate && (
+              <NumField label="∠" value={Math.round(singleRotation || 0)} onCommit={(v) => onSetGeometry("rotation", v)} title="Rotation (deg)" />
+            )}
+          </div>
+          <div className="w-px h-5 bg-white/[0.08] mx-1" />
+        </>
+      )}
 
       {/* Alignment */}
       {count >= 2 && (

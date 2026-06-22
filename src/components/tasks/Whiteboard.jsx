@@ -15,6 +15,9 @@ import {
   snap,
   snapObj,
   GRID_SIZE,
+  strokeDashArray,
+  fillOpacityOf,
+  strokeOpacityOf,
 } from "./whiteboard/geometry";
 import Toolbar from "./whiteboard/Toolbar";
 import SelectionBar from "./whiteboard/SelectionBar";
@@ -313,6 +316,40 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     pushHistory(objects);
     setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? { ...o, ...patch } : o));
   }, [effectiveSelectionIds, objects]);
+
+  // Set numeric geometry (x/y/w/h/rotation) for the single selected object from
+  // the SelectionBar inputs. `field` is one of x|y|w|h|rotation; the bounds are
+  // expressed in objectBounds() space (top-left origin, positive size). For
+  // line/arrow, x/y move both endpoints and w/h stretch the second endpoint.
+  const setSelectionGeometry = useCallback((field, value) => {
+    if (selectedIds.length !== 1) return;
+    const id = selectedIds[0];
+    const target = objects.find(o => o.id === id);
+    if (!target || target.locked) return;
+    const v = Math.round(value);
+    pushHistory(objects);
+    setObjects(prev => prev.map(o => {
+      if (o.id !== id) return o;
+      if (field === "rotation" && BOX_TYPES.includes(o.type)) return { ...o, rotation: v };
+      const b = objectBounds(o);
+      if (o.type === "line" || o.type === "arrow") {
+        if (field === "x") { const dx = v - b.x; return { ...o, x1: o.x1 + dx, x2: o.x2 + dx }; }
+        if (field === "y") { const dy = v - b.y; return { ...o, y1: o.y1 + dy, y2: o.y2 + dy }; }
+        if (field === "w") { const nx = b.x + Math.max(1, v); return o.x2 >= o.x1 ? { ...o, x2: nx } : { ...o, x1: nx }; }
+        if (field === "h") { const ny = b.y + Math.max(1, v); return o.y2 >= o.y1 ? { ...o, y2: ny } : { ...o, y1: ny }; }
+        return o;
+      }
+      // Box-like objects store top-left x/y and signed w/h. Normalize to a
+      // positive-size, top-left-origin box (matching bounds) before applying so
+      // a previously sign-flipped box doesn't jump.
+      const nb = { x: b.x, y: b.y, w: b.w, h: b.h };
+      if (field === "x") nb.x = v;
+      else if (field === "y") nb.y = v;
+      else if (field === "w") nb.w = Math.max(1, v);
+      else if (field === "h") nb.h = Math.max(1, v);
+      return { ...o, x: nb.x, y: nb.y, w: nb.w, h: nb.h };
+    }));
+  }, [selectedIds, objects]);
 
   // Add quick shape at point
   const addQuickShape = useCallback((shapeType, atX, atY) => {
@@ -823,11 +860,44 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         if (cfg.dimX) newW = Math.max(GRID_SIZE, snap(newW));
         if (cfg.dimY) newH = Math.max(GRID_SIZE, snap(newH));
       }
+      // Shift on a corner handle locks the original aspect ratio. Use the larger
+      // proposed scale on either axis so the box grows/shrinks uniformly.
+      if (ev.shiftKey && cfg.dimX && cfg.dimY && b.w > 0 && b.h > 0) {
+        const scale = Math.max(newW / b.w, newH / b.h);
+        newW = Math.max(8, b.w * scale);
+        newH = Math.max(8, b.h * scale);
+      }
       const offWorld = rotatePt(cfg.sx * newW / 2, cfg.sy * newH / 2, 0, 0, r);
       const cx = anchorVisual.x + offWorld.x;
       const cy = anchorVisual.y + offWorld.y;
       setObjects(prev => prev.map(o => o.id === id
         ? { ...o, x: cx - newW / 2, y: cy - newH / 2, w: newW, h: newH }
+        : o));
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  };
+
+  // Drag a single endpoint of a line/arrow. `end` is 1 (x1,y1) or 2 (x2,y2).
+  // Reuses the same document-listener gesture pattern as startTransform so it
+  // works for both mouse and touch.
+  const startEndpointDrag = (e, end, obj) => {
+    e.stopPropagation();
+    e.preventDefault?.();
+    pushHistory(objects);
+    const id = obj.id;
+    setSelectedIds([id]);
+    const onMove = (ev) => {
+      let { x, y } = screenToWorld(ev.clientX, ev.clientY);
+      if (snapToGrid) { x = snap(x); y = snap(y); }
+      setObjects(prev => prev.map(o => o.id === id
+        ? (end === 1 ? { ...o, x1: x, y1: y } : { ...o, x2: x, y2: y })
         : o));
     };
     const onUp = () => {
@@ -1046,6 +1116,8 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           // Show selection action bar when 1+ non-text objects are selected
           if (selectedIds.length > 0) {
             const first = objects.find(o => o.id === selectedIds[0]);
+            const single = selectedIds.length === 1 ? first : null;
+            const singleBounds = single ? objectBounds(single) : null;
             return (
               <SelectionBar
                 count={selectedIds.length}
@@ -1053,8 +1125,22 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 locked={!!first?.locked}
                 fill={first?.fill ?? "transparent"}
                 opacity={first?.opacity ?? 1}
+                fillOpacity={first?.fillOpacity ?? first?.opacity ?? 1}
+                strokeOpacity={first?.strokeOpacity ?? first?.opacity ?? 1}
+                strokeStyle={first?.strokeStyle ?? "solid"}
+                cornerRadius={first?.cornerRadius}
+                arrowHeads={first?.arrowHeads ?? "end"}
+                singleType={single?.type ?? null}
+                singleBounds={singleBounds}
+                singleRotation={single ? Math.round(single.rotation || 0) : 0}
                 onSetFill={(c) => setSelectionProp({ fill: c })}
                 onSetOpacity={(v) => setSelectionProp({ opacity: v })}
+                onSetFillOpacity={(v) => setSelectionProp({ fillOpacity: v })}
+                onSetStrokeOpacity={(v) => setSelectionProp({ strokeOpacity: v })}
+                onSetStrokeStyle={(v) => setSelectionProp({ strokeStyle: v })}
+                onSetCornerRadius={(v) => setSelectionProp({ cornerRadius: v })}
+                onSetArrowHeads={(v) => setSelectionProp({ arrowHeads: v })}
+                onSetGeometry={setSelectionGeometry}
                 onAlign={alignSelection}
                 onDistribute={distributeSelection}
                 onBringToFront={bringToFront}
@@ -1130,13 +1216,19 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
             <marker id="wb-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
             </marker>
+            {/* Start marker mirrors #wb-arrow so it points back toward (x1,y1). */}
+            <marker id="wb-arrow-start" viewBox="0 0 10 10" refX="2" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 10 0 L 0 5 L 10 10 z" fill="currentColor" />
+            </marker>
           </defs>
           <g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.zoom})`}>
             {allDrawing.map(o => {
               const isSel = selectedIds.includes(o.id);
               const selStyle = isSel ? { filter: "drop-shadow(0 0 4px rgba(59,130,246,0.8))" } : {};
 
-              const objOpacity = o.opacity ?? 1;
+              const objFillOpacity = fillOpacityOf(o);
+              const objStrokeOpacity = strokeOpacityOf(o);
+              const objDash = strokeDashArray(o);
               const objFill = o.fill && o.fill !== "transparent" ? o.fill : (o.color + "20");
               const lockedStyle = o.locked ? { ...selStyle, opacity: 0.7 } : selStyle;
 
@@ -1150,11 +1242,14 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                     key={o.id}
                     x={x} y={y} width={w} height={h}
                     fill={objFill}
-                    fillOpacity={objOpacity}
+                    fillOpacity={objFillOpacity}
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
-                    strokeOpacity={objOpacity}
-                    rx={o.type === "roundedRect" ? Math.min(w, h) / 4 : 4}
+                    strokeOpacity={objStrokeOpacity}
+                    strokeDasharray={objDash}
+                    rx={o.cornerRadius != null
+                      ? Math.max(0, Math.min(o.cornerRadius, Math.min(w, h) / 2))
+                      : (o.type === "roundedRect" ? Math.min(w, h) / 4 : 4)}
                     transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
                     style={lockedStyle}
                   />
@@ -1167,7 +1262,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 const h = Math.abs(o.h);
                 const pts = `${x + w / 2},${y} ${x},${y + h} ${x + w},${y + h}`;
                 return (
-                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined} style={lockedStyle} />
+                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objFillOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objStrokeOpacity} strokeDasharray={objDash} transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined} style={lockedStyle} />
                 );
               }
               if (o.type === "diamond") {
@@ -1177,7 +1272,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 const h = Math.abs(o.h);
                 const pts = `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
                 return (
-                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined} style={lockedStyle} />
+                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objFillOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objStrokeOpacity} strokeDasharray={objDash} transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined} style={lockedStyle} />
                 );
               }
               if (o.type === "star") {
@@ -1195,7 +1290,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                   pts.push(`${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`);
                 }
                 return (
-                  <polygon key={o.id} points={pts.join(" ")} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined} style={lockedStyle} />
+                  <polygon key={o.id} points={pts.join(" ")} fill={objFill} fillOpacity={objFillOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objStrokeOpacity} strokeDasharray={objDash} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined} style={lockedStyle} />
                 );
               }
               if (o.type === "ellipse") {
@@ -1208,10 +1303,11 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                     key={o.id}
                     cx={cx} cy={cy} rx={rx} ry={ry}
                     fill={objFill}
-                    fillOpacity={objOpacity}
+                    fillOpacity={objFillOpacity}
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
-                    strokeOpacity={objOpacity}
+                    strokeOpacity={objStrokeOpacity}
+                    strokeDasharray={objDash}
                     transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
                     style={lockedStyle}
                   />
@@ -1224,20 +1320,28 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                     x1={o.x1} y1={o.y1} x2={o.x2} y2={o.y2}
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
+                    strokeOpacity={objStrokeOpacity}
+                    strokeDasharray={objDash}
                     strokeLinecap="round"
                     style={selStyle}
                   />
                 );
               }
               if (o.type === "arrow") {
+                const heads = o.arrowHeads || "end";
+                const showStart = heads === "start" || heads === "both";
+                const showEnd = heads === "end" || heads === "both";
                 return (
                   <line
                     key={o.id}
                     x1={o.x1} y1={o.y1} x2={o.x2} y2={o.y2}
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
+                    strokeOpacity={objStrokeOpacity}
+                    strokeDasharray={objDash}
                     strokeLinecap="round"
-                    markerEnd="url(#wb-arrow)"
+                    markerStart={showStart ? "url(#wb-arrow-start)" : undefined}
+                    markerEnd={showEnd ? "url(#wb-arrow)" : undefined}
                     style={{ color: o.color, ...selStyle }}
                   />
                 );
@@ -1387,6 +1491,30 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                   <RotateCw className="h-3 w-3 text-blue-600" />
                 </div>
               </div>
+            </>
+          );
+        })()}
+
+        {/* Endpoint handles for a single selected line/arrow */}
+        {tool === "select" && !editingTextId && !drawingObject && selectedIds.length === 1 && (() => {
+          const o = objects.find(ob => ob.id === selectedIds[0]);
+          if (!o || (o.type !== "line" && o.type !== "arrow") || o.locked) return null;
+          const z = viewport.zoom;
+          const ends = [
+            { end: 1, left: o.x1 * z + viewport.x, top: o.y1 * z + viewport.y },
+            { end: 2, left: o.x2 * z + viewport.x, top: o.y2 * z + viewport.y },
+          ];
+          return (
+            <>
+              {ends.map(p => (
+                <div key={p.end}
+                  onPointerDown={(e) => startEndpointDrag(e, p.end, o)}
+                  className="absolute z-40 flex items-center justify-center"
+                  style={{ left: p.left, top: p.top, width: 28, height: 28, transform: "translate(-50%,-50%)", cursor: "move", touchAction: "none" }}
+                >
+                  <div className="rounded-full bg-white border-2 border-blue-500 shadow" style={{ width: 14, height: 14 }} />
+                </div>
+              ))}
             </>
           );
         })()}
