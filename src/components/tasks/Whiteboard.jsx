@@ -23,6 +23,7 @@ import {
 import Toolbar from "./whiteboard/Toolbar";
 import SelectionBar from "./whiteboard/SelectionBar";
 import TextRibbon from "./whiteboard/TextRibbon";
+import DrawDefaultsBar from "./whiteboard/DrawDefaultsBar";
 import WhiteboardContextMenu from "./whiteboard/WhiteboardContextMenu";
 import Minimap from "./whiteboard/Minimap";
 
@@ -997,6 +998,17 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     });
   };
 
+  // Set an absolute zoom level, keeping the canvas center fixed (used by the
+  // in-toolbar zoom dropdown). Mirrors the +/− floating buttons' math.
+  const setZoomLevel = (z) => {
+    setViewport(v => {
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
+      const cx = containerSize.w / 2, cy = containerSize.h / 2;
+      const wx = (cx - v.x) / v.zoom, wy = (cy - v.y) / v.zoom;
+      return { x: cx - wx * newZoom, y: cy - wy * newZoom, zoom: newZoom };
+    });
+  };
+
   // Cursor for the canvas
   const cursorClass = (() => {
     if (panning) return "cursor-grabbing";
@@ -1137,24 +1149,105 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           backgroundPosition: `${viewport.x}px ${viewport.y}px`,
         } : { backgroundColor: "#1a1b1c" }}
       >
-        <Toolbar
-          tool={tool}
-          setTool={setTool}
-          color={color}
-          setColor={setColor}
-          strokeWidth={strokeWidth}
-          setStrokeWidth={setStrokeWidth}
-          fontSize={fontSize}
-          setFontSize={setFontSize}
-          onClear={handleClear}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-          canUndo={undoStack.current.length > 0}
-          canRedo={redoStack.current.length > 0}
-          showGrid={showGrid}
-          setShowGrid={setShowGrid}
-          onAIOpen={() => setAiOpen(true)}
-        />
+        {/* Two-row top toolbar: Row 1 persistent tools, Row 2 contextual formatting */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 max-w-[calc(100vw-1.5rem)]">
+          <Toolbar
+            tool={tool}
+            setTool={setTool}
+            onClear={handleClear}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            canUndo={undoStack.current.length > 0}
+            canRedo={redoStack.current.length > 0}
+            showGrid={showGrid}
+            setShowGrid={setShowGrid}
+            onAIOpen={() => setAiOpen(true)}
+            zoomPercent={Math.round(viewport.zoom * 100)}
+            onSetZoom={setZoomLevel}
+            onZoomFit={fitToContent}
+            isMobile={isMobile}
+          />
+
+          {/* Row 2 — contextual: text ribbon / selection bar / draw defaults */}
+          {(() => {
+            const focusedTextId = editingTextId || (selectedIds.length === 1 ? selectedIds[0] : null);
+            const focusedText = focusedTextId ? objects.find(o => o.id === focusedTextId && o.type === "text") : null;
+            if (focusedText) {
+              return (
+                <TextRibbon
+                  textObject={focusedText}
+                  isEditing={editingTextId === focusedTextId}
+                  editingTextRef={editingTextRef}
+                  isMobile={isMobile}
+                  onUpdate={(patch) => {
+                    pushHistory(objects);
+                    setObjects(prev => prev.map(o => o.id === focusedTextId ? { ...o, ...patch } : o));
+                  }}
+                />
+              );
+            }
+            // Selection action bar when 1+ non-text objects are selected
+            if (selectedIds.length > 0) {
+              const first = objects.find(o => o.id === selectedIds[0]);
+              const single = selectedIds.length === 1 ? first : null;
+              const singleBounds = single ? objectBounds(single) : null;
+              return (
+                <SelectionBar
+                  count={selectedIds.length}
+                  selected={objects.filter(o => selectedIds.includes(o.id))}
+                  locked={!!first?.locked}
+                  fill={first?.fill ?? "transparent"}
+                  opacity={first?.opacity ?? 1}
+                  fillOpacity={first?.fillOpacity ?? first?.opacity ?? 1}
+                  strokeOpacity={first?.strokeOpacity ?? first?.opacity ?? 1}
+                  strokeStyle={first?.strokeStyle ?? "solid"}
+                  cornerRadius={first?.cornerRadius}
+                  arrowHeads={first?.arrowHeads ?? "end"}
+                  singleType={single?.type ?? null}
+                  singleBounds={singleBounds}
+                  singleRotation={single ? Math.round(single.rotation || 0) : 0}
+                  onSetFill={(c) => setSelectionProp({ fill: c })}
+                  onSetOpacity={(v) => setSelectionProp({ opacity: v })}
+                  onSetFillOpacity={(v) => setSelectionProp({ fillOpacity: v })}
+                  onSetStrokeOpacity={(v) => setSelectionProp({ strokeOpacity: v })}
+                  onSetStrokeStyle={(v) => setSelectionProp({ strokeStyle: v })}
+                  onSetCornerRadius={(v) => setSelectionProp({ cornerRadius: v })}
+                  onSetArrowHeads={(v) => setSelectionProp({ arrowHeads: v })}
+                  onSetGeometry={setSelectionGeometry}
+                  onAlign={alignSelection}
+                  onDistribute={distributeSelection}
+                  onBringToFront={bringToFront}
+                  onBringForward={bringForward}
+                  onSendBackward={sendBackward}
+                  onSendToBack={sendToBack}
+                  onGroup={groupSelection}
+                  onUngroup={ungroupSelection}
+                  onToggleLock={toggleLock}
+                  onDuplicate={duplicateSelection}
+                  onDelete={deleteSelection}
+                  onExportPNG={exportPNG}
+                  onExportSVG={exportSVG}
+                />
+              );
+            }
+            // Draw tool active with nothing selected → defaults bar
+            if (["pen", "text", "rect", "ellipse", "arrow", "line", "triangle", "diamond", "roundedRect", "star"].includes(tool)) {
+              return (
+                <DrawDefaultsBar
+                  tool={tool}
+                  color={color}
+                  setColor={setColor}
+                  strokeWidth={strokeWidth}
+                  setStrokeWidth={setStrokeWidth}
+                  fontSize={fontSize}
+                  setFontSize={setFontSize}
+                  isMobile={isMobile}
+                />
+              );
+            }
+            return null;
+          })()}
+        </div>
 
         {/* Whiteboard right-click context menu */}
         {ctxMenu && (
@@ -1192,70 +1285,6 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
             }}
           />
         )}
-
-        {/* Text formatting ribbon OR selection action bar */}
-        {(() => {
-          const focusedTextId = editingTextId || (selectedIds.length === 1 ? selectedIds[0] : null);
-          const focusedText = focusedTextId ? objects.find(o => o.id === focusedTextId && o.type === "text") : null;
-          if (focusedText) {
-            return (
-              <TextRibbon
-                textObject={focusedText}
-                isEditing={editingTextId === focusedTextId}
-                editingTextRef={editingTextRef}
-                onUpdate={(patch) => {
-                  pushHistory(objects);
-                  setObjects(prev => prev.map(o => o.id === focusedTextId ? { ...o, ...patch } : o));
-                }}
-              />
-            );
-          }
-          // Show selection action bar when 1+ non-text objects are selected
-          if (selectedIds.length > 0) {
-            const first = objects.find(o => o.id === selectedIds[0]);
-            const single = selectedIds.length === 1 ? first : null;
-            const singleBounds = single ? objectBounds(single) : null;
-            return (
-              <SelectionBar
-                count={selectedIds.length}
-                selected={objects.filter(o => selectedIds.includes(o.id))}
-                locked={!!first?.locked}
-                fill={first?.fill ?? "transparent"}
-                opacity={first?.opacity ?? 1}
-                fillOpacity={first?.fillOpacity ?? first?.opacity ?? 1}
-                strokeOpacity={first?.strokeOpacity ?? first?.opacity ?? 1}
-                strokeStyle={first?.strokeStyle ?? "solid"}
-                cornerRadius={first?.cornerRadius}
-                arrowHeads={first?.arrowHeads ?? "end"}
-                singleType={single?.type ?? null}
-                singleBounds={singleBounds}
-                singleRotation={single ? Math.round(single.rotation || 0) : 0}
-                onSetFill={(c) => setSelectionProp({ fill: c })}
-                onSetOpacity={(v) => setSelectionProp({ opacity: v })}
-                onSetFillOpacity={(v) => setSelectionProp({ fillOpacity: v })}
-                onSetStrokeOpacity={(v) => setSelectionProp({ strokeOpacity: v })}
-                onSetStrokeStyle={(v) => setSelectionProp({ strokeStyle: v })}
-                onSetCornerRadius={(v) => setSelectionProp({ cornerRadius: v })}
-                onSetArrowHeads={(v) => setSelectionProp({ arrowHeads: v })}
-                onSetGeometry={setSelectionGeometry}
-                onAlign={alignSelection}
-                onDistribute={distributeSelection}
-                onBringToFront={bringToFront}
-                onBringForward={bringForward}
-                onSendBackward={sendBackward}
-                onSendToBack={sendToBack}
-                onGroup={groupSelection}
-                onUngroup={ungroupSelection}
-                onToggleLock={toggleLock}
-                onDuplicate={duplicateSelection}
-                onDelete={deleteSelection}
-                onExportPNG={exportPNG}
-                onExportSVG={exportSVG}
-              />
-            );
-          }
-          return null;
-        })()}
 
         {/* Zoom controls — top-right on desktop, bottom-left (above tab bar) on mobile to avoid the toolbar */}
         <div

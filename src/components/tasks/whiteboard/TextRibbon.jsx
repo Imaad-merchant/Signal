@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Highlighter, X } from "lucide-react";
-import { COLORS, FONT_FAMILIES, FONT_SIZES, execCmd } from "./geometry";
+import { ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Highlighter, X, RemoveFormatting } from "lucide-react";
+import { COLORS, FONT_FAMILIES, execCmd } from "./geometry";
+import FontSizeStepper from "./FontSizeStepper";
 
 const FONT_WEIGHTS = [
   { v: 300, label: "Light" },
@@ -12,15 +13,13 @@ const FONT_WEIGHTS = [
 const LINE_HEIGHTS = [1.0, 1.15, 1.3, 1.5, 1.75, 2.0];
 
 // ─── Text Ribbon (Google Docs-style formatting) ───────────────────
-export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing }) {
+export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing, isMobile = false }) {
   const [fontOpen, setFontOpen] = useState(false);
-  const [sizeOpen, setSizeOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [weightOpen, setWeightOpen] = useState(false);
   const [lineOpen, setLineOpen] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const fontRef = useRef(null);
-  const sizeRef = useRef(null);
   const colorRef = useRef(null);
   const weightRef = useRef(null);
   const lineRef = useRef(null);
@@ -29,7 +28,6 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   useEffect(() => {
     const handler = (e) => {
       if (fontRef.current && !fontRef.current.contains(e.target)) setFontOpen(false);
-      if (sizeRef.current && !sizeRef.current.contains(e.target)) setSizeOpen(false);
       if (colorRef.current && !colorRef.current.contains(e.target)) setColorOpen(false);
       if (weightRef.current && !weightRef.current.contains(e.target)) setWeightOpen(false);
       if (lineRef.current && !lineRef.current.contains(e.target)) setLineOpen(false);
@@ -81,7 +79,6 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   };
 
   const handleSizePick = (size) => {
-    setSizeOpen(false);
     if (hasSelection()) {
       editingTextRef.current.focus();
       execCmd("styleWithCSS", true);
@@ -177,33 +174,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       </div>
 
       {/* Font size */}
-      <div className="relative" ref={sizeRef}>
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onClick={(e) => { e.stopPropagation(); setSizeOpen(o => !o); }}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-gray-300 hover:bg-white/[0.07] min-w-[52px]"
-          title="Font size"
-        >
-          <span className="flex-1 text-center">{currentSize}</span>
-          <ChevronDown className="h-2.5 w-2.5" />
-        </button>
-        {sizeOpen && (
-          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[60px] z-50 max-h-60 overflow-y-auto">
-            {FONT_SIZES.map(s => (
-              <button
-                key={s}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); handleSizePick(s); }}
-                className={`block w-full text-center px-2 py-1 text-xs hover:bg-white/[0.05] ${currentSize === s ? "text-blue-300" : "text-gray-300"}`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <FontSizeStepper value={currentSize} onPick={handleSizePick} isMobile={isMobile} />
 
       {/* Font weight */}
       <div className="relative" ref={weightRef}>
@@ -400,6 +371,11 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       {/* Lists */}
       <RbBtn onClick={() => applyExec("insertUnorderedList")} title="Bulleted list"><List className="h-3.5 w-3.5" /></RbBtn>
       <RbBtn onClick={() => applyExec("insertOrderedList")} title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></RbBtn>
+
+      <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* Clear formatting */}
+      <RbBtn onClick={() => applyExec("removeFormat")} title="Clear formatting"><RemoveFormatting className="h-3.5 w-3.5" /></RbBtn>
     </div>
   );
 }

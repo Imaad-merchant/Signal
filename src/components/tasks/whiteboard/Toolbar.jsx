@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, Undo2, Redo2, Minus, Grid3x3, ChevronDown, Sparkles } from "lucide-react";
-import { COLORS, STROKE_WIDTHS } from "./geometry";
 
 // More shapes dropdown
-function MoreShapesDropdown({ moreShapes, tool, setTool }) {
+function MoreShapesDropdown({ moreShapes, tool, setTool, isMobile }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -19,13 +18,13 @@ function MoreShapesDropdown({ moreShapes, tool, setTool }) {
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
-        className={`p-1.5 rounded-md transition-all ${active ? "bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
+        className={`rounded-md transition-all ${isMobile ? "p-2" : "p-1.5"} ${active ? "bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
         title="More shapes"
       >
         <span className="text-[10px] font-bold">◇</span>
       </button>
       {open && (
-        <div className="absolute left-full top-0 ml-2 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[140px] z-50">
+        <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[140px] max-w-[90vw] z-50">
           {moreShapes.map(s => (
             <button
               key={s.key}
@@ -42,8 +41,59 @@ function MoreShapesDropdown({ moreShapes, tool, setTool }) {
   );
 }
 
-// ─── Toolbar (Google Docs–inspired) ────────────────────────────────
-export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, onClear, onUndo, onRedo, canUndo, canRedo, fontSize, setFontSize, showGrid, setShowGrid, onAIOpen }) {
+// Zoom level dropdown (shows current %, lets you jump to presets or Fit)
+function ZoomDropdown({ zoomPercent, onSetZoom, onZoomFit, isMobile }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const presets = [50, 75, 100, 125, 150, 200];
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); }}
+        className={`flex items-center gap-1 rounded-md text-[11px] text-gray-300 hover:bg-white/[0.07] ${isMobile ? "px-2.5 py-2" : "px-2 py-1"} min-w-[52px]`}
+        title="Zoom"
+      >
+        <span className="flex-1 text-center tabular-nums">{zoomPercent}%</span>
+        <ChevronDown className="h-2.5 w-2.5" />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[80px] max-w-[90vw] z-50 max-h-[60vh] overflow-y-auto">
+          {presets.map(p => (
+            <button
+              key={p}
+              type="button"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onSetZoom(p / 100); setOpen(false); }}
+              className={`block w-full text-center px-2 py-1 text-xs hover:bg-white/[0.05] ${zoomPercent === p ? "text-blue-300" : "text-gray-300"}`}
+            >
+              {p}%
+            </button>
+          ))}
+          <div className="h-px w-full bg-white/[0.08] my-1" />
+          <button
+            type="button"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onZoomFit(); setOpen(false); }}
+            className="block w-full text-center px-2 py-1 text-xs text-gray-300 hover:bg-white/[0.05]"
+          >
+            Fit
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Toolbar (Google Docs–inspired, horizontal Row 1) ──────────────
+export default function Toolbar({ tool, setTool, onClear, onUndo, onRedo, canUndo, canRedo, showGrid, setShowGrid, onAIOpen, zoomPercent, onSetZoom, onZoomFit, isMobile = false }) {
   const tools = [
     { key: "select", icon: MousePointer2, label: "Select (V)" },
     { key: "hand", icon: Hand, label: "Pan (H)" },
@@ -64,14 +114,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
     { key: "star", label: "Star" },
   ];
 
-  const [colorOpen, setColorOpen] = useState(false);
-  const colorRef = useRef(null);
-  useEffect(() => {
-    if (!colorOpen) return;
-    const h = (e) => { if (colorRef.current && !colorRef.current.contains(e.target)) setColorOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [colorOpen]);
+  const btnPad = isMobile ? "p-2" : "p-1.5";
 
   const ToolBtn = ({ t }) => {
     const Icon = t.icon;
@@ -81,7 +124,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); setTool(t.key); }}
-        className={`p-1.5 rounded-md transition-all ${selected ? "bg-blue-500/25 text-blue-200 shadow-sm ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
+        className={`${btnPad} rounded-md transition-all ${selected ? "bg-blue-500/25 text-blue-200 shadow-sm ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
         title={t.label}
       >
         <Icon className="h-3.5 w-3.5" />
@@ -89,11 +132,13 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
     );
   };
 
+  const Divider = () => <div className="w-px h-5 bg-white/[0.08] mx-1" />;
+
   return (
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute top-3 left-3 z-30 flex flex-col items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl max-h-[calc(100vh-1.5rem)] overflow-y-auto"
+      className="flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto"
     >
       {/* Undo / Redo */}
       <button
@@ -101,7 +146,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onUndo(); }}
         disabled={!canUndo}
-        className="p-1.5 rounded-md text-gray-400 hover:bg-white/[0.07] hover:text-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className={`${btnPad} rounded-md text-gray-400 hover:bg-white/[0.07] hover:text-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors`}
         title="Undo (⌘Z)"
       >
         <Undo2 className="h-3.5 w-3.5" />
@@ -111,110 +156,36 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onRedo(); }}
         disabled={!canRedo}
-        className="p-1.5 rounded-md text-gray-400 hover:bg-white/[0.07] hover:text-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className={`${btnPad} rounded-md text-gray-400 hover:bg-white/[0.07] hover:text-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors`}
         title="Redo (⌘⇧Z)"
       >
         <Redo2 className="h-3.5 w-3.5" />
       </button>
 
-      <div className="h-px w-6 bg-white/[0.08] my-1" />
+      <Divider />
+
+      {/* Zoom */}
+      <ZoomDropdown zoomPercent={zoomPercent} onSetZoom={onSetZoom} onZoomFit={onZoomFit} isMobile={isMobile} />
+
+      <Divider />
 
       {/* Select + Hand */}
       {tools.map(t => <ToolBtn key={t.key} t={t} />)}
 
-      <div className="h-px w-6 bg-white/[0.08] my-1" />
+      <Divider />
 
       {/* Drawing tools */}
       {drawTools.map(t => <ToolBtn key={t.key} t={t} />)}
+      <MoreShapesDropdown moreShapes={moreShapes} tool={tool} setTool={setTool} isMobile={isMobile} />
 
-      {/* More shapes dropdown */}
-      <MoreShapesDropdown moreShapes={moreShapes} tool={tool} setTool={setTool} />
-
-      <div className="h-px w-6 bg-white/[0.08] my-1" />
-
-      {/* Color picker */}
-      <div className="relative" ref={colorRef}>
-        <button
-          type="button"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); setColorOpen(o => !o); }}
-          className="flex items-center gap-1 p-1.5 rounded-md hover:bg-white/[0.07] text-gray-400 transition-colors"
-          title="Color"
-        >
-          <div className="h-4 w-4 rounded-full border border-white/20" style={{ backgroundColor: color }} />
-          <ChevronDown className="h-2.5 w-2.5" />
-        </button>
-        {colorOpen && (
-          <div className="absolute left-full top-0 ml-2 bg-[#2d2e30] border border-white/[0.12] rounded-xl shadow-2xl p-2 z-50">
-            <div className="grid grid-cols-5 gap-1.5">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); setColor(c); setColorOpen(false); }}
-                  className={`h-6 w-6 rounded-full transition-transform hover:scale-110 ${color === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
-                  style={{ backgroundColor: c }}
-                  title={c}
-                />
-              ))}
-            </div>
-            <div className="mt-2 flex items-center gap-2 px-1">
-              <span className="text-[10px] text-gray-500">Custom:</span>
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Stroke width or font size */}
-      {tool === "text" ? (
-        <div className="flex items-center gap-0.5 px-1.5">
-          {[14, 18, 24, 36, 48].map(s => (
-            <button
-              key={s}
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setFontSize(s); }}
-              className={`min-w-[22px] px-1.5 py-0.5 rounded text-[10.5px] font-medium transition-colors ${fontSize === s ? "bg-blue-500/25 text-blue-200" : "text-gray-500 hover:bg-white/[0.07] hover:text-gray-300"}`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="flex items-center gap-0.5 px-1.5">
-          {STROKE_WIDTHS.map(w => (
-            <button
-              key={w}
-              type="button"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setStrokeWidth(w); }}
-              className={`p-1 rounded transition-colors ${strokeWidth === w ? "bg-blue-500/25 ring-1 ring-blue-400/40" : "hover:bg-white/[0.07]"}`}
-              title={`Stroke ${w}px`}
-            >
-              <div
-                className="rounded-full"
-                style={{ height: `${Math.min(w + 1, 10)}px`, width: `${Math.min(w + 1, 10) * 2}px`, backgroundColor: color, opacity: strokeWidth === w ? 1 : 0.5 }}
-              />
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="h-px w-6 bg-white/[0.08] my-1" />
+      <Divider />
 
       {/* Grid toggle */}
       <button
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); setShowGrid(g => !g); }}
-        className={`p-1.5 rounded-md transition-colors ${showGrid ? "bg-blue-500/15 text-blue-300" : "text-gray-500 hover:bg-white/[0.07] hover:text-gray-300"}`}
+        className={`${btnPad} rounded-md transition-colors ${showGrid ? "bg-blue-500/15 text-blue-300" : "text-gray-500 hover:bg-white/[0.07] hover:text-gray-300"}`}
         title={showGrid ? "Hide grid" : "Show grid"}
       >
         <Grid3x3 className="h-3.5 w-3.5" />
@@ -224,13 +195,13 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onClear(); }}
-        className="p-1.5 rounded-md text-gray-400 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
+        className={`${btnPad} rounded-md text-gray-400 hover:bg-rose-500/20 hover:text-rose-300 transition-colors`}
         title="Clear board"
       >
         <Trash2 className="h-3.5 w-3.5" />
       </button>
 
-      <div className="h-px w-6 bg-white/[0.08] my-1" />
+      <Divider />
 
       {/* AI button */}
       <button
