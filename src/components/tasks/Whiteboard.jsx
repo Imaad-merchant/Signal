@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Minus, Grid3x3, Eye, EyeOff, Palette as PaletteIcon, ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Sparkles } from "lucide-react";
+import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, ZoomIn, ZoomOut, Maximize2, Undo2, Redo2, Minus, Grid3x3, Eye, EyeOff, Palette as PaletteIcon, ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, Sparkles, RotateCw } from "lucide-react";
 import AIPromptDialog from "./AIPromptDialog";
 import { base44 } from "@/api/base44Client";
+import { useIsMobile } from "@/components/useIsMobile";
 
 // ─── Constants ─────────────────────────────────────────────────────
 const COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
@@ -103,7 +104,7 @@ function Toolbar({ tool, setTool, color, setColor, strokeWidth, setStrokeWidth, 
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl"
+      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto"
     >
       {/* Undo / Redo */}
       <button
@@ -1021,7 +1022,24 @@ function distToSegment(px, py, x1, y1, x2, y2) {
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
+const BOX_TYPES = ["text", "rect", "ellipse", "triangle", "diamond", "roundedRect", "star"];
+
+// Rotate a point (px,py) around center (cx,cy) by `deg` degrees.
+function rotatePt(px, py, cx, cy, deg) {
+  if (!deg) return { x: px, y: py };
+  const r = (deg * Math.PI) / 180;
+  const cos = Math.cos(r), sin = Math.sin(r);
+  const dx = px - cx, dy = py - cy;
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
 function hitTest(o, x, y, tolerance = 8) {
+  // For rotated box objects, inverse-rotate the test point into the object's local frame.
+  if (o.rotation && BOX_TYPES.includes(o.type)) {
+    const b = objectBounds(o);
+    const p = rotatePt(x, y, b.x + b.w / 2, b.y + b.h / 2, -o.rotation);
+    x = p.x; y = p.y;
+  }
   switch (o.type) {
     case "text":
     case "rect":
@@ -1048,6 +1066,7 @@ function hitTest(o, x, y, tolerance = 8) {
 // ─── Main Whiteboard ──────────────────────────────────────────────
 export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const containerRef = useRef(null);
+  const isMobile = useIsMobile();
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
 
   // Viewport: x, y are screen offset; zoom is scale factor
@@ -1072,6 +1091,8 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const [drawingObject, setDrawingObject] = useState(null);
   const [panning, setPanning] = useState(false);
   const [draggingSelection, setDraggingSelection] = useState(null); // { startX, startY, originals }
+  const [transforming, setTransforming] = useState(null); // { mode: "resize"|"rotate", handle, id, oc, snapshot, startAngle, startRotation }
+  const lastPointer = useRef(null); // last screen pointer pos, for touch-friendly panning
   const [editingTextId, setEditingTextId] = useState(null);
 
   const saveTimer = useRef(null);
@@ -1480,6 +1501,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     if (e.button === 2) return;
     if (e.button === 1 || (tool === "hand" && e.button === 0)) {
       setPanning(true);
+      lastPointer.current = { x: e.clientX, y: e.clientY };
       e.currentTarget.setPointerCapture?.(e.pointerId);
       return;
     }
@@ -1512,6 +1534,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         // Click on empty space → start panning the canvas
         setSelectedIds([]);
         setPanning(true);
+        lastPointer.current = { x: e.clientX, y: e.clientY };
         e.currentTarget.setPointerCapture?.(e.pointerId);
       }
       return;
@@ -1554,7 +1577,39 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
   const handlePointerMove = (e) => {
     if (panning) {
-      setViewport(v => ({ ...v, x: v.x + e.movementX, y: v.y + e.movementY }));
+      // Track delta manually — pointer movementX/Y is unreliable for touch.
+      const last = lastPointer.current || { x: e.clientX, y: e.clientY };
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      lastPointer.current = { x: e.clientX, y: e.clientY };
+      setViewport(v => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      return;
+    }
+
+    if (transforming) {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      const t = transforming;
+      const oc = t.oc;
+      if (t.mode === "rotate") {
+        const ang = Math.atan2(y - oc.y, x - oc.x) * 180 / Math.PI;
+        let rotation = t.startRotation + (ang - t.startAngle);
+        if (e.shiftKey) rotation = Math.round(rotation / 15) * 15;
+        setObjects(prev => prev.map(o => o.id === t.id ? { ...o, rotation } : o));
+      } else {
+        // Resize from center: inverse-rotate pointer into the object's local frame.
+        const lp = rotatePt(x, y, oc.x, oc.y, -t.startRotation);
+        const minHalf = 4;
+        let halfW = Math.max(minHalf, Math.abs(lp.x - oc.x));
+        let halfH = Math.max(minHalf, Math.abs(lp.y - oc.y));
+        const h = t.handle;
+        const horiz = h === "e" || h === "w";
+        const vert = h === "n" || h === "s";
+        if (horiz) halfH = t.snapshot.h / 2;   // edge handle: lock the other axis
+        if (vert) halfW = t.snapshot.w / 2;
+        setObjects(prev => prev.map(o => o.id === t.id
+          ? { ...o, x: oc.x - halfW, y: oc.y - halfH, w: halfW * 2, h: halfH * 2 }
+          : o));
+      }
       return;
     }
 
@@ -1604,7 +1659,8 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   };
 
   const handlePointerUp = (e) => {
-    if (panning) { setPanning(false); return; }
+    if (panning) { setPanning(false); lastPointer.current = null; return; }
+    if (transforming) { setTransforming(null); return; }
     if (draggingSelection) { setDraggingSelection(null); return; }
     if (drawingObject) {
       let obj = drawingObject;
@@ -1637,6 +1693,26 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       if (obj.type === "path" && (!obj.points || obj.points.length < 2)) return;
       setObjects(prev => [...prev, obj]);
     }
+  };
+
+  // Start a resize/rotate gesture from a selection handle (mouse or touch).
+  const startTransform = (e, mode, handle, obj) => {
+    e.stopPropagation();
+    pushHistory(objects);
+    const b = objectBounds(obj);
+    const oc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+    const { x, y } = screenToWorld(e.clientX, e.clientY);
+    containerRef.current?.setPointerCapture?.(e.pointerId);
+    setSelectedIds([obj.id]);
+    setTransforming({
+      mode,
+      handle,
+      id: obj.id,
+      oc,
+      snapshot: { x: b.x, y: b.y, w: b.w, h: b.h },
+      startRotation: obj.rotation || 0,
+      startAngle: Math.atan2(y - oc.y, x - oc.x) * 180 / Math.PI,
+    });
   };
 
   // Wheel: zoom — attached via useEffect with passive:false so preventDefault works
@@ -1729,7 +1805,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       {headerSlot}
       <div
         ref={containerRef}
-        className={`relative flex-1 overflow-hidden ${cursorClass} select-none`}
+        className={`relative flex-1 overflow-hidden touch-none ${cursorClass} select-none`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1867,8 +1943,13 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           return null;
         })()}
 
-        {/* Zoom controls */}
-        <div className="absolute top-3 right-3 z-30 flex items-center gap-1 bg-[#2a2b2d]/95 backdrop-blur border border-white/[0.08] rounded-lg px-1 py-1 shadow-2xl">
+        {/* Zoom controls — top-right on desktop, bottom-left (above tab bar) on mobile to avoid the toolbar */}
+        <div
+          className="absolute z-30 flex items-center gap-1 bg-[#2a2b2d]/95 backdrop-blur border border-white/[0.08] rounded-lg px-1 py-1 shadow-2xl"
+          style={isMobile
+            ? { left: 12, bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }
+            : { top: 12, right: 12 }}
+        >
           <button
             onClick={() => setViewport(v => {
               const newZoom = Math.max(MIN_ZOOM, v.zoom * 0.8);
@@ -1943,6 +2024,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                     strokeWidth={o.strokeWidth || 2}
                     strokeOpacity={objOpacity}
                     rx={o.type === "roundedRect" ? Math.min(w, h) / 4 : 4}
+                    transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
                     style={lockedStyle}
                   />
                 );
@@ -1954,7 +2036,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 const h = Math.abs(o.h);
                 const pts = `${x + w / 2},${y} ${x},${y + h} ${x + w},${y + h}`;
                 return (
-                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} style={lockedStyle} />
+                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined} style={lockedStyle} />
                 );
               }
               if (o.type === "diamond") {
@@ -1964,7 +2046,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 const h = Math.abs(o.h);
                 const pts = `${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`;
                 return (
-                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} style={lockedStyle} />
+                  <polygon key={o.id} points={pts} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} transform={o.rotation ? `rotate(${o.rotation} ${x + w / 2} ${y + h / 2})` : undefined} style={lockedStyle} />
                 );
               }
               if (o.type === "star") {
@@ -1982,7 +2064,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                   pts.push(`${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`);
                 }
                 return (
-                  <polygon key={o.id} points={pts.join(" ")} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} style={lockedStyle} />
+                  <polygon key={o.id} points={pts.join(" ")} fill={objFill} fillOpacity={objOpacity} stroke={o.color} strokeWidth={o.strokeWidth || 2} strokeOpacity={objOpacity} transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined} style={lockedStyle} />
                 );
               }
               if (o.type === "ellipse") {
@@ -1999,6 +2081,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                     stroke={o.color}
                     strokeWidth={o.strokeWidth || 2}
                     strokeOpacity={objOpacity}
+                    transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}
                     style={lockedStyle}
                   />
                 );
@@ -2073,6 +2156,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                     y={o.y}
                     width={tw}
                     height={th}
+                    transform={o.rotation ? `rotate(${o.rotation} ${o.x + tw / 2} ${o.y + th / 2})` : undefined}
                     style={{ ...selStyle, overflow: "visible" }}
                   >
                     <div
@@ -2107,6 +2191,57 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
             })}
           </g>
         </svg>
+
+        {/* Resize / rotate handles for a single selected box object */}
+        {tool === "select" && !editingTextId && !drawingObject && selectedIds.length === 1 && (() => {
+          const o = objects.find(ob => ob.id === selectedIds[0]);
+          if (!o || !BOX_TYPES.includes(o.type) || o.locked) return null;
+          const b = objectBounds(o);
+          const oc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+          const rot = o.rotation || 0;
+          const z = viewport.zoom;
+          const w2s = (wx, wy) => {
+            const p = rotatePt(wx, wy, oc.x, oc.y, rot);
+            return { left: p.x * z + viewport.x, top: p.y * z + viewport.y };
+          };
+          const handles = [
+            { k: "nw", x: b.x, y: b.y }, { k: "n", x: b.x + b.w / 2, y: b.y }, { k: "ne", x: b.x + b.w, y: b.y },
+            { k: "e", x: b.x + b.w, y: b.y + b.h / 2 }, { k: "se", x: b.x + b.w, y: b.y + b.h },
+            { k: "s", x: b.x + b.w / 2, y: b.y + b.h }, { k: "sw", x: b.x, y: b.y + b.h }, { k: "w", x: b.x, y: b.y + b.h / 2 },
+          ];
+          const cScr = { left: oc.x * z + viewport.x, top: oc.y * z + viewport.y };
+          const topMid = w2s(b.x + b.w / 2, b.y);
+          const rdx = topMid.left - cScr.left, rdy = topMid.top - cScr.top;
+          const rlen = Math.hypot(rdx, rdy) || 1;
+          const rotPos = { left: topMid.left + (rdx / rlen) * 28, top: topMid.top + (rdy / rlen) * 28 };
+          const cursorFor = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
+          return (
+            <>
+              {/* rotated bounding box */}
+              <div className="absolute pointer-events-none border border-blue-400/80 rounded-sm" style={{
+                left: cScr.left, top: cScr.top, width: b.w * z, height: b.h * z,
+                transform: `translate(-50%,-50%) rotate(${rot}deg)`,
+              }} />
+              {handles.map(hd => {
+                const s = w2s(hd.x, hd.y);
+                return (
+                  <div key={hd.k}
+                    onPointerDown={(e) => startTransform(e, "resize", hd.k, o)}
+                    className="absolute z-40 rounded-[3px] bg-white border-2 border-blue-500 shadow"
+                    style={{ left: s.left, top: s.top, width: 16, height: 16, transform: "translate(-50%,-50%)", cursor: cursorFor[hd.k], touchAction: "none" }}
+                  />
+                );
+              })}
+              <div
+                onPointerDown={(e) => startTransform(e, "rotate", null, o)}
+                className="absolute z-40 rounded-full bg-white border-2 border-blue-500 shadow flex items-center justify-center"
+                style={{ left: rotPos.left, top: rotPos.top, width: 20, height: 20, transform: "translate(-50%,-50%)", cursor: "grab", touchAction: "none" }}
+              >
+                <RotateCw className="h-3 w-3 text-blue-600" />
+              </div>
+            </>
+          );
+        })()}
 
         {/* Text edit overlay (contentEditable for rich text) */}
         {editingTextId && (() => {
