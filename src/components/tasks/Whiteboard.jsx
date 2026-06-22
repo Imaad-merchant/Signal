@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Pencil, ZoomIn, ZoomOut, Maximize2, RotateCw } from "lucide-react";
+import DOMPurify from "dompurify";
 import AIPromptDialog from "./AIPromptDialog";
 import { base44 } from "@/api/base44Client";
 import { useIsMobile } from "@/components/useIsMobile";
@@ -24,6 +25,26 @@ import Minimap from "./whiteboard/Minimap";
 
 // Generate a stable id
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+// Sanitize stored/pasted text HTML — allow only basic formatting tags/attrs and
+// strip scripts/event handlers (defends against XSS from AI output or paste).
+const SANITIZE_OPTS = {
+  ALLOWED_TAGS: ["b", "strong", "i", "em", "u", "s", "strike", "span", "div", "p", "br", "ul", "ol", "li", "a", "font"],
+  ALLOWED_ATTR: ["style", "href", "target", "rel", "color", "size", "face"],
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
+};
+// Small cache so the per-text-object render path doesn't re-run DOMPurify on every
+// pan/zoom/drag frame for HTML that hasn't changed. Bounded to avoid unbounded growth.
+const _sanitizeCache = new Map();
+const sanitizeTextHtml = (html) => {
+  const key = html || "";
+  const hit = _sanitizeCache.get(key);
+  if (hit !== undefined) return hit;
+  const clean = DOMPurify.sanitize(key, SANITIZE_OPTS);
+  if (_sanitizeCache.size > 500) _sanitizeCache.clear();
+  _sanitizeCache.set(key, clean);
+  return clean;
+};
 
 // ─── Main Whiteboard ──────────────────────────────────────────────
 export default function Whiteboard({ page, onUpdate, headerSlot }) {
@@ -920,16 +941,92 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
   // Strip HTML tags to detect truly empty content
   const finishTextEdit = (id, html) => {
+    const clean = sanitizeTextHtml(html);
     const tmp = document.createElement("div");
-    tmp.innerHTML = html || "";
+    tmp.innerHTML = clean;
     const plain = (tmp.textContent || "").trim();
     if (!plain) {
       setObjects(prev => prev.filter(o => o.id !== id));
     } else {
-      setObjects(prev => prev.map(o => o.id === id ? { ...o, text: html } : o));
+      setObjects(prev => prev.map(o => {
+        if (o.id !== id) return o;
+        const measured = measureTextContent(o, clean);
+        const next = { ...o, text: clean };
+        // Auto-grow only: never shrink below the user's current/handle-set height.
+        if (measured && measured > (o.h || 0)) next.h = measured;
+        return next;
+      }));
     }
     setEditingTextId(null);
   };
+
+  // Measure the rendered height of a text object's content at its current width,
+  // using an off-screen clone that mirrors the static render's box styling. Returns
+  // the content height (in world units) or null if it can't measure.
+  const measureTextContent = useCallback((o, html) => {
+    if (typeof document === "undefined") return null;
+    const tw = Math.max(o.w || 200, 50);
+    const probe = document.createElement("div");
+    probe.style.cssText = [
+      "position:absolute",
+      "visibility:hidden",
+      "pointer-events:none",
+      "left:-99999px",
+      "top:0",
+      `width:${tw}px`,
+      "box-sizing:border-box",
+      "padding:2px",
+      `font-size:${o.fontSize || 18}px`,
+      `font-family:${o.fontFamily || "Inter, system-ui, sans-serif"}`,
+      `font-weight:${o.fontWeight || 400}`,
+      `line-height:${o.lineHeight || 1.3}`,
+      `text-align:${o.textAlign || "left"}`,
+      "white-space:pre-wrap",
+      "word-break:break-word",
+    ].join(";");
+    probe.innerHTML = html ?? o.text ?? "";
+    document.body.appendChild(probe);
+    const h = probe.scrollHeight;
+    document.body.removeChild(probe);
+    return Number.isFinite(h) && h > 0 ? Math.ceil(h) : null;
+  }, []);
+
+  // Auto-grow: keep a text box tall enough to show its content when the CONTENT (or
+  // a property that changes content height) changes — e.g. typing, AI output, paste,
+  // font/size/line-height/weight edits. We deliberately trigger only on content-shape
+  // changes (tracked via a signature) rather than on every objects update, so a
+  // manual height resize via a handle (which changes only h, not the signature) is
+  // never fought, and so it can't feed back into a render loop. Grows only, never
+  // shrinks; the static render keeps overflow visible so nothing clips meanwhile.
+  const grownSigRef = useRef(new Map());
+  useEffect(() => {
+    if (drawingObject || draggingSelection) return; // don't measure mid-gesture
+    let changed = false;
+    const sigs = grownSigRef.current;
+    const seen = new Set();
+    const grown = objects.map(o => {
+      if (o.type !== "text") return o;
+      seen.add(o.id);
+      // Signature of everything that affects intrinsic content height (excludes h).
+      const sig = `${o.text || ""}|${o.w || 0}|${o.fontSize || 18}|${o.fontFamily || ""}|${o.fontWeight || 400}|${o.lineHeight || 1.3}`;
+      const prevSig = sigs.get(o.id);
+      sigs.set(o.id, sig);
+      // First time we see an object (e.g. just loaded from storage) we only record
+      // its baseline signature — we do NOT grow it, so merely opening a page never
+      // mutates/auto-saves it. Clipping is still avoided because the static render
+      // uses overflow:visible + minHeight. Growth happens on later content changes.
+      if (prevSig === undefined || prevSig === sig || editingTextId === o.id) return o;
+      const measured = measureTextContent(o, o.text);
+      if (measured && measured > (o.h || 0) + 0.5) {
+        changed = true;
+        return { ...o, h: measured };
+      }
+      return o;
+    });
+    // Drop signatures for objects that no longer exist.
+    for (const id of sigs.keys()) if (!seen.has(id)) sigs.delete(id);
+    if (changed) setObjects(grown);
+  }, [objects, editingTextId, drawingObject, draggingSelection, measureTextContent]);
 
   return (
     <div className="relative h-full flex flex-col bg-[#1a1b1c]">
@@ -1303,17 +1400,24 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                         color: o.color,
                         fontSize: `${o.fontSize || 18}px`,
                         fontFamily: o.fontFamily || "Inter, system-ui, sans-serif",
+                        fontWeight: o.fontWeight || 400,
                         textAlign: o.textAlign || "left",
-                        lineHeight: 1.3,
+                        lineHeight: o.lineHeight || 1.3,
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-word",
                         padding: "2px",
                         width: "100%",
-                        height: "100%",
+                        minHeight: "100%",
+                        boxSizing: "border-box",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: o.verticalAlign === "middle" ? "center" : o.verticalAlign === "bottom" ? "flex-end" : "flex-start",
+                        background: o.bgColor && o.bgColor !== "none" ? o.bgColor : undefined,
+                        borderRadius: o.bgColor && o.bgColor !== "none" ? "4px" : undefined,
                         cursor: tool === "select" ? "text" : "default",
                         pointerEvents: "auto",
                       }}
-                      dangerouslySetInnerHTML={{ __html: o.text || "" }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeTextHtml(o.text) }}
                     />
                   </foreignObject>
                 );
@@ -1411,7 +1515,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
-              dangerouslySetInnerHTML={{ __html: o.text || "" }}
+              dangerouslySetInnerHTML={{ __html: sanitizeTextHtml(o.text) }}
               className="absolute bg-[#1e1f20]/95 border-2 border-blue-400/60 rounded px-1.5 py-1 outline-none text-gray-100 overflow-auto"
               style={{
                 left: sx,
@@ -1421,10 +1525,14 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 color: o.color,
                 fontSize: (o.fontSize || 18) * viewport.zoom,
                 fontFamily: o.fontFamily || "Inter, system-ui, sans-serif",
+                fontWeight: o.fontWeight || 400,
                 textAlign: o.textAlign || "left",
-                lineHeight: 1.3,
+                lineHeight: o.lineHeight || 1.3,
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
+                // Edit top-aligned (a flex-column contentEditable causes caret/Enter
+                // glitches); vertical alignment is applied in the static render.
+                background: o.bgColor && o.bgColor !== "none" ? o.bgColor : undefined,
               }}
               data-placeholder="Type something..."
             />

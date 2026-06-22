@@ -1,21 +1,39 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered } from "lucide-react";
+import { ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Highlighter, X } from "lucide-react";
 import { COLORS, FONT_FAMILIES, FONT_SIZES, execCmd } from "./geometry";
+
+const FONT_WEIGHTS = [
+  { v: 300, label: "Light" },
+  { v: 400, label: "Regular" },
+  { v: 500, label: "Medium" },
+  { v: 600, label: "Semibold" },
+  { v: 700, label: "Bold" },
+];
+const LINE_HEIGHTS = [1.0, 1.15, 1.3, 1.5, 1.75, 2.0];
 
 // ─── Text Ribbon (Google Docs-style formatting) ───────────────────
 export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing }) {
   const [fontOpen, setFontOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
+  const [weightOpen, setWeightOpen] = useState(false);
+  const [lineOpen, setLineOpen] = useState(false);
+  const [bgOpen, setBgOpen] = useState(false);
   const fontRef = useRef(null);
   const sizeRef = useRef(null);
   const colorRef = useRef(null);
+  const weightRef = useRef(null);
+  const lineRef = useRef(null);
+  const bgRef = useRef(null);
 
   useEffect(() => {
     const handler = (e) => {
       if (fontRef.current && !fontRef.current.contains(e.target)) setFontOpen(false);
       if (sizeRef.current && !sizeRef.current.contains(e.target)) setSizeOpen(false);
       if (colorRef.current && !colorRef.current.contains(e.target)) setColorOpen(false);
+      if (weightRef.current && !weightRef.current.contains(e.target)) setWeightOpen(false);
+      if (lineRef.current && !lineRef.current.contains(e.target)) setLineOpen(false);
+      if (bgRef.current && !bgRef.current.contains(e.target)) setBgOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -35,6 +53,11 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
 
   const currentFont = FONT_FAMILIES.find(f => f.css === textObject.fontFamily) || FONT_FAMILIES[0];
   const currentSize = textObject.fontSize || 18;
+  const currentWeight = textObject.fontWeight || 400;
+  const currentWeightLabel = (FONT_WEIGHTS.find(w => w.v === currentWeight) || FONT_WEIGHTS[1]).label;
+  const currentLineHeight = textObject.lineHeight || 1.3;
+  const currentVAlign = textObject.verticalAlign || "top";
+  const currentBg = textObject.bgColor && textObject.bgColor !== "none" ? textObject.bgColor : null;
 
   const handleFontPick = (font) => {
     setProp({ fontFamily: font.css });
@@ -154,6 +177,36 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
         )}
       </div>
 
+      {/* Font weight */}
+      <div className="relative" ref={weightRef}>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={(e) => { e.stopPropagation(); setWeightOpen(o => !o); }}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-gray-300 hover:bg-white/[0.07] min-w-[78px]"
+          title="Font weight"
+        >
+          <span className="truncate flex-1 text-left" style={{ fontWeight: currentWeight }}>{currentWeightLabel}</span>
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+        {weightOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[110px] z-50">
+            {FONT_WEIGHTS.map(w => (
+              <button
+                key={w.v}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={(e) => { e.stopPropagation(); setProp({ fontWeight: w.v }); setWeightOpen(false); }}
+                className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.05] ${currentWeight === w.v ? "text-blue-300" : "text-gray-300"}`}
+                style={{ fontWeight: w.v }}
+              >
+                {w.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="w-px h-5 bg-white/[0.08] mx-1" />
 
       {/* Bold / Italic / Underline / Strikethrough */}
@@ -206,6 +259,59 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
         )}
       </div>
 
+      {/* Highlight / background color */}
+      <div className="relative" ref={bgRef}>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={(e) => { e.stopPropagation(); setBgOpen(o => !o); }}
+          className="flex items-center gap-1 p-1.5 rounded-md hover:bg-white/[0.07] text-gray-300"
+          title="Highlight color"
+        >
+          <div className="flex flex-col items-center">
+            <Highlighter className="h-3.5 w-3.5" />
+            <div className="h-1 w-3 rounded-sm mt-0.5" style={{ backgroundColor: currentBg || "transparent", border: currentBg ? "none" : "1px solid rgba(255,255,255,0.25)" }} />
+          </div>
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+        {bgOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl p-2 z-50">
+            <div className="grid grid-cols-5 gap-1.5">
+              {COLORS.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onClick={(e) => { e.stopPropagation(); setProp({ bgColor: c }); setBgOpen(false); }}
+                  className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${currentBg === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-500">Custom:</span>
+                <input
+                  type="color"
+                  value={currentBg || "#000000"}
+                  onChange={(e) => setProp({ bgColor: e.target.value })}
+                  className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
+                />
+              </div>
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={(e) => { e.stopPropagation(); setProp({ bgColor: "none" }); setBgOpen(false); }}
+                className="flex items-center gap-1 px-1.5 py-1 rounded text-[10px] text-gray-300 hover:bg-white/[0.07]"
+                title="No highlight"
+              >
+                <X className="h-3 w-3" /> Clear
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="w-px h-5 bg-white/[0.08] mx-1" />
 
       {/* Alignment */}
@@ -218,6 +324,48 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       <RbBtn onClick={() => { setProp({ textAlign: "right" }); applyExec("justifyRight"); }} active={textObject.textAlign === "right"} title="Align right">
         <AlignRight className="h-3.5 w-3.5" />
       </RbBtn>
+
+      {/* Vertical alignment */}
+      <RbBtn onClick={() => setProp({ verticalAlign: "top" })} active={currentVAlign === "top"} title="Align top">
+        <AlignStartVertical className="h-3.5 w-3.5 rotate-90" />
+      </RbBtn>
+      <RbBtn onClick={() => setProp({ verticalAlign: "middle" })} active={currentVAlign === "middle"} title="Align middle">
+        <AlignCenterVertical className="h-3.5 w-3.5 rotate-90" />
+      </RbBtn>
+      <RbBtn onClick={() => setProp({ verticalAlign: "bottom" })} active={currentVAlign === "bottom"} title="Align bottom">
+        <AlignEndVertical className="h-3.5 w-3.5 rotate-90" />
+      </RbBtn>
+
+      <div className="w-px h-5 bg-white/[0.08] mx-1" />
+
+      {/* Line height */}
+      <div className="relative" ref={lineRef}>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={(e) => { e.stopPropagation(); setLineOpen(o => !o); }}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-gray-300 hover:bg-white/[0.07] min-w-[52px]"
+          title="Line spacing"
+        >
+          <span className="flex-1 text-center">{currentLineHeight.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}</span>
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+        {lineOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[60px] z-50 max-h-60 overflow-y-auto">
+            {LINE_HEIGHTS.map(lh => (
+              <button
+                key={lh}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={(e) => { e.stopPropagation(); setProp({ lineHeight: lh }); setLineOpen(false); }}
+                className={`block w-full text-center px-2 py-1 text-xs hover:bg-white/[0.05] ${currentLineHeight === lh ? "text-blue-300" : "text-gray-300"}`}
+              >
+                {lh.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="w-px h-5 bg-white/[0.08] mx-1" />
 
