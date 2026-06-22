@@ -186,13 +186,15 @@ export default function Tasks() {
     setView("page");
   };
 
-  const handleUpdatePage = async (patch) => {
+  // Wrapped in useCallback so the reference is stable across renders — otherwise
+  // a fresh closure each render resets Whiteboard's 600ms save debounce and thrashes saves.
+  const handleUpdatePage = useCallback(async (patch) => {
     if (!selectedPageId) return;
     queryClient.setQueryData(["pages", user?.email], (old = []) =>
       old.map(p => p.id === selectedPageId ? { ...p, ...patch, updated_date: new Date().toISOString() } : p)
     );
     await base44.entities.Page.update(selectedPageId, patch);
-  };
+  }, [selectedPageId, queryClient, user?.email]);
 
   // Generic version for sidebar actions (rename, move, change icon)
   const handleUpdatePageById = async (pageId, patch) => {

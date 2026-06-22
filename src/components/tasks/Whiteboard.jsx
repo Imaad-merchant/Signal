@@ -12,6 +12,9 @@ import {
   shiftObj,
   hitTest,
   worldToScreen,
+  snap,
+  snapObj,
+  GRID_SIZE,
 } from "./whiteboard/geometry";
 import Toolbar from "./whiteboard/Toolbar";
 import SelectionBar from "./whiteboard/SelectionBar";
@@ -50,6 +53,9 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const [drawingObject, setDrawingObject] = useState(null);
   const [panning, setPanning] = useState(false);
   const [draggingSelection, setDraggingSelection] = useState(null); // { startX, startY, originals }
+  const dragHistoryRef = useRef(false); // whether a history snapshot was pushed for the active drag
+  const [marquee, setMarquee] = useState(null); // { startX, startY, x, y } in world coords
+  const eraseHistoryRef = useRef(false); // whether a history snapshot was pushed for the active erase-drag
   const lastPointer = useRef(null); // last screen pointer pos, for touch-friendly panning
   const pointers = useRef(new Map()); // active pointers (for pinch-zoom)
   const pinchRef = useRef(null); // { startDist, startMid, startViewport }
@@ -57,6 +63,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
   const saveTimer = useRef(null);
   const loadedRef = useRef(false);
+  const skipSaveRef = useRef(false); // suppress the save triggered by loading a page
   const editingTextRef = useRef(null);
 
   // ─── AI prompt state ─────────────────────────────────────────────
@@ -73,6 +80,9 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       });
       const actions = res.data?.actions || [];
       if (actions.length === 0) { setAiLoading(false); setAiOpen(false); return; }
+      // Snapshot the pre-change state for undo, using the live objects array
+      // (snapshot BEFORE applying so undo restores the canvas as it was).
+      pushHistory(objects);
       setObjects(prev => {
         let next = [...prev];
         for (const a of actions) {
@@ -84,10 +94,6 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         }
         return next;
       });
-      // push history AFTER (we already have prev snapshot in stack? push manually)
-      undoStack.current.push(JSON.parse(JSON.stringify(objects)));
-      if (undoStack.current.length > 50) undoStack.current.shift();
-      redoStack.current = [];
       setAiOpen(false);
     } catch (e) {
       console.error("aiCanvas failed", e);
@@ -195,10 +201,23 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     pushHistory(objects);
     setObjects(prev => {
       const arr = [...prev];
-      for (let i = arr.length - 2; i >= 0; i--) {
-        if (effectiveSelectionIds.includes(arr[i].id) && !effectiveSelectionIds.includes(arr[i + 1].id)) {
-          [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+      const sel = new Set(effectiveSelectionIds);
+      // Shift the whole selection forward by exactly one slot relative to
+      // non-selected items: for each maximal run of selected items, swap the
+      // single non-selected item directly after the run with the run (i.e. move
+      // that separator before the run). Processing top-down avoids leapfrogging.
+      let i = arr.length - 1;
+      while (i >= 0) {
+        if (!sel.has(arr[i].id)) { i--; continue; }
+        // [start..i] is a run of selected items ending at i.
+        let start = i;
+        while (start - 1 >= 0 && sel.has(arr[start - 1].id)) start--;
+        // If a non-selected item sits right after the run, move it before the run.
+        if (i + 1 < arr.length && !sel.has(arr[i + 1].id)) {
+          const [mover] = arr.splice(i + 1, 1);
+          arr.splice(start, 0, mover);
         }
+        i = start - 1;
       }
       return arr;
     });
@@ -209,10 +228,19 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     pushHistory(objects);
     setObjects(prev => {
       const arr = [...prev];
-      for (let i = 1; i < arr.length; i++) {
-        if (effectiveSelectionIds.includes(arr[i].id) && !effectiveSelectionIds.includes(arr[i - 1].id)) {
-          [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
+      const sel = new Set(effectiveSelectionIds);
+      // Mirror of bringForward: for each maximal run of selected items, move the
+      // single non-selected item directly before the run to just after the run.
+      let i = 0;
+      while (i < arr.length) {
+        if (!sel.has(arr[i].id)) { i++; continue; }
+        let end = i;
+        while (end + 1 < arr.length && sel.has(arr[end + 1].id)) end++;
+        if (i - 1 >= 0 && !sel.has(arr[i - 1].id)) {
+          const [mover] = arr.splice(i - 1, 1);
+          arr.splice(end, 0, mover); // end shifted left by 1 after splice → lands after run
         }
+        i = end + 1;
       }
       return arr;
     });
@@ -289,6 +317,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   // Add quick shape at point
   const addQuickShape = useCallback((shapeType, atX, atY) => {
     pushHistory(objects);
+    if (snapToGrid) { atX = snap(atX); atY = snap(atY); }
     const newObj = shapeType === "text"
       ? { id: uid(), type: "text", x: atX, y: atY, w: 220, h: fontSize * 1.6, text: "Text", color, fontSize }
       : shapeType === "sticky"
@@ -296,7 +325,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       : { id: uid(), type: shapeType, x: atX, y: atY, w: 120, h: 80, color, strokeWidth };
     setObjects(prev => [...prev, newObj]);
     setSelectedIds([newObj.id]);
-  }, [color, fontSize, strokeWidth, objects]);
+  }, [color, fontSize, strokeWidth, objects, snapToGrid]);
 
   // Export functions
   const exportSVG = useCallback(() => {
@@ -347,23 +376,38 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     } else {
       setObjects([]);
     }
-    setViewport({ x: 0, y: 0, zoom: 1 });
+    // Restore persisted viewport if present, else reset.
+    let restored = { x: 0, y: 0, zoom: 1 };
+    if (page.viewport) {
+      try {
+        const v = typeof page.viewport === "string" ? JSON.parse(page.viewport) : page.viewport;
+        if (v && typeof v.x === "number" && typeof v.y === "number" && typeof v.zoom === "number") {
+          restored = { x: v.x, y: v.y, zoom: Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom)) };
+        }
+      } catch { /* ignore malformed viewport */ }
+    }
+    setViewport(restored);
     setSelectedIds([]);
     undoStack.current = [];
     redoStack.current = [];
     setHistoryVersion(v => v + 1);
     loadedRef.current = true;
+    // Skip the save that the above setObjects/setViewport will trigger, so merely
+    // opening a page doesn't write the data straight back (which would bump
+    // updated_date and reorder the page list).
+    skipSaveRef.current = true;
   }, [page.id]);
 
   // Auto-save objects to page (debounced)
   useEffect(() => {
     if (!loadedRef.current) return;
+    if (skipSaveRef.current) { skipSaveRef.current = false; return; }
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      onUpdate({ whiteboard: JSON.stringify(objects) });
+      onUpdate({ whiteboard: JSON.stringify(objects), viewport: JSON.stringify(viewport) });
     }, 600);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [objects, onUpdate]);
+  }, [objects, viewport, onUpdate]);
 
   // Container size
   useEffect(() => {
@@ -437,6 +481,25 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           e.preventDefault();
           deleteSelection();
         }
+        return;
+      }
+      // Escape: deselect everything
+      if (e.key === "Escape") {
+        if (selectedIds.length > 0) { e.preventDefault(); setSelectedIds([]); }
+        return;
+      }
+      // Arrow keys: nudge selection (1px, or 10px with Shift)
+      if (!mod && (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        if (effectiveSelectionIds.length === 0) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        // Only snapshot on the initial press, not on OS key-repeat, so holding an
+        // arrow key produces a single undo entry rather than one per pixel.
+        if (!e.repeat) pushHistory(objects);
+        setObjects(prev => prev.map(o => effectiveSelectionIds.includes(o.id) ? shiftObj(o, dx, dy) : o));
+        return;
       }
       // Tool shortcuts
       if (!mod && !e.shiftKey) {
@@ -453,7 +516,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleUndo, handleRedo, selectedIds, objects, editingTextId]);
+  }, [handleUndo, handleRedo, selectedIds, effectiveSelectionIds, objects, editingTextId, copySelection, pasteClipboard, deleteSelection, duplicateSelection, groupSelection, ungroupSelection, pushHistory]);
 
   // ─── Pointer handlers ────────────────────────────────────────────
   const handlePointerDown = (e) => {
@@ -474,6 +537,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       setPanning(false);
       setDraggingSelection(null);
       setDrawingObject(null);
+      setMarquee(null);
       return;
     }
     if (pinchRef.current) return; // already pinching
@@ -488,8 +552,9 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     const { x, y } = screenToWorld(e.clientX, e.clientY);
 
     if (tool === "select") {
-      // Hit test (skip locked unless directly clicked already-selected)
-      const hit = [...objects].reverse().find(o => !o.locked && hitTest(o, x, y));
+      // Hit test (skip locked unless directly clicked already-selected).
+      // Divide tolerance by zoom so the slop stays constant in screen pixels.
+      const hit = [...objects].reverse().find(o => !o.locked && hitTest(o, x, y, 8 / viewport.zoom));
       if (hit) {
         // Expand to group members
         const expanded = [];
@@ -502,19 +567,28 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         const newSelection = e.shiftKey ? [...new Set([...selectedIds, ...expanded])] : expanded;
         setSelectedIds(newSelection);
         const dragIds = selectedIds.includes(hit.id) && !e.shiftKey ? selectedIds : expanded;
+        // Defer the history snapshot until the drag actually moves, so a plain
+        // select-click without movement doesn't spam the undo stack.
+        dragHistoryRef.current = false;
         setDraggingSelection({
           startX: x,
           startY: y,
           originals: objects.filter(o => dragIds.includes(o.id))
             .map(o => ({ id: o.id, snapshot: JSON.parse(JSON.stringify(o)) })),
         });
-        pushHistory(objects);
       } else {
-        // Click on empty space → start panning the canvas
+        // Click on empty canvas:
+        //  - touch: pan (one finger drag feels natural on mobile)
+        //  - mouse/pen: rubber-band marquee to select intersecting objects
         setSelectedIds([]);
-        setPanning(true);
-        lastPointer.current = { x: e.clientX, y: e.clientY };
-        e.currentTarget.setPointerCapture?.(e.pointerId);
+        if (e.pointerType === "touch") {
+          setPanning(true);
+          lastPointer.current = { x: e.clientX, y: e.clientY };
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        } else {
+          setMarquee({ startX: x, startY: y, x, y });
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        }
       }
       return;
     }
@@ -545,9 +619,13 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     }
 
     if (tool === "eraser") {
-      const hit = [...objects].reverse().find(o => hitTest(o, x, y));
+      // Track whether a snapshot has been pushed for this erase gesture so a
+      // drag that only starts deleting after the initial press still records undo.
+      eraseHistoryRef.current = false;
+      const hit = [...objects].reverse().find(o => hitTest(o, x, y, 8 / viewport.zoom));
       if (hit) {
         pushHistory(objects);
+        eraseHistoryRef.current = true;
         setObjects(prev => prev.filter(o => o.id !== hit.id));
       }
       return;
@@ -582,26 +660,26 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
     if (draggingSelection) {
       const { x, y } = screenToWorld(e.clientX, e.clientY);
-      const dx = x - draggingSelection.startX;
-      const dy = y - draggingSelection.startY;
+      let dx = x - draggingSelection.startX;
+      let dy = y - draggingSelection.startY;
+      // Snap the drag delta to the grid (keeps relative offsets within a multi-selection).
+      if (snapToGrid) { dx = snap(dx); dy = snap(dy); }
+      // Push a single history snapshot the first time the drag actually moves.
+      if (!dragHistoryRef.current && (dx !== 0 || dy !== 0)) {
+        dragHistoryRef.current = true;
+        pushHistory(objects);
+      }
       setObjects(prev => prev.map(o => {
         const orig = draggingSelection.originals.find(s => s.id === o.id);
         if (!orig) return o;
-        const s = orig.snapshot;
-        switch (s.type) {
-          case "text":
-          case "rect":
-          case "ellipse":
-            return { ...o, x: s.x + dx, y: s.y + dy };
-          case "line":
-          case "arrow":
-            return { ...o, x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy };
-          case "path":
-            return { ...o, points: s.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
-          default:
-            return o;
-        }
+        return shiftObj(orig.snapshot, dx, dy);
       }));
+      return;
+    }
+
+    if (marquee) {
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      setMarquee(m => m ? { ...m, x, y } : m);
       return;
     }
 
@@ -618,8 +696,13 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
     if (tool === "eraser" && e.buttons === 1) {
       const { x, y } = screenToWorld(e.clientX, e.clientY);
-      const hit = [...objects].reverse().find(o => hitTest(o, x, y));
+      const hit = [...objects].reverse().find(o => hitTest(o, x, y, 8 / viewport.zoom));
       if (hit) {
+        // Push a snapshot once per erase gesture, even if the initial press missed.
+        if (!eraseHistoryRef.current) {
+          eraseHistoryRef.current = true;
+          pushHistory(objects);
+        }
         setObjects(prev => prev.filter(o => o.id !== hit.id));
       }
     }
@@ -629,7 +712,35 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinchRef.current = null;
     if (panning) { setPanning(false); lastPointer.current = null; return; }
-    if (draggingSelection) { setDraggingSelection(null); return; }
+    if (draggingSelection) {
+      dragHistoryRef.current = false;
+      setDraggingSelection(null);
+      return;
+    }
+    if (tool === "eraser") { eraseHistoryRef.current = false; }
+    if (marquee) {
+      // Select every object whose bounds intersect the rubber-band rectangle.
+      const mx = Math.min(marquee.startX, marquee.x);
+      const my = Math.min(marquee.startY, marquee.y);
+      const mw = Math.abs(marquee.x - marquee.startX);
+      const mh = Math.abs(marquee.y - marquee.startY);
+      setMarquee(null);
+      // A tiny marquee is treated as a plain click on empty space (deselect only).
+      if (mw < 3 && mh < 3) { setSelectedIds([]); return; }
+      const hits = objects.filter(o => {
+        if (o.locked) return false;
+        const b = objectBounds(o);
+        return b.x < mx + mw && b.x + b.w > mx && b.y < my + mh && b.y + b.h > my;
+      });
+      // Expand selection to include full groups.
+      const ids = new Set();
+      for (const o of hits) {
+        if (o.groupId) objects.filter(g => g.groupId === o.groupId).forEach(g => ids.add(g.id));
+        else ids.add(o.id);
+      }
+      setSelectedIds(Array.from(ids));
+      return;
+    }
     if (drawingObject) {
       let obj = drawingObject;
       setDrawingObject(null);
@@ -649,6 +760,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           if (obj.w < 0) obj = { ...obj, x: obj.x + obj.w, w: -obj.w };
           if (obj.h < 0) obj = { ...obj, y: obj.y + obj.h, h: -obj.h };
         }
+        if (snapToGrid) obj = snapObj(obj);
         setObjects(prev => [...prev, obj]);
         setEditingTextId(obj.id);
         setSelectedIds([obj.id]);
@@ -659,6 +771,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
         if (Math.hypot(obj.x2 - obj.x1, obj.y2 - obj.y1) < 2) return;
       }
       if (obj.type === "path" && (!obj.points || obj.points.length < 2)) return;
+      if (snapToGrid) obj = snapObj(obj);
       setObjects(prev => [...prev, obj]);
     }
   };
@@ -704,8 +817,12 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       const anchorStored = { x: b.x + cfg.ax * b.w, y: b.y + cfg.ay * b.h };
       const anchorVisual = rotatePt(anchorStored.x, anchorStored.y, oc.x, oc.y, r);
       const d = rotatePt(x - anchorVisual.x, y - anchorVisual.y, 0, 0, -r); // un-rotate the drag vector
-      const newW = cfg.dimX ? Math.max(8, Math.abs(d.x)) : b.w;
-      const newH = cfg.dimY ? Math.max(8, Math.abs(d.y)) : b.h;
+      let newW = cfg.dimX ? Math.max(8, Math.abs(d.x)) : b.w;
+      let newH = cfg.dimY ? Math.max(8, Math.abs(d.y)) : b.h;
+      if (snapToGrid) {
+        if (cfg.dimX) newW = Math.max(GRID_SIZE, snap(newW));
+        if (cfg.dimY) newH = Math.max(GRID_SIZE, snap(newH));
+      }
       const offWorld = rotatePt(cfg.sx * newW / 2, cfg.sy * newH / 2, 0, 0, r);
       const cx = anchorVisual.x + offWorld.x;
       const cy = anchorVisual.y + offWorld.y;
@@ -731,19 +848,25 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
       // Block ALL wheel events from bubbling to the page
       e.preventDefault();
       e.stopPropagation();
-      const rect = el.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      // Trackpad pinch-zoom shows as ctrlKey wheel events; standard wheel = zoom too
-      const delta = -e.deltaY * 0.0015;
-      setViewport(v => {
-        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
-        const worldX = (mx - v.x) / v.zoom;
-        const worldY = (my - v.y) / v.zoom;
-        const newX = mx - worldX * newZoom;
-        const newY = my - worldY * newZoom;
-        return { x: newX, y: newY, zoom: newZoom };
-      });
+      // ctrl/⌘ + wheel (and trackpad pinch, which the browser reports as ctrlKey
+      // wheel events) = zoom; a plain wheel/two-finger swipe = pan.
+      if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const delta = -e.deltaY * 0.0015;
+        setViewport(v => {
+          const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
+          const worldX = (mx - v.x) / v.zoom;
+          const worldY = (my - v.y) / v.zoom;
+          const newX = mx - worldX * newZoom;
+          const newY = my - worldY * newZoom;
+          return { x: newX, y: newY, zoom: newZoom };
+        });
+      } else {
+        // Plain wheel: pan by the scroll delta (supports trackpad two-finger panning).
+        setViewport(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -822,7 +945,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           e.preventDefault();
           if (editingTextId) return;
           const { x, y } = screenToWorld(e.clientX, e.clientY);
-          const hit = [...objects].reverse().find(o => hitTest(o, x, y));
+          const hit = [...objects].reverse().find(o => hitTest(o, x, y, 8 / viewport.zoom));
           if (hit) {
             // Select if not already selected (respect groups)
             const expanded = hit.groupId
@@ -1197,6 +1320,19 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
               }
               return null;
             })}
+            {/* Rubber-band marquee selection rectangle */}
+            {marquee && (
+              <rect
+                x={Math.min(marquee.startX, marquee.x)}
+                y={Math.min(marquee.startY, marquee.y)}
+                width={Math.abs(marquee.x - marquee.startX)}
+                height={Math.abs(marquee.y - marquee.startY)}
+                fill="rgba(59,130,246,0.08)"
+                stroke="rgba(59,130,246,0.8)"
+                strokeWidth={1 / viewport.zoom}
+                strokeDasharray={`${4 / viewport.zoom} ${3 / viewport.zoom}`}
+              />
+            )}
           </g>
         </svg>
 
