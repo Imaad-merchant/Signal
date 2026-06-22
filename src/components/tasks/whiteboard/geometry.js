@@ -28,6 +28,35 @@ export function execCmd(cmd, value) {
   } catch {}
 }
 
+// ─── Stroke style ───────────────────────────────────────────────────
+export const STROKE_STYLES = ["solid", "dashed", "dotted"];
+
+// Resolve an object's stroke dasharray. Honors an explicit `strokeDasharray`
+// override, otherwise derives one from the `strokeStyle` keyword. Scales the
+// dash pattern with stroke width so it reads well at any thickness. Returns
+// undefined for a solid stroke (the SVG default).
+export function strokeDashArray(o) {
+  if (o.strokeDasharray) return o.strokeDasharray;
+  const sw = o.strokeWidth || 2;
+  switch (o.strokeStyle) {
+    case "dashed":
+      return `${sw * 3} ${sw * 2}`;
+    case "dotted":
+      return `${sw} ${sw * 2}`;
+    default:
+      return undefined;
+  }
+}
+
+// Resolve fill / stroke opacity, falling back to the legacy single `opacity`
+// (then to fully opaque) so older objects keep rendering as before.
+export function fillOpacityOf(o) {
+  return o.fillOpacity ?? o.opacity ?? 1;
+}
+export function strokeOpacityOf(o) {
+  return o.strokeOpacity ?? o.opacity ?? 1;
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────
 export function shiftObj(o, dx, dy) {
   if (dx === 0 && dy === 0) return o;
