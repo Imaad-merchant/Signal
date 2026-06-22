@@ -25,7 +25,7 @@ function MoreShapesDropdown({ moreShapes, tool, setTool }) {
         <span className="text-[10px] font-bold">◇</span>
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[140px] z-50">
+        <div className="absolute left-full top-0 ml-2 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[140px] z-50">
           {moreShapes.map(s => (
             <button
               key={s.key}
@@ -93,7 +93,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto"
+      className="absolute top-3 left-3 z-30 flex flex-col items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl max-h-[calc(100vh-1.5rem)] overflow-y-auto"
     >
       {/* Undo / Redo */}
       <button
@@ -117,12 +117,12 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         <Redo2 className="h-3.5 w-3.5" />
       </button>
 
-      <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
+      <div className="h-px w-6 bg-white/[0.08] my-1" />
 
       {/* Select + Hand */}
       {tools.map(t => <ToolBtn key={t.key} t={t} />)}
 
-      <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
+      <div className="h-px w-6 bg-white/[0.08] my-1" />
 
       {/* Drawing tools */}
       {drawTools.map(t => <ToolBtn key={t.key} t={t} />)}
@@ -130,7 +130,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
       {/* More shapes dropdown */}
       <MoreShapesDropdown moreShapes={moreShapes} tool={tool} setTool={setTool} />
 
-      <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
+      <div className="h-px w-6 bg-white/[0.08] my-1" />
 
       {/* Color picker */}
       <div className="relative" ref={colorRef}>
@@ -145,7 +145,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
           <ChevronDown className="h-2.5 w-2.5" />
         </button>
         {colorOpen && (
-          <div className="absolute top-full left-0 mt-2 bg-[#2d2e30] border border-white/[0.12] rounded-xl shadow-2xl p-2 z-50">
+          <div className="absolute left-full top-0 ml-2 bg-[#2d2e30] border border-white/[0.12] rounded-xl shadow-2xl p-2 z-50">
             <div className="grid grid-cols-5 gap-1.5">
               {COLORS.map(c => (
                 <button
@@ -207,7 +207,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         </div>
       )}
 
-      <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
+      <div className="h-px w-6 bg-white/[0.08] my-1" />
 
       {/* Grid toggle */}
       <button
@@ -230,7 +230,7 @@ export default function Toolbar({ tool, setTool, color, setColor, strokeWidth, s
         <Trash2 className="h-3.5 w-3.5" />
       </button>
 
-      <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
+      <div className="h-px w-6 bg-white/[0.08] my-1" />
 
       {/* AI button */}
       <button

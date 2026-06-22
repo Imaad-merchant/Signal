@@ -46,9 +46,19 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     }
   };
 
-  // Apply object-level prop (when not editing or font-level)
+  // Apply object-level prop (default for the whole text box)
   const setProp = (patch) => {
     onUpdate(patch);
+  };
+
+  // True when there is a non-collapsed selection inside the editing text box.
+  // Formatting should then target just those characters, not the whole box.
+  const hasSelection = () => {
+    if (!isEditing || !editingTextRef?.current) return false;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+    const root = editingTextRef.current;
+    return root.contains(sel.anchorNode) && root.contains(sel.focusNode);
   };
 
   const currentFont = FONT_FAMILIES.find(f => f.css === textObject.fontFamily) || FONT_FAMILIES[0];
@@ -60,44 +70,62 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   const currentBg = textObject.bgColor && textObject.bgColor !== "none" ? textObject.bgColor : null;
 
   const handleFontPick = (font) => {
-    setProp({ fontFamily: font.css });
     setFontOpen(false);
-    if (isEditing) {
-      editingTextRef?.current?.focus();
+    if (hasSelection()) {
+      editingTextRef.current.focus();
       execCmd("fontName", font.name);
+      return;
     }
+    setProp({ fontFamily: font.css });
+    if (isEditing) editingTextRef?.current?.focus();
   };
 
   const handleSizePick = (size) => {
-    setProp({ fontSize: size });
     setSizeOpen(false);
-    if (isEditing && editingTextRef?.current) {
+    if (hasSelection()) {
       editingTextRef.current.focus();
-      // Wrap selection in span with style
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
-        execCmd("styleWithCSS", true);
-        execCmd("fontSize", "7");
-        // Replace generated font tags with span style
-        const root = editingTextRef.current;
-        root.querySelectorAll('font[size="7"]').forEach(f => {
-          const span = document.createElement("span");
-          span.style.fontSize = `${size}px`;
-          span.innerHTML = f.innerHTML;
-          f.replaceWith(span);
-        });
-      }
+      execCmd("styleWithCSS", true);
+      execCmd("fontSize", "7");
+      // Replace the placeholder <font size="7"> tags with explicit px spans
+      const root = editingTextRef.current;
+      root.querySelectorAll('font[size="7"]').forEach(f => {
+        const span = document.createElement("span");
+        span.style.fontSize = `${size}px`;
+        span.innerHTML = f.innerHTML;
+        f.replaceWith(span);
+      });
+      return;
     }
+    setProp({ fontSize: size });
+    if (isEditing) editingTextRef?.current?.focus();
   };
 
   const handleColorPick = (c) => {
-    setProp({ color: c });
     setColorOpen(false);
-    if (isEditing && editingTextRef?.current) {
+    if (hasSelection()) {
       editingTextRef.current.focus();
       execCmd("styleWithCSS", true);
       execCmd("foreColor", c);
+      return;
     }
+    setProp({ color: c });
+    if (isEditing) editingTextRef?.current?.focus();
+  };
+
+  // Highlight: apply to just the selected characters when text is selected,
+  // otherwise fall back to the object-level background for the whole box.
+  const handleHighlight = (c) => {
+    setBgOpen(false);
+    if (hasSelection()) {
+      editingTextRef.current.focus();
+      execCmd("styleWithCSS", true);
+      const val = c === "none" ? "transparent" : c;
+      execCmd("hiliteColor", val); // standard
+      execCmd("backColor", val);   // Chromium fallback
+      return;
+    }
+    setProp({ bgColor: c });
+    if (isEditing) editingTextRef?.current?.focus();
   };
 
   const RbBtn = ({ onClick, active, title, children }) => (
@@ -116,7 +144,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute top-[60px] left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl"
+      className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto"
     >
       {/* Font family */}
       <div className="relative" ref={fontRef}>
@@ -282,7 +310,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
                   key={c}
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={(e) => { e.stopPropagation(); setProp({ bgColor: c }); setBgOpen(false); }}
+                  onClick={(e) => { e.stopPropagation(); handleHighlight(c); }}
                   className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${currentBg === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
                   style={{ backgroundColor: c }}
                 />
@@ -294,14 +322,14 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
                 <input
                   type="color"
                   value={currentBg || "#000000"}
-                  onChange={(e) => setProp({ bgColor: e.target.value })}
+                  onChange={(e) => handleHighlight(e.target.value)}
                   className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
                 />
               </div>
               <button
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); setProp({ bgColor: "none" }); setBgOpen(false); }}
+                onClick={(e) => { e.stopPropagation(); handleHighlight("none"); }}
                 className="flex items-center gap-1 px-1.5 py-1 rounded text-[10px] text-gray-300 hover:bg-white/[0.07]"
                 title="No highlight"
               >
