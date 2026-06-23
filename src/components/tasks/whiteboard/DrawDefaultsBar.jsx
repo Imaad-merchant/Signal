@@ -23,7 +23,7 @@ export default function DrawDefaultsBar({ tool, color, setColor, strokeWidth, se
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="flex items-center gap-1 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-2 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto"
+      className="flex flex-wrap items-center justify-center gap-1 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-2 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]"
     >
       {/* Color picker */}
       <div className="relative" ref={colorRef}>

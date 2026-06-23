@@ -138,7 +138,7 @@ export default function Toolbar({ tool, setTool, onClear, onUndo, onRedo, canUnd
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="flex items-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto"
+      className="flex flex-wrap items-center justify-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]"
     >
       {/* Undo / Redo */}
       <button
