@@ -315,11 +315,13 @@ export default function NotionSidebar({
   user,
   view,
   onSelectHome,
+  onSelectTrash,
   onSelectPage,
   onCreatePage,
   onDeletePage,
   onUpdatePage,
   selectedPageId,
+  trashCount = 0,
   aiAutoOrganize,
   onToggleAutoOrganize,
   onOrganizeNow,
@@ -401,6 +403,18 @@ export default function NotionSidebar({
         >
           <Search className="h-3.5 w-3.5" />
           Search
+        </button>
+        <button
+          onClick={onSelectTrash}
+          className={`flex items-center gap-2 w-full px-2 py-1 rounded-md text-[13px] transition-colors ${
+            view === "trash" ? "bg-white/[0.06] text-gray-100" : "text-gray-400 hover:bg-white/[0.03] hover:text-gray-200"
+          }`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          <span className="flex-1 text-left">Recently deleted</span>
+          {trashCount > 0 && (
+            <span className="text-[10px] text-gray-500 bg-white/[0.06] rounded px-1.5 py-0.5">{trashCount}</span>
+          )}
         </button>
       </div>
 

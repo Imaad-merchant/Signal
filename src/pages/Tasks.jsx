@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,6 +20,68 @@ import { format, isSameDay, isToday, parseISO } from "date-fns";
 import { useIsMobile } from "../components/useIsMobile";
 
 const PULL_THRESHOLD = 70;
+
+// "Recently deleted" view — lists soft-deleted page subtrees with Restore /
+// Delete-forever. Items auto-purge after 30 days (handled in the parent).
+function TrashView({ pages, onRestore, onPurge }) {
+  const fmt = (iso) => {
+    if (!iso) return "";
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+    if (days <= 0) return "today";
+    if (days === 1) return "yesterday";
+    return `${days}d ago`;
+  };
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-2xl mx-auto px-4 py-6">
+        <div className="flex items-center gap-2 mb-1">
+          <Trash2 className="h-4 w-4 text-gray-400" />
+          <h1 className="text-lg font-medium text-gray-100">Recently deleted</h1>
+        </div>
+        <p className="text-xs text-gray-500 mb-5">
+          Deleted pages are kept here for 30 days, then permanently removed.
+        </p>
+        {pages.length === 0 ? (
+          <div className="text-center py-16 text-gray-600 text-sm">
+            <Trash2 className="h-8 w-8 mx-auto mb-3 opacity-30" />
+            Nothing here. Deleted pages will show up in this list.
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {pages.map((p) => {
+              const iconCfg = ICON_MAP[p.icon] || ICON_MAP.file;
+              const Icon = iconCfg.icon;
+              return (
+                <div
+                  key={p.id}
+                  className="group flex items-center gap-2.5 px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.04]"
+                >
+                  <Icon className={`h-4 w-4 shrink-0 ${iconCfg.color}`} />
+                  <span className="flex-1 truncate text-[13.5px] text-gray-200">{p.title || "Untitled"}</span>
+                  <span className="text-[11px] text-gray-600 shrink-0">{fmt(p.deleted_at)}</span>
+                  <button
+                    onClick={() => onRestore(p)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
+                    title="Restore"
+                  >
+                    <RotateCcw className="h-3 w-3" /> Restore
+                  </button>
+                  <button
+                    onClick={() => onPurge(p)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] text-rose-400 hover:bg-rose-500/15 transition-colors"
+                    title="Delete forever"
+                  >
+                    <Trash2 className="h-3 w-3" /> Delete
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function Tasks() {
   const [showAdd, setShowAdd] = useState(false);
@@ -128,6 +190,17 @@ export default function Tasks() {
     queryFn: () => base44.entities.Page.list("-updated_date"),
     enabled: !!user,
   });
+
+  // Soft-delete: pages carry an optional `deleted_at`. Active pages (no flag) feed
+  // the sidebar/editor; trashed pages live in the "Recently deleted" view. Each
+  // trashed subtree shares a `deleted_root_id` so it restores/purges as a unit.
+  const activePages = useMemo(() => pages.filter(p => !p.deleted_at), [pages]);
+  const trashedRoots = useMemo(
+    () => pages
+      .filter(p => p.deleted_at && (p.deleted_root_id === p.id || !p.deleted_root_id))
+      .sort((a, b) => (b.deleted_at || "").localeCompare(a.deleted_at || "")),
+    [pages]
+  );
 
   const isMobile = useIsMobile();
   const [view, setView] = useState("home"); // "home" or "page"
@@ -266,27 +339,68 @@ export default function Tasks() {
     }
   };
 
-  const handleDeletePage = async (page) => {
-    if (!confirm(`Delete "${page.title || 'Untitled'}"?`)) return;
-    // Also delete sub-pages
-    const toDelete = [page.id];
+  // Collect a page id plus every descendant id (whole subtree).
+  const collectSubtree = (rootId) => {
+    const ids = [rootId];
     const walk = (parentId) => {
-      pages.filter(p => p.parent_id === parentId).forEach(child => { toDelete.push(child.id); walk(child.id); });
+      pages.filter(p => p.parent_id === parentId).forEach(child => { ids.push(child.id); walk(child.id); });
     };
-    walk(page.id);
-    await Promise.all(toDelete.map(id => base44.entities.Page.delete(id)));
-    if (selectedPageId === page.id) { setSelectedPageId(null); setView("home"); }
+    walk(rootId);
+    return ids;
+  };
+
+  // Soft-delete: flag the subtree with deleted_at + deleted_root_id so it moves to
+  // "Recently deleted" (restorable) instead of being destroyed. No confirm needed —
+  // it's reversible from the Trash view.
+  const handleDeletePage = async (page) => {
+    const ids = collectSubtree(page.id);
+    const deleted_at = new Date().toISOString();
+    queryClient.setQueryData(["pages", user?.email], (old = []) =>
+      old.map(p => ids.includes(p.id) ? { ...p, deleted_at, deleted_root_id: page.id } : p)
+    );
+    if (selectedPageId && ids.includes(selectedPageId)) { setSelectedPageId(null); setView("home"); }
+    await Promise.all(ids.map(id => base44.entities.Page.update(id, { deleted_at, deleted_root_id: page.id })));
     refreshPages();
   };
+
+  // Restore a trashed subtree (clear the flags).
+  const handleRestorePage = async (root) => {
+    const ids = pages.filter(p => p.deleted_root_id === root.id || p.id === root.id).map(p => p.id);
+    queryClient.setQueryData(["pages", user?.email], (old = []) =>
+      old.map(p => ids.includes(p.id) ? { ...p, deleted_at: null, deleted_root_id: null } : p)
+    );
+    await Promise.all(ids.map(id => base44.entities.Page.update(id, { deleted_at: null, deleted_root_id: null })));
+    refreshPages();
+  };
+
+  // Permanently destroy a trashed subtree (the old hard-delete behavior).
+  const handlePermanentDelete = async (root) => {
+    if (!confirm(`Permanently delete "${root.title || 'Untitled'}"? This cannot be undone.`)) return;
+    const ids = pages.filter(p => p.deleted_root_id === root.id || p.id === root.id).map(p => p.id);
+    queryClient.setQueryData(["pages", user?.email], (old = []) => old.filter(p => !ids.includes(p.id)));
+    await Promise.all(ids.map(id => base44.entities.Page.delete(id)));
+    refreshPages();
+  };
+
+  // Auto-purge trashed pages older than 30 days (runs once per session).
+  const purgedRef = useRef(false);
+  useEffect(() => {
+    if (purgedRef.current || pages.length === 0) return;
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const stale = pages.filter(p => p.deleted_at && new Date(p.deleted_at).getTime() < cutoff);
+    if (stale.length === 0) return;
+    purgedRef.current = true;
+    Promise.all(stale.map(p => base44.entities.Page.delete(p.id).catch(() => {}))).then(refreshPages);
+  }, [pages]);
 
   const selectedPage = pages.find(p => p.id === selectedPageId);
 
   // ─── AI Organizer ─────────────────────────────────────────────────
   const runAIOrganize = useCallback(async () => {
-    if (aiOrganizing || pages.length < 2) return;
+    if (aiOrganizing || activePages.length < 2) return;
     setAiOrganizing(true);
     try {
-      const res = await base44.functions.invoke("organizePages", { pages });
+      const res = await base44.functions.invoke("organizePages", { pages: activePages });
       const result = res.data || {};
       const actions = result.actions || [];
       if (actions.length === 0) {
@@ -317,7 +431,7 @@ export default function Tasks() {
       const reverseActions = [];
       for (const act of actions) {
         if (act.action === "set_parent" && act.pageId) {
-          const page = pages.find(p => p.id === act.pageId);
+          const page = activePages.find(p => p.id === act.pageId);
           if (!page) continue;
           const newParentId = act.newParentId && tempToReal[act.newParentId] ? tempToReal[act.newParentId] : (act.newParentId || null);
           if (page.parent_id === newParentId) continue;
@@ -340,7 +454,7 @@ export default function Tasks() {
     } finally {
       setAiOrganizing(false);
     }
-  }, [pages, aiOrganizing]);
+  }, [activePages, aiOrganizing]);
 
   const undoAIOrganize = useCallback(async () => {
     if (aiUndoStack.length === 0) return;
@@ -361,8 +475,8 @@ export default function Tasks() {
 
   // Auto-organize debouncer when toggle is on
   useEffect(() => {
-    if (!aiAutoOrganize || pages.length < 2) return;
-    const hash = pages.map(p => `${p.id}:${p.title}:${p.parent_id || ""}`).sort().join("|");
+    if (!aiAutoOrganize || activePages.length < 2) return;
+    const hash = activePages.map(p => `${p.id}:${p.title}:${p.parent_id || ""}`).sort().join("|");
     if (hash === aiLastRunHash.current) return;
     if (aiAutoTimer.current) clearTimeout(aiAutoTimer.current);
     aiAutoTimer.current = setTimeout(() => {
@@ -370,7 +484,7 @@ export default function Tasks() {
       runAIOrganize();
     }, 8000); // wait 8s of no changes before auto-organize
     return () => { if (aiAutoTimer.current) clearTimeout(aiAutoTimer.current); };
-  }, [aiAutoOrganize, pages, runAIOrganize]);
+  }, [aiAutoOrganize, activePages, runAIOrganize]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
@@ -630,11 +744,13 @@ export default function Tasks() {
           style={isMobile ? { paddingTop: "env(safe-area-inset-top)" } : undefined}
         >
         <NotionSidebar
-          pages={pages}
+          pages={activePages}
           user={user}
           view={view}
           selectedPageId={selectedPageId}
+          trashCount={trashedRoots.length}
           onSelectHome={() => { setView("home"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
+          onSelectTrash={() => { setView("trash"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
           onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); if (isMobile) setSidebarOpen(false); }}
           onCreatePage={handleCreatePage}
           onDeletePage={handleDeletePage}
@@ -694,7 +810,13 @@ export default function Tasks() {
 
         {/* Body — Home tasks view OR page editor based on type */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          {view === "page" && selectedPage ? (() => {
+          {view === "trash" ? (
+            <TrashView
+              pages={trashedRoots}
+              onRestore={handleRestorePage}
+              onPurge={handlePermanentDelete}
+            />
+          ) : view === "page" && selectedPage ? (() => {
             const pageType = selectedPage.type || "whiteboard";
             const iconCfg = ICON_MAP[selectedPage.icon] || ICON_MAP.file;
             const PageIcon = iconCfg.icon;
