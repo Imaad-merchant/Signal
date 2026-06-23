@@ -6,12 +6,26 @@ import { FONT_SIZES } from "./geometry";
 // `value` is the current size; `onPick(size)` commits a new size (selection-aware
 // in TextRibbon, object-default in DrawDefaultsBar). `isMobile` bumps hit-areas.
 export default function FontSizeStepper({ value, onPick, isMobile = false }) {
-  const size = value || 18;
-  const [draft, setDraft] = useState(String(size));
+  const clamp = (n) => Math.max(1, Math.min(400, Math.round(n)));
+  const incoming = clamp(value || 18);
+  // Local working value. Stepping accumulates here so repeated +/- always build
+  // on the last shown number, even when the selection-aware onPick applies the
+  // size via execCommand without changing the object-level `value` prop.
+  const [size, setSize] = useState(incoming);
+  const [draft, setDraft] = useState(String(incoming));
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
-  useEffect(() => { setDraft(String(size)); }, [size]);
+  // Re-sync only when the incoming prop genuinely changes (e.g. selecting a
+  // different text box) — not on our own onPick round-trips.
+  const prevIncoming = useRef(incoming);
+  useEffect(() => {
+    if (incoming !== prevIncoming.current) {
+      prevIncoming.current = incoming;
+      setSize(incoming);
+      setDraft(String(incoming));
+    }
+  }, [incoming]);
 
   useEffect(() => {
     if (!open) return;
@@ -20,11 +34,16 @@ export default function FontSizeStepper({ value, onPick, isMobile = false }) {
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const clamp = (n) => Math.max(1, Math.min(400, Math.round(n)));
-  const step = (delta) => onPick(clamp(size + delta));
+  const apply = (n) => {
+    const v = clamp(n);
+    setSize(v);
+    setDraft(String(v));
+    onPick(v);
+  };
+  const step = (delta) => apply(size + delta);
   const commit = () => {
     const n = parseInt(draft, 10);
-    if (!Number.isNaN(n)) onPick(clamp(n));
+    if (!Number.isNaN(n)) apply(n);
     else setDraft(String(size));
   };
 
@@ -81,7 +100,7 @@ export default function FontSizeStepper({ value, onPick, isMobile = false }) {
               key={s}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-              onClick={(e) => { e.stopPropagation(); onPick(s); setOpen(false); }}
+              onClick={(e) => { e.stopPropagation(); apply(s); setOpen(false); }}
               className={`block w-full text-center px-2 py-1 text-xs hover:bg-white/[0.05] ${size === s ? "text-blue-300" : "text-gray-300"}`}
             >
               {s}
