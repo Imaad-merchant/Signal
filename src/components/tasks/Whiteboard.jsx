@@ -25,7 +25,6 @@ import SelectionBar from "./whiteboard/SelectionBar";
 import TextRibbon from "./whiteboard/TextRibbon";
 import DrawDefaultsBar from "./whiteboard/DrawDefaultsBar";
 import WhiteboardContextMenu from "./whiteboard/WhiteboardContextMenu";
-import Minimap from "./whiteboard/Minimap";
 
 // Generate a stable id
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1149,8 +1148,8 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
           backgroundPosition: `${viewport.x}px ${viewport.y}px`,
         } : { backgroundColor: "#1a1b1c" }}
       >
-        {/* Two-row top toolbar: Row 1 persistent tools, Row 2 contextual formatting */}
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-[calc(100vw-1.5rem)]">
+        {/* Top toolbar: persistent tools + contextual formatting, side by side */}
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex flex-row flex-wrap items-start justify-center gap-1.5 max-w-[calc(100vw-1.5rem)]">
           <Toolbar
             tool={tool}
             setTool={setTool}
@@ -1673,12 +1672,17 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
               dangerouslySetInnerHTML={{ __html: sanitizeTextHtml(o.text) }}
-              className="absolute bg-[#1e1f20]/95 border-2 border-blue-400/60 rounded px-1.5 py-1 outline-none text-gray-100 overflow-auto"
+              className="absolute rounded outline-none overflow-auto ring-2 ring-blue-400/60"
               style={{
                 left: sx,
                 top: sy,
-                width: Math.max((o.w || 200) * viewport.zoom, 80),
-                minHeight: Math.max((o.h || 30) * viewport.zoom, (o.fontSize || 18) * viewport.zoom * 1.4),
+                // Match the static foreignObject render exactly so the box doesn't
+                // resize on enter/exit: same width, padding (2px), and box model.
+                // The blue outline is a ring (box-shadow) so it adds no layout size.
+                width: Math.max((o.w || 200) * viewport.zoom, 50 * viewport.zoom),
+                minHeight: Math.max((o.h || (o.fontSize || 18) * 1.6) * viewport.zoom, 20 * viewport.zoom),
+                padding: 2 * viewport.zoom,
+                boxSizing: "border-box",
                 color: o.color,
                 fontSize: (o.fontSize || 18) * viewport.zoom,
                 fontFamily: o.fontFamily || "Inter, system-ui, sans-serif",
@@ -1689,20 +1693,13 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 wordBreak: "break-word",
                 // Edit top-aligned (a flex-column contentEditable causes caret/Enter
                 // glitches); vertical alignment is applied in the static render.
-                background: o.bgColor && o.bgColor !== "none" ? o.bgColor : undefined,
+                background: o.bgColor && o.bgColor !== "none" ? o.bgColor : "rgba(30,31,32,0.85)",
+                borderRadius: o.bgColor && o.bgColor !== "none" ? "4px" : undefined,
               }}
               data-placeholder="Type something..."
             />
           );
         })()}
-
-        {/* Minimap */}
-        <Minimap
-          objects={objects}
-          viewport={viewport}
-          setViewport={setViewport}
-          containerSize={containerSize}
-        />
 
         {/* AI Prompt Dialog */}
         <AIPromptDialog
