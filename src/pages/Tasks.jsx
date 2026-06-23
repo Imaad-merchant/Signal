@@ -9,6 +9,7 @@ import { AnimatePresence } from "framer-motion";
 import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import NotionSidebar from "../components/tasks/NotionSidebar";
+import DocsHome from "../components/tasks/DocsHome";
 import Whiteboard from "../components/tasks/Whiteboard";
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
@@ -856,7 +857,12 @@ export default function Tasks() {
             // Default: whiteboard
             return <Whiteboard key={selectedPage.id} page={selectedPage} onUpdate={handleUpdatePage} headerSlot={header} />;
           })() : (
-            <div className="flex-1 overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0">{homeContent}</div>
+            <DocsHome
+              pages={activePages}
+              user={user}
+              onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
+              onCreate={() => handleCreatePage(null, "private")}
+            />
           )}
         </div>
 
