@@ -32,9 +32,11 @@ const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 // Sanitize stored/pasted text HTML — allow only basic formatting tags/attrs and
 // strip scripts/event handlers (defends against XSS from AI output or paste).
 const SANITIZE_OPTS = {
-  ALLOWED_TAGS: ["b", "strong", "i", "em", "u", "s", "strike", "span", "div", "p", "br", "ul", "ol", "li", "a", "font"],
-  ALLOWED_ATTR: ["style", "href", "target", "rel", "color", "size", "face"],
+  ALLOWED_TAGS: ["b", "strong", "i", "em", "u", "s", "strike", "span", "div", "p", "br", "ul", "ol", "li", "a", "font", "img"],
+  ALLOWED_ATTR: ["style", "href", "target", "rel", "color", "size", "face", "src", "alt", "width", "height"],
   ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
+  // Permit data: URIs specifically on <img> so pasted/embedded images render.
+  ADD_DATA_URI_TAGS: ["img"],
 };
 // Small cache so the per-text-object render path doesn't re-run DOMPurify on every
 // pan/zoom/drag frame for HTML that hasn't changed. Bounded to avoid unbounded growth.
@@ -1026,7 +1028,10 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     const tmp = document.createElement("div");
     tmp.innerHTML = clean;
     const plain = (tmp.textContent || "").trim();
-    if (!plain) {
+    // An embedded image counts as content even without any text, so an
+    // image-only paste isn't treated as an empty box and deleted.
+    const hasImage = !!tmp.querySelector("img");
+    if (!plain && !hasImage) {
       setObjects(prev => prev.filter(o => o.id !== id));
     } else {
       setObjects(prev => prev.map(o => {
@@ -1668,6 +1673,23 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
                 if (e.key === "Escape") { e.currentTarget.blur(); }
                 // Cmd/Ctrl + Enter to commit (Enter alone allows new paragraphs)
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.blur(); }
+              }}
+              onPaste={(e) => {
+                // If the clipboard holds an image, embed it inline at the caret as a
+                // data URL instead of letting the browser drop it.
+                const items = e.clipboardData?.items;
+                if (!items) return;
+                const imgItem = Array.from(items).find(it => it.type.startsWith("image/"));
+                if (!imgItem) return;
+                const file = imgItem.getAsFile();
+                if (!file) return;
+                e.preventDefault();
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const html = `<img src="${reader.result}" style="max-width:100%;height:auto;display:inline-block;border-radius:4px;" />`;
+                  document.execCommand("insertHTML", false, html);
+                };
+                reader.readAsDataURL(file);
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
