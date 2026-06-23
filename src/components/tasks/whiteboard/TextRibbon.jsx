@@ -64,14 +64,23 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   const handleSizePick = (size) => {
     if (hasSelection()) {
       editingTextRef.current.focus();
-      execCmd("styleWithCSS", true);
+      // styleWithCSS must be OFF here: it makes execCommand("fontSize") emit the
+      // deprecated <font size="7"> placeholder we swap for an exact px span.
+      // With it ON, Chrome emits a fixed CSS keyword (xxx-large) instead, the
+      // querySelector below matches nothing, and every pick collapses to one size.
+      execCmd("styleWithCSS", false);
       execCmd("fontSize", "7");
-      // Replace the placeholder <font size="7"> tags with explicit px spans
       const root = editingTextRef.current;
       root.querySelectorAll('font[size="7"]').forEach(f => {
         const span = document.createElement("span");
         span.style.fontSize = `${size}px`;
         span.innerHTML = f.innerHTML;
+        // Clear any nested font-size left from a previous resize — otherwise an
+        // inner span's size wins and the text appears "stuck" at one size.
+        span.querySelectorAll('[style*="font-size"]').forEach(el => {
+          el.style.fontSize = "";
+          if (!el.getAttribute("style")) el.removeAttribute("style");
+        });
         f.replaceWith(span);
       });
       return;
