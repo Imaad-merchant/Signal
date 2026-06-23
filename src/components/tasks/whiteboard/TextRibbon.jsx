@@ -1,36 +1,23 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ChevronDown, Bold, Italic, Underline, Strikethrough, AlignLeft, AlignCenter, AlignRight, List, ListOrdered, AlignStartVertical, AlignCenterVertical, AlignEndVertical, Highlighter, X, RemoveFormatting } from "lucide-react";
+import { ChevronDown, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Highlighter, X } from "lucide-react";
 import { COLORS, FONT_FAMILIES, execCmd } from "./geometry";
 import FontSizeStepper from "./FontSizeStepper";
 
-const FONT_WEIGHTS = [
-  { v: 300, label: "Light" },
-  { v: 400, label: "Regular" },
-  { v: 500, label: "Medium" },
-  { v: 600, label: "Semibold" },
-  { v: 700, label: "Bold" },
-];
-const LINE_HEIGHTS = [1.0, 1.15, 1.3, 1.5, 1.75, 2.0];
-
 // ─── Text Ribbon (Google Docs-style formatting) ───────────────────
+// Trimmed to the essentials: font family, size, bold/italic/underline,
+// alignment, text color, and highlight.
 export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing, isMobile = false }) {
   const [fontOpen, setFontOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
-  const [weightOpen, setWeightOpen] = useState(false);
-  const [lineOpen, setLineOpen] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const fontRef = useRef(null);
   const colorRef = useRef(null);
-  const weightRef = useRef(null);
-  const lineRef = useRef(null);
   const bgRef = useRef(null);
 
   useEffect(() => {
     const handler = (e) => {
       if (fontRef.current && !fontRef.current.contains(e.target)) setFontOpen(false);
       if (colorRef.current && !colorRef.current.contains(e.target)) setColorOpen(false);
-      if (weightRef.current && !weightRef.current.contains(e.target)) setWeightOpen(false);
-      if (lineRef.current && !lineRef.current.contains(e.target)) setLineOpen(false);
       if (bgRef.current && !bgRef.current.contains(e.target)) setBgOpen(false);
     };
     document.addEventListener("mousedown", handler);
@@ -61,10 +48,6 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
 
   const currentFont = FONT_FAMILIES.find(f => f.css === textObject.fontFamily) || FONT_FAMILIES[0];
   const currentSize = textObject.fontSize || 18;
-  const currentWeight = textObject.fontWeight || 400;
-  const currentWeightLabel = (FONT_WEIGHTS.find(w => w.v === currentWeight) || FONT_WEIGHTS[1]).label;
-  const currentLineHeight = textObject.lineHeight || 1.3;
-  const currentVAlign = textObject.verticalAlign || "top";
   const currentBg = textObject.bgColor && textObject.bgColor !== "none" ? textObject.bgColor : null;
 
   const handleFontPick = (font) => {
@@ -176,43 +159,12 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       {/* Font size */}
       <FontSizeStepper value={currentSize} onPick={handleSizePick} isMobile={isMobile} />
 
-      {/* Font weight */}
-      <div className="relative" ref={weightRef}>
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onClick={(e) => { e.stopPropagation(); setWeightOpen(o => !o); }}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-gray-300 hover:bg-white/[0.07] min-w-[78px]"
-          title="Font weight"
-        >
-          <span className="truncate flex-1 text-left" style={{ fontWeight: currentWeight }}>{currentWeightLabel}</span>
-          <ChevronDown className="h-2.5 w-2.5" />
-        </button>
-        {weightOpen && (
-          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[110px] z-50">
-            {FONT_WEIGHTS.map(w => (
-              <button
-                key={w.v}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); setProp({ fontWeight: w.v }); setWeightOpen(false); }}
-                className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.05] ${currentWeight === w.v ? "text-blue-300" : "text-gray-300"}`}
-                style={{ fontWeight: w.v }}
-              >
-                {w.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
       <div className="w-px h-5 bg-white/[0.08] mx-1" />
 
-      {/* Bold / Italic / Underline / Strikethrough */}
+      {/* Bold / Italic / Underline */}
       <RbBtn onClick={() => applyExec("bold")} title="Bold (⌘B)"><Bold className="h-3.5 w-3.5" /></RbBtn>
       <RbBtn onClick={() => applyExec("italic")} title="Italic (⌘I)"><Italic className="h-3.5 w-3.5" /></RbBtn>
       <RbBtn onClick={() => applyExec("underline")} title="Underline (⌘U)"><Underline className="h-3.5 w-3.5" /></RbBtn>
-      <RbBtn onClick={() => applyExec("strikeThrough")} title="Strikethrough"><Strikethrough className="h-3.5 w-3.5" /></RbBtn>
 
       <div className="w-px h-5 bg-white/[0.08] mx-1" />
 
@@ -323,59 +275,6 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       <RbBtn onClick={() => { setProp({ textAlign: "right" }); applyExec("justifyRight"); }} active={textObject.textAlign === "right"} title="Align right">
         <AlignRight className="h-3.5 w-3.5" />
       </RbBtn>
-
-      {/* Vertical alignment */}
-      <RbBtn onClick={() => setProp({ verticalAlign: "top" })} active={currentVAlign === "top"} title="Align top">
-        <AlignStartVertical className="h-3.5 w-3.5 rotate-90" />
-      </RbBtn>
-      <RbBtn onClick={() => setProp({ verticalAlign: "middle" })} active={currentVAlign === "middle"} title="Align middle">
-        <AlignCenterVertical className="h-3.5 w-3.5 rotate-90" />
-      </RbBtn>
-      <RbBtn onClick={() => setProp({ verticalAlign: "bottom" })} active={currentVAlign === "bottom"} title="Align bottom">
-        <AlignEndVertical className="h-3.5 w-3.5 rotate-90" />
-      </RbBtn>
-
-      <div className="w-px h-5 bg-white/[0.08] mx-1" />
-
-      {/* Line height */}
-      <div className="relative" ref={lineRef}>
-        <button
-          type="button"
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onClick={(e) => { e.stopPropagation(); setLineOpen(o => !o); }}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-gray-300 hover:bg-white/[0.07] min-w-[52px]"
-          title="Line spacing"
-        >
-          <span className="flex-1 text-center">{currentLineHeight.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}</span>
-          <ChevronDown className="h-2.5 w-2.5" />
-        </button>
-        {lineOpen && (
-          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[60px] z-50 max-h-60 overflow-y-auto">
-            {LINE_HEIGHTS.map(lh => (
-              <button
-                key={lh}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); setProp({ lineHeight: lh }); setLineOpen(false); }}
-                className={`block w-full text-center px-2 py-1 text-xs hover:bg-white/[0.05] ${currentLineHeight === lh ? "text-blue-300" : "text-gray-300"}`}
-              >
-                {lh.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="w-px h-5 bg-white/[0.08] mx-1" />
-
-      {/* Lists */}
-      <RbBtn onClick={() => applyExec("insertUnorderedList")} title="Bulleted list"><List className="h-3.5 w-3.5" /></RbBtn>
-      <RbBtn onClick={() => applyExec("insertOrderedList")} title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></RbBtn>
-
-      <div className="w-px h-5 bg-white/[0.08] mx-1" />
-
-      {/* Clear formatting */}
-      <RbBtn onClick={() => applyExec("removeFormat")} title="Clear formatting"><RemoveFormatting className="h-3.5 w-3.5" /></RbBtn>
     </div>
   );
 }
