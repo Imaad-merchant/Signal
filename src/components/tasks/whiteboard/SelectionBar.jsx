@@ -77,7 +77,7 @@ export default function SelectionBar({ count, selected, locked, fill, opacity, f
     <div
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
-      className="flex flex-wrap items-center justify-center gap-0.5 bg-[#252628]/98 backdrop-blur-md border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl max-w-[calc(100vw-1.5rem)]"
+      className="flex flex-wrap items-center justify-center gap-0.5 bg-[#252628] border border-white/[0.1] rounded-xl px-1.5 py-1.5 shadow-2xl max-w-[calc(100vw-1.5rem)]"
     >
       <span className="text-[10px] text-gray-500 px-2">{count} selected</span>
       <div className="w-px h-5 bg-white/[0.08] mx-1" />

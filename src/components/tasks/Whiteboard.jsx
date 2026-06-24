@@ -1066,6 +1066,10 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     // An embedded image counts as content even without any text, so an
     // image-only paste isn't treated as an empty box and deleted.
     const hasImage = !!tmp.querySelector("img");
+    // Record the pre-edit state so Ctrl/Cmd+Z undoes the text change (objects
+    // still holds the old text here — edits lived in the contentEditable).
+    const current = objects.find(o => o.id === id);
+    if (current && current.text !== clean) pushHistory(objects);
     if (!plain && !hasImage) {
       setObjects(prev => prev.filter(o => o.id !== id));
     } else {
