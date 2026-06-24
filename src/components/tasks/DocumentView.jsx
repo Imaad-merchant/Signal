@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useAutosave } from "./useAutosave";
 import RichTextEditor from "./RichTextEditor";
 
 // Detect if content is HTML (vs. plain text / markdown from older docs)
@@ -32,38 +33,35 @@ function legacyToHTML(s) {
   }).join("");
 }
 
-export default function DocumentView({ page, onUpdate, onAIVisualize, onAIEdit }) {
+export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit }) {
   const [html, setHtml] = useState(() => legacyToHTML(page.content || ""));
-  const saveTimer = useRef(null);
   const loadedRef = useRef(false);
-  const lastSavedRef = useRef(html);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // Bound to THIS document's id (component is keyed per page.id), so a flush after
+  // a page switch still writes to the right document.
+  const save = useCallback((patch) => onSave(page.id, patch), [onSave, page.id]);
+  const { schedule } = useAutosave(500);
 
   useEffect(() => {
     setHtml(legacyToHTML(page.content || ""));
-    lastSavedRef.current = legacyToHTML(page.content || "");
     loadedRef.current = true;
   }, [page.id]);
 
   const handleChange = useCallback((newHtml) => {
     setHtml(newHtml);
     if (!loadedRef.current) return;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      if (newHtml !== lastSavedRef.current) {
-        lastSavedRef.current = newHtml;
-        onUpdate({ content: newHtml });
-      }
-    }, 600);
-  }, [onUpdate]);
+    schedule({ content: newHtml }, save);
+  }, [schedule, save]);
 
   const handleAIEdit = useCallback(async (mode, currentHtml, instruction) => {
     const newHtml = await onAIEdit?.(mode, currentHtml, instruction);
     if (newHtml) {
-      setHtml(newHtml);
-      lastSavedRef.current = newHtml;
-      onUpdate({ content: newHtml });
+      if (mountedRef.current) setHtml(newHtml);
+      save({ content: newHtml }); // immediate; bound to this page even post-switch
     }
-  }, [onAIEdit, onUpdate]);
+  }, [onAIEdit, save]);
 
   return (
     <RichTextEditor

@@ -270,6 +270,18 @@ export default function Tasks() {
     await base44.entities.Page.update(selectedPageId, patch);
   }, [selectedPageId, queryClient, user?.email]);
 
+  // Stable, id-bound saver for the editors. Takes an EXPLICIT page id (never
+  // selectedPageId) so a debounced/flushed write always targets the page the edit
+  // was made on — even if the user has since switched pages. This is the fix for
+  // the cross-write class where a pending save lands on the wrong document.
+  const updatePageById = useCallback((pageId, patch) => {
+    if (!pageId) return Promise.resolve();
+    queryClient.setQueryData(["pages", user?.email], (old = []) =>
+      old.map(p => p.id === pageId ? { ...p, ...patch, updated_date: new Date().toISOString() } : p)
+    );
+    return base44.entities.Page.update(pageId, patch).catch((e) => console.error(e));
+  }, [queryClient, user?.email]);
+
   // Generic version for sidebar actions (rename, move, change icon)
   const handleUpdatePageById = async (pageId, patch) => {
     if (!pageId) return;
@@ -841,7 +853,7 @@ export default function Tasks() {
                 <>
                   {header}
                   <div className="flex-1 overflow-y-auto">
-                    <NotionPageView page={selectedPage} onUpdate={handleUpdatePage} onDelete={() => handleDeletePage(selectedPage)} />
+                    <NotionPageView key={selectedPage.id} page={selectedPage} onSave={updatePageById} onDelete={() => handleDeletePage(selectedPage)} />
                   </div>
                 </>
               );
@@ -850,12 +862,12 @@ export default function Tasks() {
               return (
                 <>
                   {header}
-                  <DocumentView page={selectedPage} onUpdate={handleUpdatePage} onAIVisualize={handleAIVisualize} onAIEdit={handleAIEditDoc} />
+                  <DocumentView key={selectedPage.id} page={selectedPage} onSave={updatePageById} onAIVisualize={handleAIVisualize} onAIEdit={handleAIEditDoc} />
                 </>
               );
             }
             // Default: whiteboard
-            return <Whiteboard key={selectedPage.id} page={selectedPage} onUpdate={handleUpdatePage} headerSlot={header} />;
+            return <Whiteboard key={selectedPage.id} page={selectedPage} onSave={updatePageById} headerSlot={header} />;
           })() : (
             <DocsHome
               pages={activePages}

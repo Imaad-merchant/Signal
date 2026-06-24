@@ -25,6 +25,7 @@ import SelectionBar from "./whiteboard/SelectionBar";
 import TextRibbon from "./whiteboard/TextRibbon";
 import DrawDefaultsBar from "./whiteboard/DrawDefaultsBar";
 import WhiteboardContextMenu from "./whiteboard/WhiteboardContextMenu";
+import { useAutosave } from "./useAutosave";
 
 // Generate a stable id
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -52,7 +53,7 @@ const sanitizeTextHtml = (html) => {
 };
 
 // ─── Main Whiteboard ──────────────────────────────────────────────
-export default function Whiteboard({ page, onUpdate, headerSlot }) {
+export default function Whiteboard({ page, onSave, headerSlot }) {
   const containerRef = useRef(null);
   const isMobile = useIsMobile();
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
@@ -87,10 +88,16 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
   const pinchRef = useRef(null); // { startDist, startMid, startViewport }
   const [editingTextId, setEditingTextId] = useState(null);
 
-  const saveTimer = useRef(null);
   const loadedRef = useRef(false);
   const skipSaveRef = useRef(false); // suppress the save triggered by loading a page
   const editingTextRef = useRef(null);
+  // Mirror of the editing box's HTML, updated on every keystroke. A plain string
+  // ref (not the DOM node) so it survives unmount/teardown when the flush reads it.
+  const editingHtmlRef = useRef(null);
+
+  // Page-bound saver: writes to THIS board's id (the component is keyed per
+  // page.id), so a flush after the user navigates away can't hit the wrong page.
+  const save = useCallback((patch) => onSave(page.id, patch), [onSave, page.id]);
 
   // ─── AI prompt state ─────────────────────────────────────────────
   const [aiOpen, setAiOpen] = useState(false);
@@ -458,16 +465,43 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
     skipSaveRef.current = true;
   }, [page.id]);
 
-  // Auto-save objects to page (debounced)
+  // Latest-state refs so the flush-on-exit path can read current values without
+  // waiting on a re-render (critical: setObjects won't apply on an unmounting box).
+  const objectsRef = useRef(objects); objectsRef.current = objects;
+  const viewportRef = useRef(viewport); viewportRef.current = viewport;
+  const editingTextIdRef = useRef(editingTextId); editingTextIdRef.current = editingTextId;
+  const saveRef = useRef(save); useEffect(() => { saveRef.current = save; }, [save]);
+
+  // At flush time, fold any in-progress text-box edit (which lives only in the
+  // contentEditable DOM until blur) into the saved objects — so switching pages,
+  // hiding the tab, or closing the PWA mid-type can't lose the text. Reads the DOM
+  // synchronously and mirrors finishTextEdit's empty/image handling.
+  const collectEditingText = useCallback(() => {
+    const id = editingTextIdRef.current;
+    const rawHtml = editingHtmlRef.current;
+    if (!id || rawHtml == null) return null;
+    const clean = sanitizeTextHtml(rawHtml);
+    const tmp = document.createElement("div");
+    tmp.innerHTML = clean;
+    const plain = (tmp.textContent || "").trim();
+    const hasImage = !!tmp.querySelector("img");
+    let objs = objectsRef.current;
+    if (!plain && !hasImage) objs = objs.filter(o => o.id !== id);
+    else objs = objs.map(o => (o.id === id ? { ...o, text: clean } : o));
+    return {
+      patch: { whiteboard: JSON.stringify(objs), viewport: JSON.stringify(viewportRef.current) },
+      save: saveRef.current,
+    };
+  }, []);
+
+  const { schedule: scheduleSave } = useAutosave(500, collectEditingText);
+
+  // Auto-save objects/viewport to the page (debounced, flushed on exit).
   useEffect(() => {
     if (!loadedRef.current) return;
     if (skipSaveRef.current) { skipSaveRef.current = false; return; }
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      onUpdate({ whiteboard: JSON.stringify(objects), viewport: JSON.stringify(viewport) });
-    }, 600);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [objects, viewport, onUpdate]);
+    scheduleSave({ whiteboard: JSON.stringify(objects), viewport: JSON.stringify(viewport) }, save);
+  }, [objects, viewport, scheduleSave, save]);
 
   // Container size
   useEffect(() => {
@@ -1024,6 +1058,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
 
   // Strip HTML tags to detect truly empty content
   const finishTextEdit = (id, html) => {
+    editingHtmlRef.current = null; // committed — no longer "in progress"
     const clean = sanitizeTextHtml(html);
     const tmp = document.createElement("div");
     tmp.innerHTML = clean;
@@ -1668,6 +1703,7 @@ export default function Whiteboard({ page, onUpdate, headerSlot }) {
               contentEditable
               suppressContentEditableWarning
               autoFocus
+              onInput={(e) => { editingHtmlRef.current = e.currentTarget.innerHTML; }}
               onBlur={(e) => finishTextEdit(o.id, e.currentTarget.innerHTML)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") { e.currentTarget.blur(); }

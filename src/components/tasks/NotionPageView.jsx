@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Calendar as CalendarIcon, Type, Flag, Activity, MoreHorizontal, MessageCircle, Plus, ChevronDown, FileText } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
+import { useAutosave } from "./useAutosave";
 import { format, parseISO } from "date-fns";
 
 const STATUS_OPTIONS = [
@@ -220,34 +221,33 @@ function TextField({ value, placeholder, onChange }) {
   );
 }
 
-export default function NotionPageView({ page, onUpdate, onDelete }) {
+export default function NotionPageView({ page, onSave, onDelete }) {
   const [iconOpen, setIconOpen] = useState(false);
   const [title, setTitle] = useState(page.title || "");
   const [content, setContent] = useState(page.content || "");
   const [showComment, setShowComment] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
-  const saveDebounce = useRef(null);
+
+  // Bound to THIS page's id (component is keyed per page.id); the autosave hook
+  // flushes any pending edit on page switch, tab hide, or unmount.
+  const save = useCallback((patch) => onSave(page.id, patch), [onSave, page.id]);
+  const { schedule } = useAutosave(500);
 
   useEffect(() => {
     setTitle(page.title || "");
     setContent(page.content || "");
   }, [page.id]);
 
-  const debouncedSave = useCallback((patch) => {
-    if (saveDebounce.current) clearTimeout(saveDebounce.current);
-    saveDebounce.current = setTimeout(() => onUpdate(patch), 600);
-  }, [onUpdate]);
-
   const handleTitle = (e) => {
     const v = e.target.value;
     setTitle(v);
-    debouncedSave({ title: v });
+    schedule({ title: v }, save);
   };
 
   const handleContent = (e) => {
     const v = e.target.value;
     setContent(v);
-    debouncedSave({ content: v });
+    schedule({ content: v }, save);
   };
 
   const iconCfg = ICON_MAP[page.icon] || ICON_MAP.file;
@@ -259,7 +259,7 @@ export default function NotionPageView({ page, onUpdate, onDelete }) {
     const text = commentDraft.trim();
     if (!text) return;
     const newComments = [...comments, { id: Date.now(), text, created_at: new Date().toISOString() }];
-    onUpdate({ comments: newComments });
+    save({ comments: newComments });
     setCommentDraft("");
     setShowComment(false);
   };
@@ -278,7 +278,7 @@ export default function NotionPageView({ page, onUpdate, onDelete }) {
           {iconOpen && (
             <IconPicker
               current={page.icon}
-              onChange={(k) => onUpdate({ icon: k })}
+              onChange={(k) => save({ icon: k })}
               onClose={() => setIconOpen(false)}
             />
           )}
@@ -298,26 +298,26 @@ export default function NotionPageView({ page, onUpdate, onDelete }) {
             <TextField
               value={page.subject}
               placeholder="Empty"
-              onChange={(v) => onUpdate({ subject: v })}
+              onChange={(v) => save({ subject: v })}
             />
           </PropertyRow>
           <PropertyRow icon={CalendarIcon} label="Due date">
             <DateRangeField
               start={page.due_start}
               end={page.due_end}
-              onChange={({ start, end }) => onUpdate({ due_start: start, due_end: end })}
+              onChange={({ start, end }) => save({ due_start: start, due_end: end })}
             />
           </PropertyRow>
           <PropertyRow icon={Flag} label="Priority">
             <PrioritySelect
               value={page.priority || ""}
-              onChange={(v) => onUpdate({ priority: v })}
+              onChange={(v) => save({ priority: v })}
             />
           </PropertyRow>
           <PropertyRow icon={Activity} label="Status">
             <StatusBadge
               value={page.status || "not_started"}
-              onChange={(v) => onUpdate({ status: v })}
+              onChange={(v) => save({ status: v })}
             />
           </PropertyRow>
 
