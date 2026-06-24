@@ -13,6 +13,10 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   const fontRef = useRef(null);
   const colorRef = useRef(null);
   const bgRef = useRef(null);
+  // Last non-collapsed selection inside the editing box. Native <input type=color>
+  // steals focus and collapses the live selection before its onChange fires, so we
+  // restore from here before applying selection-aware styles.
+  const savedRange = useRef(null);
 
   useEffect(() => {
     const handler = (e) => {
@@ -23,6 +27,20 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Continuously remember the live selection while editing.
+  useEffect(() => {
+    const onSelChange = () => {
+      const root = editingTextRef?.current;
+      if (!isEditing || !root) return;
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const r = sel.getRangeAt(0);
+      if (root.contains(r.commonAncestorContainer)) savedRange.current = r.cloneRange();
+    };
+    document.addEventListener("selectionchange", onSelChange);
+    return () => document.removeEventListener("selectionchange", onSelChange);
+  }, [isEditing, editingTextRef]);
 
   const applyExec = (cmd, value) => {
     if (isEditing && editingTextRef?.current) {
@@ -36,14 +54,35 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     onUpdate(patch);
   };
 
-  // True when there is a non-collapsed selection inside the editing text box.
-  // Formatting should then target just those characters, not the whole box.
-  const hasSelection = () => {
-    if (!isEditing || !editingTextRef?.current) return false;
+  // Returns true when a non-collapsed selection inside the editing box is active —
+  // restoring the saved range first if the live selection was lost (e.g. a native
+  // color input stole focus). Formatting then targets just those characters.
+  const ensureSelection = () => {
+    const root = editingTextRef?.current;
+    if (!isEditing || !root) return false;
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
-    const root = editingTextRef.current;
-    return root.contains(sel.anchorNode) && root.contains(sel.focusNode);
+    const liveOk = sel && sel.rangeCount > 0 && !sel.isCollapsed &&
+      root.contains(sel.anchorNode) && root.contains(sel.focusNode);
+    if (liveOk) return true;
+    const r = savedRange.current;
+    if (sel && r && !r.collapsed && root.contains(r.commonAncestorContainer)) {
+      root.focus();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return sel.rangeCount > 0 && !sel.isCollapsed;
+    }
+    return false;
+  };
+
+  // Re-capture the live selection after applying a style, so a follow-up onChange
+  // from the still-open native color picker keeps targeting the same characters.
+  const resaveSelection = () => {
+    const root = editingTextRef?.current;
+    const sel = window.getSelection();
+    if (root && sel && sel.rangeCount > 0 && !sel.isCollapsed &&
+        root.contains(sel.anchorNode) && root.contains(sel.focusNode)) {
+      savedRange.current = sel.getRangeAt(0).cloneRange();
+    }
   };
 
   const currentFont = FONT_FAMILIES.find(f => f.css === textObject.fontFamily) || FONT_FAMILIES[0];
@@ -52,9 +91,9 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
 
   const handleFontPick = (font) => {
     setFontOpen(false);
-    if (hasSelection()) {
-      editingTextRef.current.focus();
+    if (ensureSelection()) {
       execCmd("fontName", font.name);
+      resaveSelection();
       return;
     }
     setProp({ fontFamily: font.css });
@@ -62,7 +101,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   };
 
   const handleSizePick = (size) => {
-    if (hasSelection()) {
+    if (ensureSelection()) {
       editingTextRef.current.focus();
       // styleWithCSS must be OFF here: it makes execCommand("fontSize") emit the
       // deprecated <font size="7"> placeholder we swap for an exact px span.
@@ -83,18 +122,20 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
         });
         f.replaceWith(span);
       });
+      resaveSelection();
       return;
     }
     setProp({ fontSize: size });
     if (isEditing) editingTextRef?.current?.focus();
   };
 
+  // Panel-closing is handled by the swatch onClicks, NOT here — so the custom
+  // <input type=color> can keep firing onChange while its picker stays open.
   const handleColorPick = (c) => {
-    setColorOpen(false);
-    if (hasSelection()) {
-      editingTextRef.current.focus();
+    if (ensureSelection()) {
       execCmd("styleWithCSS", true);
       execCmd("foreColor", c);
+      resaveSelection();
       return;
     }
     setProp({ color: c });
@@ -104,13 +145,12 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   // Highlight: apply to just the selected characters when text is selected,
   // otherwise fall back to the object-level background for the whole box.
   const handleHighlight = (c) => {
-    setBgOpen(false);
-    if (hasSelection()) {
-      editingTextRef.current.focus();
+    if (ensureSelection()) {
       execCmd("styleWithCSS", true);
       const val = c === "none" ? "transparent" : c;
       execCmd("hiliteColor", val); // standard
       execCmd("backColor", val);   // Chromium fallback
+      resaveSelection();
       return;
     }
     setProp({ bgColor: c });
@@ -200,7 +240,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
                   key={c}
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={(e) => { e.stopPropagation(); handleColorPick(c); }}
+                  onClick={(e) => { e.stopPropagation(); handleColorPick(c); setColorOpen(false); }}
                   className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${textObject.color === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
                   style={{ backgroundColor: c }}
                 />
@@ -242,7 +282,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
                   key={c}
                   type="button"
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={(e) => { e.stopPropagation(); handleHighlight(c); }}
+                  onClick={(e) => { e.stopPropagation(); handleHighlight(c); setBgOpen(false); }}
                   className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${currentBg === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
                   style={{ backgroundColor: c }}
                 />
@@ -261,7 +301,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
               <button
                 type="button"
                 onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); handleHighlight("none"); }}
+                onClick={(e) => { e.stopPropagation(); handleHighlight("none"); setBgOpen(false); }}
                 className="flex items-center gap-1 px-1.5 py-1 rounded text-[10px] text-gray-300 hover:bg-white/[0.07]"
                 title="No highlight"
               >
