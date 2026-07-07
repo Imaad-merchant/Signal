@@ -127,10 +127,9 @@ function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, onToggleStatu
       onClick={(e) => { e.stopPropagation(); onTaskClick?.(task); }}
       className={`flex items-center gap-1 font-semibold rounded-[4px] cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1 py-[1px]" : "text-[10px] px-1.5 py-[3px]"}`}
       style={{
-        backgroundColor: isDone ? "rgba(255,255,255,0.04)" : c.bg,
-        color: isDone ? "#555" : c.text,
-        textDecoration: isDone ? "line-through" : "none",
-        opacity: isDone ? 0.4 : 0.9,
+        backgroundColor: c.bg,
+        color: c.text,
+        opacity: 0.9,
       }}
     >
       <span className="flex-1 truncate">{task.title}</span>
@@ -335,10 +334,9 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                         width: `calc(${((span.endCol - span.startCol + 1) / 7) * 100}% - 8px)`,
                         top: `${laneOffset + span.lane * laneHeight}px`,
                         height: `${laneHeight - 2}px`,
-                        backgroundColor: isDone ? "rgba(255,255,255,0.05)" : color,
-                        color: isDone ? "#666" : "#fff",
-                        opacity: isDone ? 0.4 : 0.92,
-                        textDecoration: isDone ? "line-through" : "none",
+                        backgroundColor: color,
+                        color: "#fff",
+                        opacity: 0.92,
                         borderTopLeftRadius: span.continuesLeft ? 0 : 4,
                         borderBottomLeftRadius: span.continuesLeft ? 0 : 4,
                         borderTopRightRadius: span.continuesRight ? 0 : 4,
