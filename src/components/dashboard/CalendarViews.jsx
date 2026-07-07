@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 
 import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear, parseISO, differenceInCalendarDays, isWithinInterval } from "date-fns";
-import { CheckCircle2, Circle, Clock, X } from "lucide-react";
+import { Check, CheckCircle2, Circle, Clock, X } from "lucide-react";
 import TaskContextMenu from "./TaskContextMenu";
 import { base44 } from "@/api/base44Client";
 
@@ -93,7 +93,29 @@ function useContextMenu(onUpdated, categories) {
   return { openMenu, menuEl };
 }
 
-function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = [], compact = false }) {
+// Small square checkbox shown on the right of an event to mark it complete.
+function CompletionCheckbox({ isDone, onToggle, compact = false, checkedColor = "#fff" }) {
+  const size = compact ? 11 : 13;
+  return (
+    <button
+      draggable={false}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      title={isDone ? "Mark as not done" : "Mark complete"}
+      className="shrink-0 flex items-center justify-center rounded-[3px] border transition-colors hover:brightness-125"
+      style={{
+        width: size,
+        height: size,
+        borderColor: isDone ? "#22c55e" : "rgba(255,255,255,0.55)",
+        backgroundColor: isDone ? "#22c55e" : "transparent",
+      }}
+    >
+      {isDone && <Check style={{ width: size - 4, height: size - 4, color: checkedColor }} strokeWidth={3.5} />}
+    </button>
+  );
+}
+
+function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, onToggleStatus, categories = [], compact = false }) {
   const categoryMap = Object.fromEntries(categories.map(c => [c.key, { bg: c.color, text: "#fff" }]));
   const c = categoryMap[task.category] || DEFAULT_CATEGORY_COLORS[task.category] || defaultColor;
   const isDone = task.status === "done";
@@ -103,7 +125,7 @@ function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = 
       onDragStart={(e) => { e.stopPropagation(); onDragStart(task); }}
       onContextMenu={(e) => onContextMenu(e, task)}
       onClick={(e) => { e.stopPropagation(); onTaskClick?.(task); }}
-      className={`flex items-center gap-1 font-semibold rounded-[4px] truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1 py-[1px]" : "text-[10px] px-1.5 py-[3px]"}`}
+      className={`flex items-center gap-1 font-semibold rounded-[4px] cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1 py-[1px]" : "text-[10px] px-1.5 py-[3px]"}`}
       style={{
         backgroundColor: isDone ? "rgba(255,255,255,0.04)" : c.bg,
         color: isDone ? "#555" : c.text,
@@ -111,7 +133,10 @@ function TaskPill({ task, onContextMenu, onDragStart, onTaskClick, categories = 
         opacity: isDone ? 0.4 : 0.9,
       }}
     >
-      {task.title}
+      <span className="flex-1 truncate">{task.title}</span>
+      {onToggleStatus && (
+        <CompletionCheckbox isDone={isDone} onToggle={() => onToggleStatus(task)} compact={compact} />
+      )}
     </div>
   );
 }
@@ -148,7 +173,7 @@ function useDragDrop(onUpdated) {
 }
 
 // ── DAY OVERFLOW POPOVER ──────────────────────────────────────────────────────
-function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, onDragStart, categories }) {
+function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, onDragStart, onToggleStatus, categories }) {
   const ref = useRef(null);
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
@@ -171,7 +196,7 @@ function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, 
       </div>
       <div className="space-y-1">
         {tasks.map((task) => (
-          <TaskPill key={task.id} task={task} onContextMenu={onContextMenu} onDragStart={onDragStart} onTaskClick={(t) => { onTaskClick?.(t); onClose(); }} categories={categories} />
+          <TaskPill key={task.id} task={task} onContextMenu={onContextMenu} onDragStart={onDragStart} onTaskClick={(t) => { onTaskClick?.(t); onClose(); }} onToggleStatus={onToggleStatus} categories={categories} />
         ))}
       </div>
     </div>
@@ -179,7 +204,7 @@ function DayOverflowPopover({ date, tasks, onClose, onTaskClick, onContextMenu, 
 }
 
 // ── MONTHLY VIEW ──────────────────────────────────────────────────────────────
-export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick, onAddEvent, compact = false }) {
+export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick, onToggleStatus, onAddEvent, compact = false }) {
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 0 });
@@ -277,7 +302,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                       </div>
                       <div className="space-y-0.5" style={{ marginTop: laneCount > 0 ? `${laneCount * laneHeight + 4}px` : 0 }}>
                         {dayTasks.slice(0, maxRows - laneCount).map((task) => (
-                          <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} compact={compact} />
+                          <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} onToggleStatus={onToggleStatus} categories={categories} compact={compact} />
                         ))}
                         {dayTasks.length > maxRows - laneCount && (
                           <button
@@ -304,7 +329,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                       onDragStart={(e) => { e.stopPropagation(); onDragStart(span.task); }}
                       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openMenu(e, span.task); }}
                       onClick={(e) => { e.stopPropagation(); onTaskClick?.(span.task); }}
-                      className={`absolute flex items-center font-semibold truncate cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1" : "text-[10px] px-1.5"}`}
+                      className={`absolute flex items-center gap-1 font-semibold cursor-grab active:cursor-grabbing select-none transition-all hover:brightness-125 ${compact ? "text-[9px] px-1" : "text-[10px] px-1.5"}`}
                       style={{
                         left: `calc(${(span.startCol / 7) * 100}% + 4px)`,
                         width: `calc(${((span.endCol - span.startCol + 1) / 7) * 100}% - 8px)`,
@@ -321,7 +346,10 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
                         zIndex: 5,
                       }}
                     >
-                      {span.continuesLeft ? "← " : ""}{span.task.title}{span.continuesRight ? " →" : ""}
+                      <span className="flex-1 truncate">{span.continuesLeft ? "← " : ""}{span.task.title}{span.continuesRight ? " →" : ""}</span>
+                      {onToggleStatus && !span.continuesRight && (
+                        <CompletionCheckbox isDone={isDone} onToggle={() => onToggleStatus(span.task)} compact={compact} />
+                      )}
                     </div>
                   );
                 })}
@@ -338,6 +366,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
           onTaskClick={onTaskClick}
           onContextMenu={openMenu}
           onDragStart={onDragStart}
+          onToggleStatus={onToggleStatus}
           categories={categories}
         />
       )}
@@ -346,7 +375,7 @@ export function MonthlyView({ currentMonth, selectedDate, setSelectedDate, tasks
 }
 
 // ── WEEKLY VIEW ───────────────────────────────────────────────────────────────
-export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick }) {
+export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, categories = [], onTaskClick, onToggleStatus }) {
   const weekStart = startOfWeek(selectedDate, { weekStartsOn: 0 });
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const { openMenu, menuEl } = useContextMenu(onUpdated, categories);
@@ -401,7 +430,7 @@ export function WeeklyView({ selectedDate, setSelectedDate, tasks, onUpdated, ca
                 <div className="space-y-1">
                   {dayTasks.length === 0 && <p className="text-[10px] text-gray-600 text-center mt-6">—</p>}
                   {dayTasks.map((task) => (
-                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} categories={categories} />
+                    <TaskPill key={task.id} task={task} onContextMenu={openMenu} onDragStart={onDragStart} onTaskClick={onTaskClick} onToggleStatus={onToggleStatus} categories={categories} />
                   ))}
                 </div>
               </div>

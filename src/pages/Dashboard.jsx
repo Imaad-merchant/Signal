@@ -750,6 +750,7 @@ export default function Dashboard() {
                 onUpdated={refresh}
                 categories={categories}
                 onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+                onToggleStatus={toggleStatus}
                 onAddEvent={(dateStr) => { setAddEventDate(dateStr); setSelectedDate(new Date(dateStr + "T12:00:00")); setShowAddEvent(true); }}
                 compact={isMobile}
               />
@@ -762,6 +763,7 @@ export default function Dashboard() {
                onUpdated={refresh}
                categories={categories}
                onTaskClick={(task) => { setSelectedTask(task); setShowTaskDetail(true); }}
+               onToggleStatus={toggleStatus}
              />
            )}
            {internalView === "Daily" && (
