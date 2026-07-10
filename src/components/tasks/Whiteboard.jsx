@@ -974,24 +974,21 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       // Block ALL wheel events from bubbling to the page
       e.preventDefault();
       e.stopPropagation();
-      // ctrl/⌘ + wheel = zoom (browsers also report a trackpad pinch this way).
-      const pinch = e.ctrlKey || e.metaKey;
-      // A trackpad two-finger swipe arrives as a stream of small, often fractional
-      // deltas and usually carries a horizontal component; a real mouse wheel sends
-      // chunky whole-number vertical deltas with no deltaX. Swipes pan, wheels zoom.
-      // Shift+wheel is the conventional "scroll sideways", so it pans too.
-      const isSwipe =
-        e.deltaMode === 0 &&
-        (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 40);
-      if (!pinch && (isSwipe || e.shiftKey)) {
-        setViewport(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+      // Scrolling zooms. Shift+wheel pans instead, matching the usual
+      // "scroll sideways" convention and leaving a wheel-only way to move around.
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        setViewport(v => ({ ...v, x: v.x - (e.deltaX || e.deltaY), y: v.y }));
         return;
       }
-      // Zoom anchored on the cursor.
+      // Zoom anchored on the cursor. deltaMode 1/2 report lines/pages rather than
+      // pixels, and accelerated trackpads can spike, so normalise to pixel-ish units
+      // and clamp — otherwise one gesture can slam through the whole zoom range.
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      const dy = Math.max(-120, Math.min(120, e.deltaY * unit));
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const delta = -e.deltaY * 0.0015;
+      const delta = -dy * 0.0015;
       setViewport(v => {
         const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
         const worldX = (mx - v.x) / v.zoom;
