@@ -671,18 +671,17 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
             .map(o => ({ id: o.id, snapshot: JSON.parse(JSON.stringify(o)) })),
         });
       } else {
-        // Click on empty canvas:
-        //  - touch: pan (one finger drag feels natural on mobile)
-        //  - mouse/pen: rubber-band marquee to select intersecting objects
-        setSelectedIds([]);
-        if (e.pointerType === "touch") {
+        // Drag on empty canvas:
+        //  - plain drag pans the board (same on mouse and touch)
+        //  - Shift+drag draws a rubber-band marquee to select intersecting objects
+        if (e.shiftKey) {
+          setMarquee({ startX: x, startY: y, x, y });
+        } else {
+          setSelectedIds([]);
           setPanning(true);
           lastPointer.current = { x: e.clientX, y: e.clientY };
-          e.currentTarget.setPointerCapture?.(e.pointerId);
-        } else {
-          setMarquee({ startX: x, startY: y, x, y });
-          e.currentTarget.setPointerCapture?.(e.pointerId);
         }
+        e.currentTarget.setPointerCapture?.(e.pointerId);
       }
       return;
     }
@@ -975,25 +974,32 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       // Block ALL wheel events from bubbling to the page
       e.preventDefault();
       e.stopPropagation();
-      // ctrl/⌘ + wheel (and trackpad pinch, which the browser reports as ctrlKey
-      // wheel events) = zoom; a plain wheel/two-finger swipe = pan.
-      if (e.ctrlKey || e.metaKey) {
-        const rect = el.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const delta = -e.deltaY * 0.0015;
-        setViewport(v => {
-          const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
-          const worldX = (mx - v.x) / v.zoom;
-          const worldY = (my - v.y) / v.zoom;
-          const newX = mx - worldX * newZoom;
-          const newY = my - worldY * newZoom;
-          return { x: newX, y: newY, zoom: newZoom };
-        });
-      } else {
-        // Plain wheel: pan by the scroll delta (supports trackpad two-finger panning).
+      // ctrl/⌘ + wheel = zoom (browsers also report a trackpad pinch this way).
+      const pinch = e.ctrlKey || e.metaKey;
+      // A trackpad two-finger swipe arrives as a stream of small, often fractional
+      // deltas and usually carries a horizontal component; a real mouse wheel sends
+      // chunky whole-number vertical deltas with no deltaX. Swipes pan, wheels zoom.
+      // Shift+wheel is the conventional "scroll sideways", so it pans too.
+      const isSwipe =
+        e.deltaMode === 0 &&
+        (e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 40);
+      if (!pinch && (isSwipe || e.shiftKey)) {
         setViewport(v => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+        return;
       }
+      // Zoom anchored on the cursor.
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const delta = -e.deltaY * 0.0015;
+      setViewport(v => {
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * (1 + delta)));
+        const worldX = (mx - v.x) / v.zoom;
+        const worldY = (my - v.y) / v.zoom;
+        const newX = mx - worldX * newZoom;
+        const newY = my - worldY * newZoom;
+        return { x: newX, y: newY, zoom: newZoom };
+      });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
