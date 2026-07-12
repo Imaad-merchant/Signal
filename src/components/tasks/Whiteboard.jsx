@@ -1716,6 +1716,34 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                 if (e.key === "Escape") { e.currentTarget.blur(); }
                 // Cmd/Ctrl + Enter to commit (Enter alone allows new paragraphs)
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.currentTarget.blur(); }
+                // Tab indents inside the text box instead of moving focus away.
+                // We insert spaces rather than a literal "\t": the box is white-space
+                // pre-wrap (so spaces are preserved), and a real tab gets wrapped in a
+                // <span white-space:pre> that renders as a line break in the SVG
+                // foreignObject. Shift+Tab removes up to INDENT leading spaces.
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  const INDENT = 4;
+                  const sel = window.getSelection();
+                  if (e.shiftKey) {
+                    if (sel && sel.isCollapsed) {
+                      // Grow the selection backward one char at a time while each is a
+                      // space, up to INDENT, then delete the run.
+                      let n = 0;
+                      while (n < INDENT) {
+                        sel.modify("extend", "backward", "character");
+                        const str = sel.toString();
+                        if (str.length === n + 1 && str[0] === " ") { n++; }
+                        else { sel.modify("extend", "forward", "character"); break; }
+                      }
+                      if (n > 0) document.execCommand("delete", false);
+                      else sel.collapseToEnd();
+                    }
+                  } else {
+                    document.execCommand("insertText", false, " ".repeat(INDENT));
+                  }
+                  editingHtmlRef.current = e.currentTarget.innerHTML;
+                }
               }}
               onPaste={(e) => {
                 // If the clipboard holds an image, embed it inline at the caret as a
