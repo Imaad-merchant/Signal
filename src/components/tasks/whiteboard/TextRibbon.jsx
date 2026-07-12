@@ -17,6 +17,10 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   // steals focus and collapses the live selection before its onChange fires, so we
   // restore from here before applying selection-aware styles.
   const savedRange = useRef(null);
+  // Font size at the current selection/caret, so the stepper shows the size of the
+  // text you actually have selected (which may be an inline span) rather than the
+  // box default. null → fall back to the object-level size.
+  const [selFontSize, setSelFontSize] = useState(null);
 
   useEffect(() => {
     const handler = (e) => {
@@ -28,19 +32,40 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Continuously remember the live selection while editing.
+  // Continuously remember the live selection while editing, and reflect the size at
+  // the selection so the stepper shows the selected text's actual size.
   useEffect(() => {
     const onSelChange = () => {
       const root = editingTextRef?.current;
       if (!isEditing || !root) return;
       const sel = window.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      if (!sel || sel.rangeCount === 0) return;
       const r = sel.getRangeAt(0);
-      if (root.contains(r.commonAncestorContainer)) savedRange.current = r.cloneRange();
+      if (!root.contains(r.commonAncestorContainer)) return;
+      if (!sel.isCollapsed) savedRange.current = r.cloneRange();
+      // Resolve the element whose font-size actually applies to the selected text.
+      // A range boundary set with setStartBefore(span) has startContainer = the
+      // PARENT (offset points at the span), so reading the parent would report the
+      // box default; descend into the child at the boundary to reach the real span.
+      let node = r.startContainer;
+      if (node.nodeType !== Node.TEXT_NODE) {
+        let child = node.childNodes[r.startOffset] || node.lastChild;
+        while (child && child.nodeType !== Node.TEXT_NODE) child = child.firstChild;
+        if (child) node = child;
+      }
+      const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+      if (el && root.contains(el)) {
+        const px = parseInt(getComputedStyle(el).fontSize, 10);
+        if (!Number.isNaN(px)) setSelFontSize(px);
+      }
     };
     document.addEventListener("selectionchange", onSelChange);
     return () => document.removeEventListener("selectionchange", onSelChange);
   }, [isEditing, editingTextRef]);
+
+  // Clear the tracked selection size when we stop editing so the stepper falls
+  // back to the object-level size for the next box.
+  useEffect(() => { if (!isEditing) setSelFontSize(null); }, [isEditing]);
 
   const applyExec = (cmd, value) => {
     if (isEditing && editingTextRef?.current) {
@@ -86,7 +111,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   };
 
   const currentFont = FONT_FAMILIES.find(f => f.css === textObject.fontFamily) || FONT_FAMILIES[0];
-  const currentSize = textObject.fontSize || 18;
+  const currentSize = selFontSize || textObject.fontSize || 18;
   const currentBg = textObject.bgColor && textObject.bgColor !== "none" ? textObject.bgColor : null;
 
   const handleFontPick = (font) => {
@@ -110,6 +135,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       execCmd("styleWithCSS", false);
       execCmd("fontSize", "7");
       const root = editingTextRef.current;
+      const created = [];
       root.querySelectorAll('font[size="7"]').forEach(f => {
         const span = document.createElement("span");
         span.style.fontSize = `${size}px`;
@@ -121,8 +147,24 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
           if (!el.getAttribute("style")) el.removeAttribute("style");
         });
         f.replaceWith(span);
+        created.push(span);
       });
+      // Re-select the resized text. replaceWith() collapses the selection, which
+      // would make the NEXT size change miss the word and silently fall back to
+      // the whole-box default — so restore a range spanning the new spans.
+      if (created.length) {
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.setStartBefore(created[0]);
+        range.setEndAfter(created[created.length - 1]);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
       resaveSelection();
+      // Direct DOM edits (replaceWith) don't fire the editor's onInput, so notify
+      // it — otherwise the in-progress snapshot used for autosave/flush is stale
+      // and can revert the inline size when the box loses focus.
+      root.dispatchEvent(new Event("input", { bubbles: true }));
       return;
     }
     setProp({ fontSize: size });
