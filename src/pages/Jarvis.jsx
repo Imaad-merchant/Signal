@@ -70,6 +70,25 @@ export default function Jarvis() {
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
+  // Surface the result of the Google OAuth round-trip (?google=connected|denied|…).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const g = params.get("google");
+    if (!g) return;
+    const msg = {
+      connected: "Google connected — I'll start pulling your highlights.",
+      denied: "Google connection was cancelled.",
+      norefresh: "Google didn't return a refresh token — try connecting again.",
+      unconfigured: "Google isn't set up on the server yet.",
+      error: "Something went wrong connecting Google.",
+    }[g] || "";
+    if (msg) setNote(msg);
+    // Clean the query string so a refresh doesn't repeat the message.
+    params.delete("google");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+  }, []);
+
   useEffect(() => {
     const ok = typeof window !== "undefined" && "speechSynthesis" in window;
     setTtsSupported(ok);

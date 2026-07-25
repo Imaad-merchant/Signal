@@ -122,6 +122,7 @@ function useTileData() {
         unit: signalRows.length ? "signals" : "",
         sub: signalRows.length ? (signalRows[0].title || signalRows[0].summary || "New highlight") : "Connect Google",
         tone: signalRows.length ? "amber" : "muted",
+        onClick: signalRows.length ? undefined : connectGoogle,
       },
     ],
   };
@@ -135,6 +136,18 @@ const TONE = {
   amber: "text-amber-300",
   muted: "text-gray-500",
 };
+
+// Kick off the Google OAuth connect flow: ask the server for the consent URL
+// (owner-scoped), then navigate to it.
+async function connectGoogle() {
+  try {
+    const res = await base44.functions.invoke("google/oauth-start", {});
+    const url = res?.data?.url || res?.url;
+    if (url) window.location.href = url;
+  } catch {
+    // Server not configured yet — nothing to do; the tile stays "Connect Google".
+  }
+}
 
 function Card({ tile, compact }) {
   const Icon = tile.icon;
@@ -159,11 +172,12 @@ function Card({ tile, compact }) {
       <p className="mt-1 text-[11px] text-gray-500 truncate">{tile.sub}</p>
     </div>
   );
-  return tile.to ? (
-    <Link to={tile.to} className="pointer-events-auto no-underline">{body}</Link>
-  ) : (
-    <div className="pointer-events-auto">{body}</div>
-  );
+  if (tile.to) return <Link to={tile.to} className="pointer-events-auto no-underline">{body}</Link>;
+  if (tile.onClick)
+    return (
+      <button type="button" onClick={tile.onClick} className="pointer-events-auto text-left">{body}</button>
+    );
+  return <div className="pointer-events-auto">{body}</div>;
 }
 
 export default function StatusGrid() {

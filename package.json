@@ -70,6 +70,7 @@
     "dompurify": "^3.4.11",
     "embla-carousel-react": "^8.5.2",
     "firebase": "^12.11.0",
+    "firebase-admin": "^12.7.0",
     "framer-motion": "^11.16.4",
     "html2canvas": "^1.4.1",
     "input-otp": "^1.4.2",
