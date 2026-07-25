@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle, RotateCcw } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/jarvis/Orb";
 import StatusGrid from "@/components/jarvis/StatusGrid";
+import RecentActions from "@/components/jarvis/RecentActions";
 import { useVoice } from "@/components/jarvis/useVoice";
+import { reverseMany } from "@/components/jarvis/undo";
 
 const todayKey = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -24,6 +27,9 @@ export default function Jarvis() {
   const [note, setNote] = useState(""); // action summary or error
   const [typed, setTyped] = useState("");
   const [ttsSupported, setTtsSupported] = useState(true);
+  const [lastActions, setLastActions] = useState([]); // undoable records from the last command
+  const [undoing, setUndoing] = useState(false);
+  const queryClient = useQueryClient();
 
   // Handle a finished transcript (from voice or the type box).
   const handleTranscript = useCallback(async (text) => {
@@ -58,15 +64,21 @@ export default function Jarvis() {
       const actions = Array.isArray(data.actions) ? data.actions : [];
       const spoken = data.reply ? String(data.reply) : "Noted.";
 
-      const done = await applyActions(actions, today);
+      const { count, records } = await applyActions(actions, today);
+      setLastActions(records);
       setReply(spoken);
-      if (done) setNote(done);
+      if (count) {
+        setNote(`${count} action${count > 1 ? "s" : ""} done`);
+        // Refresh the grid tiles + recent list so the new thing shows immediately.
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+      }
       speak(spoken);
     } catch (err) {
       setMode("idle");
       setNote(err?.message || "I couldn't reach the server — try again.");
     }
-  }, []);
+  }, [queryClient]);
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
@@ -103,9 +115,12 @@ export default function Jarvis() {
   }, []);
 
   // ---- create the entities the intent asked for, logging each to AgentAction ----
+  // Returns { count, records } where records are the AgentAction docs (with id +
+  // target) so the caller can offer an immediate Undo.
   async function applyActions(actions, today) {
-    if (!actions.length) return "";
+    if (!actions.length) return { count: 0, records: [] };
     let n = 0;
+    const records = [];
     for (const a of actions) {
       try {
         let target = "";
@@ -138,17 +153,20 @@ export default function Jarvis() {
           continue;
         }
         n++;
-        // Log for the 24h undo trail (undo UI comes in a later phase).
-        base44.entities.AgentAction.create({
-          action_type: a.type,
-          target,
-          payload: a,
-          executed_at: new Date().toISOString(),
-          undo_deadline: new Date(Date.now() + 86400000).toISOString(),
-        }).catch(() => {});
+        // Log for the 24h undo trail; capture the record so we can offer Undo now.
+        try {
+          const logged = await base44.entities.AgentAction.create({
+            action_type: a.type,
+            target,
+            payload: a,
+            executed_at: new Date().toISOString(),
+            undo_deadline: new Date(Date.now() + 86400000).toISOString(),
+          });
+          if (logged?.id) records.push(logged);
+        } catch { /* logging failure shouldn't break the action */ }
       } catch { /* one failed action shouldn't sink the rest */ }
     }
-    return n ? `${n} action${n > 1 ? "s" : ""} done` : "";
+    return { count: n, records };
   }
 
   // ---- British TTS reply ----
@@ -171,6 +189,21 @@ export default function Jarvis() {
     }
   }
 
+  // Undo everything the last command created (within the 24h window).
+  async function undoLast() {
+    if (!lastActions.length || undoing) return;
+    setUndoing(true);
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    const n = await reverseMany(lastActions);
+    setLastActions([]);
+    setNote(n ? `Undone.` : "Nothing to undo.");
+    setReply("");
+    setMode("idle");
+    queryClient.invalidateQueries({ queryKey: ["grid"] });
+    queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+    setUndoing(false);
+  }
+
   // Prime the speech engine inside a user gesture so iOS Safari lets the reply play later.
   function primeTTS() {
     if (!ttsSupported) return;
@@ -180,7 +213,7 @@ export default function Jarvis() {
   const onOrbAction = () => {
     if (mode === "idle") {
       if (!voice.supported) return; // type box is the path
-      setHeard(""); setReply(""); setNote("");
+      setHeard(""); setReply(""); setNote(""); setLastActions([]);
       setMode("listening");
       voice.start();
     } else if (mode === "listening") {
@@ -198,6 +231,7 @@ export default function Jarvis() {
     if (!t || mode === "processing") return;
     primeTTS();
     setTyped("");
+    setLastActions([]);
     handleTranscript(t);
   };
 
@@ -221,6 +255,9 @@ export default function Jarvis() {
       {/* The status "matrix" — tiles framing the orb (reads live entities). */}
       <StatusGrid />
 
+      {/* Recent orb actions still inside their 24h undo window. */}
+      <RecentActions />
+
       <button
         type="button"
         onClick={onOrbAction}
@@ -240,6 +277,17 @@ export default function Jarvis() {
         </p>
         {note && <p className="mt-1 text-[11px] text-gray-500">{note}</p>}
         {voice.micError && <p className="mt-1 text-[11px] text-amber-400/80 flex items-center justify-center gap-1"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
+        {lastActions.length > 0 && mode !== "processing" && (
+          <button
+            type="button"
+            onClick={undoLast}
+            disabled={undoing}
+            className="pointer-events-auto mt-2 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-gray-300 hover:text-white hover:border-white/25 transition-colors disabled:opacity-50"
+          >
+            {undoing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+            Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
+          </button>
+        )}
       </div>
 
       {/* Controls: mic (or a state-aware button) + always-available type fallback */}

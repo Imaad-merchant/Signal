@@ -182,6 +182,7 @@ export const base44 = {
     // grade rows (manual paste or the local worker) — read by the status grid.
     Signal: createEntityHandler("signals"),
     Grade: createEntityHandler("grades"),
+    Telemetry: createEntityHandler("telemetry"),
   },
 
   functions: {
