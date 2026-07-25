@@ -5,7 +5,7 @@
     }
   },
   "crons": [
-    { "path": "/api/cron/ingest-google", "schedule": "0 12 * * *" }
+    { "path": "/api/ingest", "schedule": "0 12 * * *" }
   ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },

@@ -45,10 +45,11 @@ async function post(payload) {
 }
 
 // Optionally nudge the Google poller more often than the daily Vercel cron.
+// (Same /api/ingest endpoint; the CRON_SECRET bearer selects the poll path.)
 async function kickGoogleCron() {
   if (!cfg.cronSecret) return;
   try {
-    await fetch(`${API}/api/cron/ingest-google`, { headers: { Authorization: `Bearer ${cfg.cronSecret}` } });
+    await fetch(`${API}/api/ingest`, { headers: { Authorization: `Bearer ${cfg.cronSecret}` } });
   } catch (err) {
     console.warn("[worker] google cron kick failed:", err.message);
   }
