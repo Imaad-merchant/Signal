@@ -127,6 +127,13 @@ export default function Jarvis() {
         } else if (a.type === "write") {
           const rec = await base44.entities.Page.create({ title: a.title, type: "document", content: a.body });
           target = "pages/" + (rec?.id || "");
+        } else if (a.type === "grade") {
+          const rec = await base44.entities.Grade.create({
+            course: a.course, assignment: a.assignment || null,
+            score: a.score, max_score: a.max ?? null,
+            graded_on: today, source: "pasted",
+          });
+          target = "grades/" + (rec?.id || "");
         } else {
           continue;
         }
