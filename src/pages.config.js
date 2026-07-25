@@ -50,7 +50,6 @@
 import Analytics from './pages/Analytics';
 import Dashboard from './pages/Dashboard';
 import Focus from './pages/Focus';
-import Jarvis from './pages/Jarvis';
 import Markets from './pages/Markets';
 import Settings from './pages/Settings';
 import Tasks from './pages/Tasks';
@@ -61,7 +60,6 @@ export const PAGES = {
     "Analytics": Analytics,
     "Dashboard": Dashboard,
     "Focus": Focus,
-    "Jarvis": Jarvis,
     "Markets": Markets,
     "Settings": Settings,
     "Tasks": Tasks,

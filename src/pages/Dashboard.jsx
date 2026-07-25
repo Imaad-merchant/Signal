@@ -713,11 +713,8 @@ export default function Dashboard() {
 
 
             <CheckInLauncher />
-            <Link to="/Jarvis" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="Jarvis">
+            <Link to="/cowork" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="Jarvis">
               <Orbit className="h-5 w-5" />
-            </Link>
-            <Link to="/cowork" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="AI Co-pilot">
-              <Sparkles className="h-5 w-5" />
             </Link>
             <Link to={createPageUrl("Tasks")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
               <CheckSquare className="h-5 w-5" />
