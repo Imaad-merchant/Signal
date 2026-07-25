@@ -17,6 +17,7 @@ import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import EditTaskDialog from "../components/dashboard/EditTaskDialog";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 import { useIsMobile } from "../components/useIsMobile";
+import CheckInLauncher from "../components/jarvis/CheckInLauncher";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
 const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly" };
@@ -711,6 +712,7 @@ export default function Dashboard() {
             </div>
 
 
+            <CheckInLauncher />
             <Link to="/cowork" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="AI Co-pilot">
               <Sparkles className="h-5 w-5" />
             </Link>
