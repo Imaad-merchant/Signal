@@ -8,7 +8,7 @@ import {
 } from "date-fns";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Check, Orbit } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
@@ -713,6 +713,9 @@ export default function Dashboard() {
 
 
             <CheckInLauncher />
+            <Link to="/Jarvis" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="Jarvis">
+              <Orbit className="h-5 w-5" />
+            </Link>
             <Link to="/cowork" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="AI Co-pilot">
               <Sparkles className="h-5 w-5" />
             </Link>
