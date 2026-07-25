@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/jarvis/Orb";
+import StatusGrid from "@/components/jarvis/StatusGrid";
 import { useVoice } from "@/components/jarvis/useVoice";
 
 const todayKey = () =>
@@ -191,12 +192,15 @@ export default function Jarvis() {
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Signal</h1>
 
+      {/* The status "matrix" — tiles framing the orb (reads live entities). */}
+      <StatusGrid />
+
       <button
         type="button"
         onClick={onOrbAction}
         aria-label="Talk to Signal"
-        className="relative outline-none"
-        style={{ width: "min(76vw, 54vh)", height: "min(76vw, 54vh)" }}
+        className="relative z-[6] outline-none"
+        style={{ width: "min(72vw, 46vh)", height: "min(72vw, 46vh)" }}
       >
         <Orb state={mode} amplitudeRef={voice.amplitudeRef} />
       </button>

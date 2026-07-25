@@ -178,6 +178,10 @@ export const base44 = {
     Insight: createEntityHandler("insights"),
     NewsTopic: createEntityHandler("news_topics"),
     AgentAction: createEntityHandler("agent_actions"),
+    // Ingested "signals" (Gmail/Drive highlights from the Google poller) and
+    // grade rows (manual paste or the local worker) — read by the status grid.
+    Signal: createEntityHandler("signals"),
+    Grade: createEntityHandler("grades"),
   },
 
   functions: {

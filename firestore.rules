@@ -91,6 +91,25 @@ service cloud.firestore {
       allow create: if isCreatingOwner();
     }
 
+    // Ingested Gmail/Drive highlights written by the Google poller (server writes
+    // via the Admin SDK, which bypasses these rules; the owner reads them here).
+    match /signals/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    // Grade rows (manual paste or the local worker).
+    match /grades/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    // Google OAuth refresh tokens — written ONLY by the server (Admin SDK). No
+    // client access at all: tokens must never be readable from the browser.
+    match /google_tokens/{docId} {
+      allow read, write: if false;
+    }
+
     // Default deny: anything not matched above is rejected.
     match /{document=**} {
       allow read, write: if false;
