@@ -1,0 +1,99 @@
+rules_version = '2';
+
+// Owner-only security rules for Signal.
+//
+// Deploy with:  firebase deploy --only firestore:rules
+//
+// Every document is scoped to its owner via the `userId` field. Reads/writes are
+// allowed only when the requester is signed in AND owns the document. Creates are
+// allowed only when the new document's `userId` matches the requester's uid.
+// Anything not explicitly matched below is denied by the final catch-all rule.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Owner-only access for a collection:
+    //  - read/delete require ownership of the existing doc.
+    //  - create requires the incoming doc to be owned by the caller.
+    //  - update requires ownership AND that the doc stays owned by the caller
+    //    (so a user can never re-assign a document to another uid).
+    function isOwner() {
+      return request.auth != null && request.auth.uid == resource.data.userId;
+    }
+    function isCreatingOwner() {
+      return request.auth != null && request.auth.uid == request.resource.data.userId;
+    }
+    function canUpdate() {
+      return isOwner() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Existing app collections
+    match /tasks/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /categories/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /dailyLogs/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /focusSessions/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /pages/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+
+    // Jarvis layer collections
+    match /domains/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /memory/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /check_ins/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /commitments/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /insights/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /news_topics/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /agent_actions/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+
+    // Default deny: anything not matched above is rejected.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

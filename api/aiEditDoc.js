@@ -1,5 +1,13 @@
+import { verifyAuth } from "./_auth.js";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  try {
+    await verifyAuth(req);
+  } catch {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) return res.status(500).json({ error: "OpenAI API key not configured" });
