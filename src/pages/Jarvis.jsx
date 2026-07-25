@@ -1,33 +1,78 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Volume2, VolumeX, Loader2, RotateCw } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import { unwrap } from "@/components/jarvis/checkinUtils";
 import Orb from "@/components/jarvis/Orb";
+import { useVoice } from "@/components/jarvis/useVoice";
 
-// The app accent (Signal blue by default), set by the theme picker.
-function readAccent() {
-  try {
-    const v = localStorage.getItem("pulse_theme");
-    if (v && /^#[0-9a-f]{6}$/i.test(v)) return v;
-  } catch { /* ignore */ }
-  return "#4285f4";
+const todayKey = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
+function pickBritishVoice(voices) {
+  const gb = voices.filter((v) => /en[-_]GB/i.test(v.lang));
+  const female =
+    gb.find((v) => /female|serena|kate|sonia|martha|libby|hazel|stephanie|amelie/i.test(v.name)) ||
+    gb.find((v) => /google uk english female/i.test(v.name));
+  return female || gb[0] || voices.find((v) => /^en/i.test(v.lang)) || null;
 }
 
 export default function Jarvis() {
-  const [muted, setMuted] = useState(true);
-  const [status, setStatus] = useState("idle"); // idle | loading | speaking | error
-  const [errorMsg, setErrorMsg] = useState(null);
+  const [mode, setMode] = useState("idle"); // idle | listening | processing | speaking
+  const [heard, setHeard] = useState("");
+  const [reply, setReply] = useState("");
+  const [note, setNote] = useState(""); // action summary or error
+  const [typed, setTyped] = useState("");
   const [ttsSupported, setTtsSupported] = useState(true);
-  const [accent] = useState(readAccent);
-  const amplitudeRef = useRef(0);
-  const speaking = status === "speaking";
+
+  // Handle a finished transcript (from voice or the type box).
+  const handleTranscript = useCallback(async (text) => {
+    const t = (text || "").trim();
+    if (!t) { setMode("idle"); return; }
+    setHeard(t);
+    setReply("");
+    setNote("");
+    setMode("processing");
+    try {
+      const [commitments, tasksRaw, domains] = await Promise.all([
+        base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
+        base44.entities.Task.list("-created_date").catch(() => []),
+        base44.entities.Domain.list("sort_order").catch(() => []),
+      ]);
+      const today = todayKey();
+      const todayTasks = (Array.isArray(tasksRaw) ? tasksRaw : [])
+        .filter((x) => x && x.due_date === today)
+        .slice(0, 25)
+        .map((x) => ({ title: x.title || "", status: x.status || "" }));
+
+      const res = await base44.functions.invoke("intent", {
+        transcript: t,
+        context: {
+          today,
+          commitments: (Array.isArray(commitments) ? commitments : []).map((c) => ({ text: c.text, due_on: c.due_on })),
+          tasks: todayTasks,
+          domains: Array.isArray(domains) ? domains : [],
+        },
+      });
+      const data = res && res.data ? res.data : res || {};
+      const actions = Array.isArray(data.actions) ? data.actions : [];
+      const spoken = data.reply ? String(data.reply) : "Noted.";
+
+      const done = await applyActions(actions, today);
+      setReply(spoken);
+      if (done) setNote(done);
+      speak(spoken);
+    } catch (err) {
+      setMode("idle");
+      setNote(err?.message || "I couldn't reach the server — try again.");
+    }
+  }, []);
+
+  const voice = useVoice({ onFinalTranscript: handleTranscript });
 
   useEffect(() => {
     const ok = typeof window !== "undefined" && "speechSynthesis" in window;
     setTtsSupported(ok);
     if (!ok) return;
-    // Some browsers load voices asynchronously — prime them.
     window.speechSynthesis.getVoices();
     const onVoices = () => window.speechSynthesis.getVoices();
     window.speechSynthesis.addEventListener?.("voiceschanged", onVoices);
@@ -37,162 +82,162 @@ export default function Jarvis() {
     };
   }, []);
 
-  const stopSpeaking = useCallback(() => {
-    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
-    amplitudeRef.current = 0;
-  }, []);
+  // ---- create the entities the intent asked for, logging each to AgentAction ----
+  async function applyActions(actions, today) {
+    if (!actions.length) return "";
+    let n = 0;
+    for (const a of actions) {
+      try {
+        let target = "";
+        if (a.type === "remind") {
+          const rec = await base44.entities.Commitment.create({
+            text: a.text, domain_id: null, stated_on: today, due_on: a.due_on || null, status: "open", source: "stated",
+          });
+          target = "commitments/" + (rec?.id || "");
+        } else if (a.type === "log") {
+          const rec = await base44.entities.Memory.create({
+            kind: "observed", content: a.text, source: "observed", domain_id: null,
+          });
+          target = "memory/" + (rec?.id || "");
+        } else if (a.type === "monitor") {
+          const rec = await base44.entities.Insight.create({
+            kind: "metric", content: a.metric + (a.value != null ? ": " + a.value : ""), evidence: a.note ? { note: a.note } : null,
+          });
+          target = "insights/" + (rec?.id || "");
+        } else if (a.type === "write") {
+          const rec = await base44.entities.Page.create({ title: a.title, type: "document", content: a.body });
+          target = "pages/" + (rec?.id || "");
+        } else {
+          continue;
+        }
+        n++;
+        // Log for the 24h undo trail (undo UI comes in a later phase).
+        base44.entities.AgentAction.create({
+          action_type: a.type,
+          target,
+          payload: a,
+          executed_at: new Date().toISOString(),
+          undo_deadline: new Date(Date.now() + 86400000).toISOString(),
+        }).catch(() => {});
+      } catch { /* one failed action shouldn't sink the rest */ }
+    }
+    return n ? `${n} action${n > 1 ? "s" : ""} done` : "";
+  }
 
-  const speak = useCallback(async () => {
-    if (!ttsSupported) return;
-    setStatus("loading");
-    setErrorMsg(null);
+  // ---- British TTS reply ----
+  function speak(text) {
+    if (!ttsSupported || !text) { setMode("idle"); return; }
     try {
-      const [memory, domains, newsTopics] = await Promise.all([
-        base44.entities.Memory.list("-created_date", 15).catch(() => []),
-        base44.entities.Domain.list("sort_order").catch(() => []),
-        base44.entities.NewsTopic.filter({ is_active: true }).catch(() => []),
-      ]);
-      const res = await base44.functions.invoke("checkin", {
-        action: "payback",
-        context: {
-          answers: [],
-          memory: Array.isArray(memory) ? memory : [],
-          domains: Array.isArray(domains) ? domains : [],
-          news_topics: Array.isArray(newsTopics) ? newsTopics : [],
-        },
-      });
-      const pb = unwrap(res)?.payback;
-      const title = pb?.title ? String(pb.title) : "Here's your signal";
-      const body = pb?.body ? String(pb.body) : "You showed up today. Keep the momentum going.";
-      const text = `${title}. ${body}`;
-
+      const synth = window.speechSynthesis;
       const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1;
-      u.pitch = 1;
-      u.volume = 1;
-      const voices = window.speechSynthesis.getVoices() || [];
-      const pick =
-        voices.find((v) => /^en/i.test(v.lang) && /natural|google|samantha|daniel|aria/i.test(v.name)) ||
-        voices.find((v) => /^en/i.test(v.lang));
-      if (pick) u.voice = pick;
-
-      u.onstart = () => { setStatus("speaking"); amplitudeRef.current = 1; };
-      u.onboundary = () => { amplitudeRef.current = 1; };
-      u.onend = () => { setStatus("idle"); amplitudeRef.current = 0; };
-      u.onerror = () => { setStatus("idle"); amplitudeRef.current = 0; };
-
-      setStatus("speaking"); // set immediately in case onstart lags
-      // Do NOT cancel() here — that would kill the in-gesture priming line
-      // (see toggleMute) that iOS needs to have started first. This queues after it.
-      window.speechSynthesis.speak(u);
-    } catch (err) {
-      setStatus("error");
-      setErrorMsg(err?.message || "Couldn't reach your signal. Tap to retry.");
-      amplitudeRef.current = 0;
+      u.rate = 1.02; u.pitch = 1; u.volume = 1;
+      const v = pickBritishVoice(synth.getVoices() || []);
+      if (v) u.voice = v;
+      u.onstart = () => { setMode("speaking"); voice.amplitudeRef.current = 1; };
+      u.onboundary = () => { voice.amplitudeRef.current = 1; };
+      u.onend = () => { setMode("idle"); voice.amplitudeRef.current = 0; };
+      u.onerror = () => { setMode("idle"); voice.amplitudeRef.current = 0; };
+      setMode("speaking");
+      synth.speak(u);
+    } catch {
+      setMode("idle");
     }
-  }, [ttsSupported]);
+  }
 
-  const toggleMute = () => {
-    if (muted) {
-      setMuted(false);
-      // iOS Safari unlocks TTS only from a direct user gesture and blocks speech
-      // that starts after an await. Speak a short priming line *synchronously* here
-      // so the engine is unlocked; the fetched payback then queues right after it.
-      if (ttsSupported) {
-        try {
-          window.speechSynthesis.cancel();
-          const g = new SpeechSynthesisUtterance("Hey.");
-          g.rate = 1;
-          g.volume = 1;
-          window.speechSynthesis.speak(g);
-        } catch { /* ignore */ }
-      }
-      speak();
-    } else {
-      setMuted(true);
-      stopSpeaking();
-      setStatus("idle");
+  // Prime the speech engine inside a user gesture so iOS Safari lets the reply play later.
+  function primeTTS() {
+    if (!ttsSupported) return;
+    try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } catch { /* ignore */ }
+  }
+
+  const onOrbAction = () => {
+    if (mode === "idle") {
+      if (!voice.supported) return; // type box is the path
+      setHeard(""); setReply(""); setNote("");
+      setMode("listening");
+      voice.start();
+    } else if (mode === "listening") {
+      primeTTS();
+      voice.stop(); // → onFinalTranscript → processing
+    } else if (mode === "speaking") {
+      try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+      setMode("idle");
     }
   };
 
-  // Tap the orb to replay when it's unmuted and not busy.
-  const onOrbTap = () => {
-    if (!muted && (status === "idle" || status === "error")) {
-      try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
-      speak();
-    }
+  const submitTyped = (e) => {
+    e.preventDefault();
+    const t = typed.trim();
+    if (!t || mode === "processing") return;
+    primeTTS();
+    setTyped("");
+    handleTranscript(t);
   };
 
-  const statusLabel = !ttsSupported
-    ? "Voice isn't available in this browser"
-    : status === "loading"
-    ? "Thinking…"
-    : status === "speaking"
-    ? "Speaking"
-    : status === "error"
-    ? (errorMsg || "Something went wrong")
-    : muted
-    ? "Muted — tap the speaker to hear me"
-    : "Tap the orb to hear me again";
+  const statusLabel = {
+    idle: voice.supported ? "Tap the orb and speak" : "Type a command below",
+    listening: "Listening…",
+    processing: "On it…",
+    speaking: "Speaking",
+  }[mode];
 
   return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden"
-      style={{ background: "radial-gradient(circle at 50% 45%, #12151c 0%, #08090c 72%)" }}
+      style={{ background: "radial-gradient(circle at 50% 42%, #12151c 0%, #08090c 72%)" }}
     >
-      <Link
-        to="/Dashboard"
-        className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors"
-        title="Back"
-        aria-label="Back to calendar"
-      >
+      <Link to="/Dashboard" className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors" title="Back" aria-label="Back">
         <ArrowLeft className="h-5 w-5" />
       </Link>
-
-      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">
-        Signal
-      </h1>
+      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Signal</h1>
 
       <button
         type="button"
-        onClick={onOrbTap}
-        aria-label="Jarvis orb"
+        onClick={onOrbAction}
+        aria-label="Talk to Signal"
         className="relative outline-none"
-        style={{ width: "min(78vw, 58vh)", height: "min(78vw, 58vh)" }}
+        style={{ width: "min(76vw, 54vh)", height: "min(76vw, 54vh)" }}
       >
-        <Orb color={accent} speaking={speaking} amplitudeRef={amplitudeRef} />
+        <Orb state={mode} amplitudeRef={voice.amplitudeRef} />
       </button>
 
-      <div className="absolute bottom-32 left-0 right-0 px-6 text-center">
-        <p className="text-sm text-gray-400 flex items-center justify-center gap-2">
-          {status === "loading" && <Loader2 className="h-4 w-4 animate-spin text-blue-400" />}
-          {statusLabel}
+      {/* Transcript / reply / status */}
+      <div className="absolute bottom-40 left-0 right-0 px-6 text-center">
+        {heard && mode !== "idle" && <p className="text-xs text-gray-500 mb-1 truncate">“{voice.partial || heard}”</p>}
+        <p className={`text-sm flex items-center justify-center gap-2 ${mode === "speaking" ? "text-gray-200" : "text-gray-400"}`}>
+          {mode === "processing" && <Loader2 className="h-4 w-4 animate-spin text-amber-400" />}
+          {mode === "idle" && reply ? `“${reply}”` : statusLabel}
         </p>
-        {status === "error" && (
-          <button
-            onClick={speak}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-1.5 text-xs text-red-200 hover:bg-red-500/10 transition-colors"
-          >
-            <RotateCw className="h-3 w-3" /> Try again
-          </button>
-        )}
+        {note && <p className="mt-1 text-[11px] text-gray-500">{note}</p>}
+        {voice.micError && <p className="mt-1 text-[11px] text-amber-400/80 flex items-center justify-center gap-1"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
       </div>
 
-      <button
-        onClick={toggleMute}
-        disabled={!ttsSupported}
-        className={`absolute left-1/2 -translate-x-1/2 flex h-14 w-14 items-center justify-center rounded-full transition-all disabled:opacity-40 ${
-          muted ? "border border-white/10 bg-white/5 text-gray-300" : "text-white shadow-xl"
-        }`}
-        style={{
-          bottom: "calc(4rem + env(safe-area-inset-bottom) + 1rem)",
-          backgroundColor: muted ? undefined : accent,
-        }}
-        title={muted ? "Unmute — let Jarvis speak" : "Mute"}
-        aria-label={muted ? "Unmute" : "Mute"}
-      >
-        {muted ? <VolumeX className="h-6 w-6" /> : <Volume2 className="h-6 w-6" />}
-      </button>
+      {/* Controls: mic (or a state-aware button) + always-available type fallback */}
+      <div className="absolute left-0 right-0 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
+        {voice.supported && (
+          <button
+            onClick={onOrbAction}
+            className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
+              mode === "listening" ? "bg-cyan-500 text-white shadow-[0_0_28px_-4px_rgba(34,211,238,0.7)]" : "border border-white/10 bg-white/5 text-gray-200"
+            }`}
+            title={mode === "listening" ? "Stop & send" : "Talk"}
+            aria-label={mode === "listening" ? "Stop and send" : "Talk"}
+          >
+            {mode === "listening" ? <Square className="h-5 w-5" /> : <Mic className="h-6 w-6" />}
+          </button>
+        )}
+        <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(88vw,420px)]">
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder={voice.supported ? "…or type a command" : "Type a command (voice not supported here)"}
+            className="flex-1 rounded-xl bg-white/[0.05] border border-white/10 px-3.5 py-2.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25"
+          />
+          <button type="submit" disabled={!typed.trim() || mode === "processing"} className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-500 transition-colors" aria-label="Send">
+            <Send className="h-4 w-4" />
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
