@@ -4,6 +4,9 @@
       "maxDuration": 60
     }
   },
+  "crons": [
+    { "path": "/api/cron/ingest-google", "schedule": "0 12 * * *" }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
