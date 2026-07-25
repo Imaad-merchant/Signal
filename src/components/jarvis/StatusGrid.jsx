@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  CalendarClock, ListChecks, Sparkles, GraduationCap, Mail, Loader2,
+  CalendarClock, ListChecks, Sparkles, GraduationCap, Mail, Cpu, Loader2,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 
@@ -59,6 +59,11 @@ function useTileData() {
     queryFn: () => base44.entities.Signal.list("-created_date", 5).catch(() => []),
     staleTime: 60_000,
   });
+  const telemetry = useQuery({
+    queryKey: ["grid", "telemetry"],
+    queryFn: () => base44.entities.Telemetry.list("-updated_date", 1).catch(() => []),
+    staleTime: 60_000,
+  });
 
   const todayTasks = (Array.isArray(tasks.data) ? tasks.data : []).filter(
     (t) => t && (t.due_date === today) && t.status !== "done" && t.status !== "completed"
@@ -68,6 +73,14 @@ function useTileData() {
   const latestInsight = (Array.isArray(insights.data) ? insights.data : [])[0] || null;
   const gradeRows = Array.isArray(grades.data) ? grades.data : [];
   const signalRows = Array.isArray(signals.data) ? signals.data : [];
+  const machine = (Array.isArray(telemetry.data) ? telemetry.data : [])[0] || null;
+
+  // Compact uptime label from seconds.
+  const uptime = machine?.uptime_s != null
+    ? (machine.uptime_s >= 86400 ? `${Math.floor(machine.uptime_s / 86400)}d`
+      : machine.uptime_s >= 3600 ? `${Math.floor(machine.uptime_s / 3600)}h`
+      : `${Math.max(1, Math.floor(machine.uptime_s / 60))}m`)
+    : "";
 
   return {
     tiles: [
@@ -123,6 +136,18 @@ function useTileData() {
         sub: signalRows.length ? (signalRows[0].title || signalRows[0].summary || "New highlight") : "Connect Google",
         tone: signalRows.length ? "amber" : "muted",
         onClick: signalRows.length ? undefined : connectGoogle,
+      },
+      {
+        key: "machine",
+        label: "Machine",
+        icon: Cpu,
+        loading: telemetry.isLoading,
+        value: machine?.mem_used_pct != null ? `${machine.mem_used_pct}%` : "—",
+        unit: machine?.host || "",
+        sub: machine
+          ? `up ${uptime}${machine.sampled_at ? ` · ${ago(machine.sampled_at)}` : ""}`
+          : "Run the worker",
+        tone: machine ? "emerald" : "muted",
       },
     ],
   };
