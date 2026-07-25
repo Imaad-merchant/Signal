@@ -230,8 +230,15 @@ export default function Jarvis() {
     e.preventDefault();
     const t = typed.trim();
     if (!t || mode === "processing") return;
-    primeTTS();
     setTyped("");
+    // Treat "undo" / "undo that" / "undo last" as the undo action, not a command —
+    // but only while there's something from the last turn to undo (else fall
+    // through so the assistant can explain, and the Recent panel stays the path).
+    if (/^undo(\s+(that|it|last))?$/i.test(t) && lastActions.length) {
+      undoLast();
+      return;
+    }
+    primeTTS();
     setLastActions([]);
     handleTranscript(t);
   };
@@ -278,21 +285,23 @@ export default function Jarvis() {
         </p>
         {note && <p className="mt-1 text-[11px] text-gray-500">{note}</p>}
         {voice.micError && <p className="mt-1 text-[11px] text-amber-400/80 flex items-center justify-center gap-1"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
+      </div>
+
+      {/* Controls: undo (when available) + mic + always-available type fallback.
+          Sits above the safe area and, crucially, above the orb in stacking order
+          (z-10 > orb's z-6) so the Undo tap target is never eaten by the orb. */}
+      <div className="absolute left-0 right-0 z-10 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
         {lastActions.length > 0 && mode !== "processing" && (
           <button
             type="button"
             onClick={undoLast}
             disabled={undoing}
-            className="pointer-events-auto mt-2 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-gray-300 hover:text-white hover:border-white/25 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 hover:bg-amber-400/20 transition-colors disabled:opacity-50"
           >
-            {undoing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+            {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
             Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
           </button>
         )}
-      </div>
-
-      {/* Controls: mic (or a state-aware button) + always-available type fallback */}
-      <div className="absolute left-0 right-0 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
         {voice.supported && (
           <button
             onClick={onOrbAction}
