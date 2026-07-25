@@ -42,16 +42,41 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
-        // The main app bundle exceeds the 2 MiB default; raise the limit so it
-        // is precached and the app works fully offline.
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        // SPA fallback so offline navigations resolve to the app shell.
-        navigateFallback: '/index.html',
-        // Never let the SW intercept API calls.
+        // Network-first, NOT precache-the-shell. Precaching the app shell +
+        // navigateFallback meant returning users kept getting a stale index.html
+        // (and therefore stale JS) long after a deploy — every UI change stayed
+        // invisible while /api changes (denylisted) still landed. Now: online
+        // always fetches the current build; offline falls back to the last one seen.
+        globPatterns: ['**/*.{ico,png,svg,webmanifest}'], // icons/manifest only
+        // Disable the default navigateFallback → precached index.html (that was the
+        // stale-shell). Navigations are handled network-first below instead.
+        navigateFallback: null,
         navigateFallbackDenylist: [/^\/api\//],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
+        skipWaiting: true,
+        runtimeCaching: [
+          {
+            // Page navigations: try the network first (Vercel's SPA rewrite serves
+            // index.html for deep links like /cowork), fall back to cache offline.
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-html',
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 8 },
+            },
+          },
+          {
+            // JS/CSS/workers: network-first so a new build's assets load immediately.
+            urlPattern: ({ request }) => ['script', 'style', 'worker'].includes(request.destination),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-assets',
+              expiration: { maxEntries: 80 },
+            },
+          },
+        ],
       },
     }),
   ],
