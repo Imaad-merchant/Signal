@@ -7,7 +7,7 @@
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON } from "./_llm.js";
 
-const VALID = ["remind", "log", "monitor", "write", "ask", "none"];
+const VALID = ["remind", "log", "monitor", "write", "grade", "ask", "none"];
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -30,7 +30,7 @@ export default async function handler(req, res) {
 Return JSON only (no markdown):
 {
   "reply": string,        // one or two crisp spoken sentences, British tone
-  "intent": "remind" | "log" | "monitor" | "write" | "ask" | "none",
+  "intent": "remind" | "log" | "monitor" | "write" | "grade" | "ask" | "none",
   "actions": [ ... ]      // zero or more of the actions below
 }
 
@@ -39,11 +39,13 @@ ACTION TYPES:
 - { "type": "log",     "text": string, "domain": string | null }         // note something that happened / an observation
 - { "type": "monitor", "metric": string, "value": number | null, "note": string | null }  // a tracked number/metric
 - { "type": "write",   "title": string, "body": string }                 // draft a note/document to the workspace
+- { "type": "grade",   "course": string, "assignment": string | null, "score": number, "max": number | null }  // a grade the user pasted/read out
 
 RULES:
 - Only create actions the user clearly asked for. If it's just a question or chat, use intent "ask"/"none" with an empty actions array and answer in "reply".
 - Never invent obligations the user didn't state.
 - Resolve relative dates against today (${today}); use null if no date is implied.
+- GRADES: if the user pastes or reads out grades (e.g. "got a 92 on the calculus midterm", or a blob of assignment/score lines), emit one "grade" action per grade. Put a percentage or points in "score", the total in "max" when stated. Use intent "grade" and, in "reply", announce the notable new grade(s) crisply — e.g. "Ninety-two on the calculus midterm — nicely done."
 - Keep "reply" short and spoken-aloud friendly — this is read by a voice, so no lists, no markdown, no emoji.`;
 
     const user = `The user said: "${transcript}"
@@ -72,9 +74,16 @@ Parse it now.`;
         if (type === "log") return { type, text: String(a.text || ""), domain: a.domain || null };
         if (type === "monitor") return { type, metric: String(a.metric || ""), value: Number.isFinite(a.value) ? a.value : null, note: a.note || null };
         if (type === "write") return { type, title: String(a.title || "Note"), body: String(a.body || "") };
+        if (type === "grade") return {
+          type,
+          course: String(a.course || "").slice(0, 120),
+          assignment: a.assignment ? String(a.assignment).slice(0, 160) : null,
+          score: Number.isFinite(a.score) ? a.score : (Number.isFinite(Number(a.score)) ? Number(a.score) : null),
+          max: Number.isFinite(a.max) ? a.max : (Number.isFinite(Number(a.max)) ? Number(a.max) : null),
+        };
         return null;
       })
-      .filter((a) => a && (a.text || a.title || a.metric));
+      .filter((a) => a && (a.text || a.title || a.metric || (a.type === "grade" && a.score != null)));
 
     return res.status(200).json({ reply, intent, actions });
   } catch (err) {
