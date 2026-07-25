@@ -81,13 +81,13 @@ plan allows at most daily crons. On **Pro** you can make it frequent, e.g. every
 15 minutes:
 
 ```json
-"crons": [{ "path": "/api/cron/ingest-google", "schedule": "*/15 * * * *" }]
+"crons": [{ "path": "/api/ingest", "schedule": "*/15 * * * *" }]
 ```
 
 You can also trigger a run manually (or from the local worker in Phase D):
 
 ```bash
-curl -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP.vercel.app/api/cron/ingest-google
+curl -H "Authorization: Bearer $CRON_SECRET" https://YOUR-APP.vercel.app/api/ingest
 ```
 
 Runs are **idempotent** — each Gmail/Drive/Calendar item has a stable id, so
@@ -95,5 +95,5 @@ re-running never creates duplicates.
 
 ### Disconnecting
 
-`POST /api/google/disconnect` (owner-scoped) revokes the token at Google and
+`POST /api/jarvis` with `{ "route": "google-disconnect" }` (owner-scoped) revokes the token at Google and
 deletes it from Firestore.

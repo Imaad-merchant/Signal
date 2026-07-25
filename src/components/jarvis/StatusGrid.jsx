@@ -166,7 +166,7 @@ const TONE = {
 // (owner-scoped), then navigate to it.
 async function connectGoogle() {
   try {
-    const res = await base44.functions.invoke("google/oauth-start", {});
+    const res = await base44.functions.invoke("jarvis", { route: "google-connect" });
     const url = res?.data?.url || res?.url;
     if (url) window.location.href = url;
   } catch {

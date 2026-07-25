@@ -161,7 +161,7 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
     seededRef.current = true;
     setSeedError(null);
     try {
-      const res = await base44.functions.invoke("seedDomains", { tasks: tasks || [] });
+      const res = await base44.functions.invoke("jarvis", { route: "seed", tasks: tasks || [] });
       const domains = unwrap(res)?.domains;
       if (Array.isArray(domains) && domains.length) {
         const created = [];
@@ -193,7 +193,8 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
     setLoadingQuestions(true);
     setQuestionsError(null);
     try {
-      const res = await base44.functions.invoke("checkin", {
+      const res = await base44.functions.invoke("jarvis", {
+        route: "checkin",
         action: "questions",
         slot,
         context: {
@@ -273,7 +274,8 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
         kind: q?.kind || "reflection",
         answer: answersObj[q?.id || `q${i + 1}`] || "skip",
       }));
-      const res = await base44.functions.invoke("checkin", {
+      const res = await base44.functions.invoke("jarvis", {
+        route: "checkin",
         action: "payback",
         context: {
           answers: answerArr,

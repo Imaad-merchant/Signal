@@ -51,7 +51,8 @@ export default function Jarvis() {
         .slice(0, 25)
         .map((x) => ({ title: x.title || "", status: x.status || "" }));
 
-      const res = await base44.functions.invoke("intent", {
+      const res = await base44.functions.invoke("jarvis", {
+        route: "intent",
         transcript: t,
         context: {
           today,
