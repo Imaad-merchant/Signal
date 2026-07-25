@@ -80,13 +80,25 @@ async function callOpenAI({ system, user, json }) {
 // Picks Anthropic when ANTHROPIC_API_KEY exists, else OpenAI. Throws if neither key
 // is configured. When json is true, returns a string the caller should JSON.parse.
 export async function callLLM({ system, user, json = false }) {
-  if (process.env.ANTHROPIC_API_KEY) {
-    return callAnthropic({ system, user, json });
+  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  if (!hasAnthropic && !hasOpenAI) {
+    throw new Error("No LLM provider configured (set ANTHROPIC_API_KEY or OPENAI_API_KEY)");
   }
-  if (process.env.OPENAI_API_KEY) {
-    return callOpenAI({ system, user, json });
+  // Prefer Anthropic when its key is set, but never let a provider-side failure
+  // (missing credits, bad key, model error, outage) take the whole feature down:
+  // fall back to OpenAI if it's available. The check-in keeps working on OpenAI
+  // and automatically uses Claude again once the Anthropic call succeeds.
+  if (hasAnthropic) {
+    try {
+      return await callAnthropic({ system, user, json });
+    } catch (err) {
+      if (!hasOpenAI) throw err;
+      console.error("Anthropic call failed; falling back to OpenAI:", err.message);
+      return await callOpenAI({ system, user, json });
+    }
   }
-  throw new Error("No LLM provider configured (set ANTHROPIC_API_KEY or OPENAI_API_KEY)");
+  return callOpenAI({ system, user, json });
 }
 
 // Parse a model's JSON response defensively: strips accidental code fences and
