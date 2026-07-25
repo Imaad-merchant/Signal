@@ -1,0 +1,23 @@
+{
+  "apiUrl": "https://YOUR-APP.vercel.app",
+  "deviceToken": "the same value you set as DEVICE_TOKEN in Vercel",
+  "intervalSeconds": 300,
+  "cronSecret": "(optional) the same CRON_SECRET, to nudge the Google poller more often than the daily Vercel cron",
+  "uh": {
+    "enabled": false,
+    "loginUrl": "https://accessuh.uh.edu/...",
+    "gradesUrl": "https://.../grades",
+    "username": "your-uh-id",
+    "password": "your-uh-password",
+    "selectors": {
+      "username": "#username",
+      "password": "#password",
+      "submit": "button[type=submit]",
+      "row": ".grade-row",
+      "course": ".course",
+      "assignment": ".assignment",
+      "score": ".score",
+      "max": ".max"
+    }
+  }
+}

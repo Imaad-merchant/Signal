@@ -32,3 +32,7 @@ dist-ssr
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Local worker secrets — never commit real credentials
+worker/config.json
+worker/config.json.enc

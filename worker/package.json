@@ -1,0 +1,16 @@
+{
+  "name": "signal-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local outbound worker for Signal — pushes local telemetry (and opt-in scraped grades) to the app over authenticated HTTPS.",
+  "bin": { "signal-worker": "signal-worker.mjs" },
+  "scripts": {
+    "start": "node signal-worker.mjs",
+    "encrypt": "node encrypt-config.mjs config.json"
+  },
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
