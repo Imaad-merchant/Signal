@@ -170,6 +170,14 @@ export const base44 = {
     DailyLog: createEntityHandler("dailyLogs"),
     FocusSession: createEntityHandler("focusSessions"),
     Page: createEntityHandler("pages"),
+    // Jarvis layer collections
+    Domain: createEntityHandler("domains"),
+    Memory: createEntityHandler("memory"),
+    CheckIn: createEntityHandler("check_ins"),
+    Commitment: createEntityHandler("commitments"),
+    Insight: createEntityHandler("insights"),
+    NewsTopic: createEntityHandler("news_topics"),
+    AgentAction: createEntityHandler("agent_actions"),
   },
 
   functions: {
