@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle, RotateCcw, X, AudioLines } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -85,8 +85,8 @@ export default function Donna() {
   const [lastActions, setLastActions] = useState([]); // undoable records from the last command
   const [undoing, setUndoing] = useState(false);
   const [nudgeReady, setNudgeReady] = useState(false); // Donna has a follow-up to voice
-  const [handsFree, setHandsFree] = useState(() => {
-    try { return localStorage.getItem("donna_handsfree") === "1"; } catch { return false; }
+  const [muted, setMuted] = useState(() => {
+    try { return localStorage.getItem("donna_muted") === "1"; } catch { return false; }
   });
   const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
@@ -110,6 +110,7 @@ export default function Donna() {
   const handleTranscript = useCallback(async (text) => {
     const t = (text || "").trim();
     if (!t) { setMode("idle"); return; }
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt any current speech */ }
     setHeard(t);
     // If this input answers a tapped question in the "To answer" box, check it off.
     const answeringQ = answeringRef.current;
@@ -307,17 +308,18 @@ export default function Donna() {
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
-  // Hands-free: while enabled and the orb is idle, listen for "Donna" / "Hey Donna"
-  // and treat what follows as the command.
-  useWakeWord({ enabled: handsFree, active: mode !== "idle", onCommand: handleTranscript });
+  // Always listening (unless muted) — including while Donna is speaking, so you can
+  // interrupt with "Donna …". Pause only while a command is being captured/handled.
+  useWakeWord({ enabled: !muted, active: mode === "listening" || mode === "processing", onCommand: handleTranscript });
 
   // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
   useEffect(() => { setAnsweredQ(new Set()); answeringRef.current = null; }, [reply]);
-  const toggleHandsFree = () => {
-    setHandsFree((v) => {
+  const toggleMute = () => {
+    setMuted((v) => {
       const next = !v;
-      try { localStorage.setItem("donna_handsfree", next ? "1" : "0"); } catch { /* ignore */ }
-      if (next) primeTTS(); // in-gesture: unlock TTS + prompt mic for the wake listener
+      try { localStorage.setItem("donna_muted", next ? "1" : "0"); } catch { /* ignore */ }
+      if (!next) primeTTS(); // unmuting is a gesture → unlock TTS + prompt mic
+      else { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } }
       return next;
     });
   };
@@ -794,31 +796,19 @@ export default function Donna() {
             Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
           </button>
         )}
-        {wakeSupported() && (
-          <button
-            type="button"
-            onClick={toggleHandsFree}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-              handsFree ? "border border-cyan-400/40 bg-cyan-500/15 text-cyan-200" : "border border-white/10 bg-white/5 text-gray-400 hover:text-gray-200"
-            }`}
-            title={handsFree ? "Hands-free on — say “Donna”" : "Enable hands-free (say “Donna”)"}
-          >
-            <AudioLines className="h-3.5 w-3.5" />
-            {handsFree ? "Listening for “Donna”" : "Hands-free"}
-          </button>
-        )}
         <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(92vw,460px)]">
           {voice.supported && (
             <button
               type="button"
-              onClick={onOrbAction}
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all ${
-                mode === "listening" ? "bg-cyan-500 text-white shadow-[0_0_20px_-4px_rgba(34,211,238,0.7)]" : "border border-white/10 bg-white/5 text-gray-200 hover:text-white"
+              onClick={toggleMute}
+              className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all ${
+                muted ? "border border-white/10 bg-white/5 text-gray-500" : "border border-cyan-400/40 bg-cyan-500/15 text-cyan-200 shadow-[0_0_16px_-6px_rgba(34,211,238,0.7)]"
               }`}
-              title={mode === "listening" ? "Stop & send" : "Talk"}
-              aria-label={mode === "listening" ? "Stop and send" : "Talk"}
+              title={muted ? "Muted — tap to unmute (Donna listens & you can interrupt)" : "Listening — tap to mute"}
+              aria-label={muted ? "Unmute" : "Mute"}
             >
-              {mode === "listening" ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
+              {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              {!muted && <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />}
             </button>
           )}
           <input
