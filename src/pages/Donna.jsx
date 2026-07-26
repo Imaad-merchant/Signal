@@ -526,7 +526,14 @@ export default function Donna() {
           boundaryFired = true; voice.amplitudeRef.current = 1;
           if (typeof e.charIndex === "number") setSpoken((s) => (s.text === text ? { ...s, idx: e.charIndex } : s));
         };
-        u.onend = () => { stopTimer(); setSpoken((s) => (s.text === text ? { ...s, idx: text.length } : s)); setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+        u.onend = () => {
+          stopTimer();
+          setSpoken((s) => (s.text === text ? { ...s, idx: text.length } : s));
+          setMode("idle"); voice.amplitudeRef.current = 0;
+          // Clear the caption a beat after she finishes talking.
+          window.setTimeout(() => setSpoken((s) => (s.text === text ? { text: "", idx: 0 } : s)), 800);
+          resolve();
+        };
         u.onerror = () => { stopTimer(); setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
 
         setMode("speaking");
@@ -656,9 +663,8 @@ export default function Donna() {
     speaking: "Speaking",
   }[mode];
 
-  // Donna's line (captions above the orb); your words (small, below the orb).
-  const donnaLine = mode === "processing" ? "" : (reply || "");
-  const captionText = spoken.text || donnaLine;
+  // The caption shows only while she's speaking, then clears itself (see speak()).
+  const captionText = spoken.text;
   const userLine =
     mode === "listening" ? (voice.partial || "Listening…")
     : (heard && mode !== "idle") ? heard
