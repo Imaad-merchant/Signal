@@ -12,7 +12,7 @@ import { buildAuthUrl } from "./google/_client.js";
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 
-const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "ask", "none"];
+const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "research", "ask", "none"];
 
 function summarize(value, max = 25) {
   if (Array.isArray(value)) return value.slice(0, max);
@@ -38,6 +38,7 @@ export default async function handler(req, res) {
     if (route === "intent") return await intent(body, res);
     if (route === "nudge") return await nudge(body, res);
     if (route === "briefing") return await briefing(body, res);
+    if (route === "research") return await research(body, res);
     if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
@@ -172,6 +173,7 @@ ACTION TYPES:
 - { "type": "write",   "title": string, "body": string }                 // draft a note/document
 - { "type": "grade",   "course": string, "assignment": string | null, "score": number, "max": number | null }
 - { "type": "email",   "to": string | null, "subject": string, "body": string }  // DRAFT an email (never sent automatically — the user confirms & sends)
+- { "type": "research", "query": string }                                 // look something up ON THE WEB (current services, schedules, hours, prices, news)
 
 RULES:
 - ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
@@ -181,6 +183,7 @@ RULES:
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
 - GRADES: emit one "grade" per grade read out; put the score in "score", total in "max" when stated.
 - EMAIL: if they ask to email/message someone, emit an "email" action — write a clear subject and a complete, well-phrased body in their voice. Put a real address in "to" only if they gave one; otherwise null (they'll fill it). Say in "reply" that you've drafted it for them to review and send — it is NOT sent automatically.
+- RESEARCH: if they ask you to look something up / find CURRENT external info you can't know from their data (available services, schedules, opening hours, prices, news, "what tutoring does UH offer"), emit ONE "research" action with a focused, specific web-search query (fold in the specifics they mentioned — school, classes, professor). In "reply" just say you'll look it up. Do NOT invent the facts yourself.
 - "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.`;
 
   const user = `The user said: "${transcript}"
@@ -227,9 +230,10 @@ Parse it now.`;
         subject: String(a.subject || "").slice(0, 200),
         body: String(a.body || "").slice(0, 5000),
       };
+      if (type === "research") return { type, query: String(a.query || "").slice(0, 400) };
       return null;
     })
-    .filter((a) => a && (a.text || a.title || a.metric || (a.type === "grade" && a.score != null) || (a.type === "email" && a.body)));
+    .filter((a) => a && (a.text || a.title || a.metric || a.query || (a.type === "grade" && a.score != null) || (a.type === "email" && a.body)));
 
   return res.status(200).json({ reply, intent: intentType, actions });
 }
@@ -284,6 +288,47 @@ Give me the spoken briefing now.`;
   const parsed = parseJSON(raw);
   const say = parsed?.say ? String(parsed.say) : (slot === "morning" ? "Good morning. Your day looks clear so far." : "Evening. Let's run through your day.");
   return res.status(200).json({ say });
+}
+
+// ---- route: research (web search via Tavily → concise synthesized answer + sources) ----
+async function research(body, res) {
+  const query = String(body.query || "").trim();
+  if (!query) return res.status(400).json({ error: "Query required" });
+
+  const key = process.env.TAVILY_API_KEY;
+  let results = [];
+  if (key) {
+    try {
+      const r = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key, query, max_results: 6, search_depth: "advanced", include_answer: false }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        results = Array.isArray(d.results) ? d.results : [];
+      }
+    } catch { /* fall through to knowledge-only */ }
+  }
+
+  const sources = results.slice(0, 6).map((x) => ({ title: String(x.title || "").slice(0, 200), url: String(x.url || "") }));
+  const findings = results
+    .map((x, i) => `[${i + 1}] ${x.title}\n${String(x.content || "").slice(0, 700)}\n${x.url}`)
+    .join("\n\n")
+    .slice(0, 7000);
+
+  const system = `You are Signal, a British chief of staff doing quick research for the principal. Answer their question directly and concisely from the search findings — the specifics they need (what's available, days/times, whether it covers their classes, office hours). Spoken-friendly, no markdown or emoji, at most a few short sentences. If the findings don't cover part of it, say what's still unknown and where to check.${key ? "" : " NOTE: live web search is NOT configured, so answer only from general knowledge, keep it high-level, and clearly tell them to verify the current details on the official site."}
+Return JSON: { "answer": string }.`;
+  const user = `Question: ${query}
+
+${key ? "Search findings:\n" + findings : "(no live search results available)"}
+
+Answer now.`;
+
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw);
+  const answer = parsed?.answer ? String(parsed.answer) : "I couldn't pull that together just now.";
+  return res.status(200).json({ answer, sources, live: !!key });
 }
 
 // ---- route: seed (cluster tasks into candidate domains) ----

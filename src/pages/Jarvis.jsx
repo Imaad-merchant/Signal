@@ -59,6 +59,7 @@ export default function Jarvis() {
   const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
+  const [sources, setSources] = useState([]); // web-research source links for the last answer
   const turnId = useRef(0);
   const transcriptRef = useRef(null);
   const queryClient = useQueryClient();
@@ -78,6 +79,7 @@ export default function Jarvis() {
     pushTurn("you", t);
     setReply("");
     setNote("");
+    setSources([]);
     setMode("processing");
     try {
       const [commitments, tasksRaw, domains, signalsRaw] = await Promise.all([
@@ -138,18 +140,39 @@ export default function Jarvis() {
       if (emailAction) {
         setEmailDraft({ to: emailAction.to || "", subject: emailAction.subject || "", body: emailAction.body || "" });
       }
-      const otherActions = actions.filter((a) => a && a.type !== "email");
+      const researchAction = actions.find((a) => a && a.type === "research" && a.query);
+      const otherActions = actions.filter((a) => a && a.type !== "email" && a.type !== "research");
       const { count, records } = await applyActions(otherActions, today, allTasks);
       setLastActions(records);
-      setReply(spoken);
-      pushTurn("signal", spoken);
       if (count) {
         setNote(`${count} action${count > 1 ? "s" : ""} done`);
-        // Refresh the grid tiles + recent list so the new thing shows immediately.
         queryClient.invalidateQueries({ queryKey: ["grid"] });
         queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
       }
-      speak(spoken);
+
+      if (researchAction) {
+        // Show the "let me look that up" line, then fetch and speak the real answer.
+        setReply(spoken);
+        pushTurn("signal", spoken);
+        setNote("Looking that up…");
+        try {
+          const rres = await base44.functions.invoke("jarvis", { route: "research", query: researchAction.query });
+          const rdata = rres && rres.data ? rres.data : rres || {};
+          const answer = rdata.answer ? String(rdata.answer) : "I couldn't find much on that.";
+          setSources(Array.isArray(rdata.sources) ? rdata.sources.filter((s) => s && s.url) : []);
+          setNote(rdata.live === false ? "From general knowledge — verify the current details." : "");
+          setReply(answer);
+          pushTurn("signal", answer);
+          speak(answer);
+        } catch {
+          setNote("I couldn't complete that lookup — try again.");
+          setMode("idle");
+        }
+      } else {
+        setReply(spoken);
+        pushTurn("signal", spoken);
+        speak(spoken);
+      }
     } catch (err) {
       setMode("idle");
       setNote(err?.message || "I couldn't reach the server — try again.");
@@ -517,6 +540,22 @@ export default function Jarvis() {
           {mode === "idle" ? (turns.length ? "" : statusLabel) : statusLabel}
         </p>
         {note && <p className="text-center text-[11px] text-gray-500">{note}</p>}
+        {sources.length > 0 && (
+          <div className="mt-1 flex max-w-[min(94vw,600px)] flex-wrap justify-center gap-1.5">
+            {sources.slice(0, 5).map((s, i) => (
+              <a
+                key={i}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="max-w-[46%] truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-blue-300 hover:border-blue-400/40"
+                title={s.title || s.url}
+              >
+                {s.title || s.url}
+              </a>
+            ))}
+          </div>
+        )}
         {voice.micError && <p className="mt-0.5 flex items-center justify-center gap-1 text-[11px] text-amber-400/80"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
       </div>
 
