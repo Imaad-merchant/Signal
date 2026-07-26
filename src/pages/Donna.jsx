@@ -7,6 +7,7 @@ import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
 import RecentActions from "@/components/donna/RecentActions";
 import DailyBriefing from "@/components/donna/DailyBriefing";
+import SpokenCaption from "@/components/donna/SpokenCaption";
 import { useVoice } from "@/components/donna/useVoice";
 import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
@@ -93,6 +94,7 @@ export default function Donna() {
   const [sources, setSources] = useState([]); // web-research source links for the last answer
   const [answeredQ, setAnsweredQ] = useState(() => new Set()); // questions answered in the right-side box
   const answeringRef = useRef(null); // the question currently being answered
+  const [spoken, setSpoken] = useState({ text: "", idx: 0 }); // caption text + karaoke cursor
   const turnId = useRef(0);
   const transcriptRef = useRef(null);
   const queryClient = useQueryClient();
@@ -498,15 +500,37 @@ export default function Donna() {
       if (!ttsSupported || !text) { setMode("idle"); resolve(); return; }
       try {
         const synth = window.speechSynthesis;
+        try { synth.cancel(); } catch { /* clear any stuck utterance */ }
         const u = new SpeechSynthesisUtterance(text);
         u.rate = 1.02; u.pitch = 1; u.volume = 1;
         const v = pickBritishVoice(synth.getVoices() || []);
         if (v) u.voice = v;
-        u.onstart = () => { setMode("speaking"); voice.amplitudeRef.current = 1; };
-        u.onboundary = () => { voice.amplitudeRef.current = 1; };
-        u.onend = () => { setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
-        u.onerror = () => { setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+
+        setSpoken({ text, idx: 0 });
+        let boundaryFired = false;
+        let timer = null;
+        const startTs = Date.now();
+        const startTimer = () => {
+          // Advance the karaoke cursor by a time estimate; boundary events (when the
+          // voice fires them) override it for accuracy.
+          timer = setInterval(() => {
+            if (boundaryFired) return;
+            const est = Math.min(text.length, (Date.now() - startTs) * 0.0145 * (u.rate || 1));
+            setSpoken((s) => (s.text === text ? { ...s, idx: Math.max(s.idx, est) } : s));
+          }, 80);
+        };
+        const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
+
+        u.onstart = () => { setMode("speaking"); voice.amplitudeRef.current = 1; startTimer(); };
+        u.onboundary = (e) => {
+          boundaryFired = true; voice.amplitudeRef.current = 1;
+          if (typeof e.charIndex === "number") setSpoken((s) => (s.text === text ? { ...s, idx: e.charIndex } : s));
+        };
+        u.onend = () => { stopTimer(); setSpoken((s) => (s.text === text ? { ...s, idx: text.length } : s)); setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+        u.onerror = () => { stopTimer(); setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+
         setMode("speaking");
+        try { synth.resume(); } catch { /* some browsers start paused */ }
         synth.speak(u);
       } catch {
         setMode("idle");
@@ -634,6 +658,7 @@ export default function Donna() {
 
   // Donna's line (captions above the orb); your words (small, below the orb).
   const donnaLine = mode === "processing" ? "" : (reply || "");
+  const captionText = spoken.text || donnaLine;
   const userLine =
     mode === "listening" ? (voice.partial || "Listening…")
     : (heard && mode !== "idle") ? heard
@@ -681,17 +706,17 @@ export default function Donna() {
 
       {/* Donna's captions ABOVE the orb; your words small BELOW it. */}
       <div className="relative z-[6] flex flex-col items-center gap-2 px-4">
-        {/* caption above (Donna) */}
+        {/* caption above (Donna) — karaoke word-by-word while speaking */}
         <div className="flex min-h-[3rem] w-[min(92vw,620px)] items-end justify-center">
           {mode === "processing" ? (
             <p className="inline-flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-sm text-gray-300 backdrop-blur-sm">
               <Loader2 className="h-4 w-4 animate-spin text-amber-400" /> On it…
             </p>
-          ) : donnaLine ? (
-            <p className={`inline-block max-w-full rounded-2xl px-4 py-2 text-center text-sm leading-snug shadow-lg backdrop-blur-sm ${mode === "speaking" ? "bg-cyan-500/15 text-cyan-50" : "bg-black/50 text-gray-100"}`}>
-              {donnaLine}
-            </p>
-          ) : null}
+          ) : (captionText ? (
+            <div className={`inline-block max-w-full rounded-2xl px-4 py-2 shadow-lg backdrop-blur-sm ${mode === "speaking" ? "bg-cyan-500/10" : "bg-black/50"}`}>
+              <SpokenCaption text={captionText} idx={spoken.idx} speaking={mode === "speaking"} />
+            </div>
+          ) : null)}
         </div>
 
         <button
