@@ -495,6 +495,8 @@ export default function Donna() {
 
   const onOrbAction = () => {
     if (mode === "idle") {
+      // If the orb is pulsing to talk, a tap hears the nudge instead of listening.
+      if (nudgeReady) { hearNudge(); return; }
       if (!voice.supported) return; // type box is the path
       setHeard(""); setReply(""); setNote(""); setLastActions([]);
       setMode("listening");
@@ -578,7 +580,7 @@ export default function Donna() {
         className="relative z-[6] outline-none"
         style={{ width: "min(72vw, 46vh)", height: "min(72vw, 46vh)" }}
       >
-        <Orb state={mode} amplitudeRef={voice.amplitudeRef} />
+        <Orb state={mode} amplitudeRef={voice.amplitudeRef} attention={mode === "idle" && nudgeReady} />
       </button>
 
       {/* Captioned transcript — both sides of the conversation, with live partial. */}
