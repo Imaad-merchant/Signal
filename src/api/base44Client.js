@@ -190,6 +190,8 @@ export const base44 = {
     Note: createEntityHandler("notes"),
     // Orchestration commands (client polls for results; server/worker write).
     Command: createEntityHandler("commands"),
+    // Automation reports posted to the ingest endpoint; read aloud in the briefing.
+    Report: createEntityHandler("reports"),
   },
 
   functions: {

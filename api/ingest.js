@@ -221,6 +221,33 @@ async function workerPush(db, req, res) {
     result.command_results = body.command_results.length;
   }
 
+  // Automation reports — what the user's Claude automations found or did. Surfaced
+  // (and read aloud) in the next morning/daily briefing. Idempotent by external_id
+  // when provided, so a retrying automation doesn't create duplicates.
+  if (Array.isArray(body.reports) && body.reports.length) {
+    const batch = db.batch();
+    let n = 0;
+    for (let i = 0; i < Math.min(body.reports.length, 50); i++) {
+      const r = body.reports[i] || {};
+      if (!r.title && !r.summary) continue;
+      const key = r.external_id ? `${uid}_${r.external_id}` : `${uid}_${now}_${i}`;
+      batch.set(db.collection("reports").doc(safeId(key)), {
+        userId: uid,
+        source: String(r.source || "automation").slice(0, 120),
+        title: String(r.title || "").slice(0, 200),
+        summary: String(r.summary || "").slice(0, 1200),
+        detail: r.detail ? String(r.detail).slice(0, 6000) : "",
+        ok: r.ok === false ? false : true,
+        announced: false,
+        occurred_at: r.at || now,
+        created_date: now, updated_date: now,
+      }, { merge: true });
+      n++;
+    }
+    if (n) await batch.commit();
+    result.reports = n;
+  }
+
   return res.status(200).json({ ok: true, ...result, at: now });
 }
 

@@ -125,6 +125,12 @@ export default function DailyBriefing({ onSpeak, onActive }) {
     } catch { return ""; }
   }
 
+  // Mark automation reports as read so they aren't repeated next briefing.
+  async function markReportsAnnounced(list) {
+    await Promise.all((list || []).map((r) =>
+      base44.entities.Report.update(r.id, { announced: true }).catch(() => null)));
+  }
+
   // ---- logging (with a brief "just logged" animation flag + strip update) ----
   const logHabit = async (habit, done) => {
     const logDate = logDateRef.current;
@@ -224,14 +230,21 @@ export default function DailyBriefing({ onSpeak, onActive }) {
     setLoading(true); setCaption(""); setCurrentId(null);
     try {
       const today = dateKey;
-      const [tasksRaw, commitsRaw, signalsRaw] = await Promise.all([
+      const [tasksRaw, commitsRaw, signalsRaw, reportsRaw] = await Promise.all([
         base44.entities.Task.list("-created_date", 300).catch(() => []),
         base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
         base44.entities.Signal.list("-created_date", 60).catch(() => []),
+        base44.entities.Report.list("-created_date", 40).catch(() => []),
       ]);
       const tasks = Array.isArray(tasksRaw) ? tasksRaw : [];
       const commits = Array.isArray(commitsRaw) ? commitsRaw : [];
       const signals = Array.isArray(signalsRaw) ? signalsRaw : [];
+
+      // Automation reports not yet read aloud — Donna recaps these in the briefing.
+      const freshReports = (Array.isArray(reportsRaw) ? reportsRaw : []).filter((r) => r && !r.announced);
+      const automations = freshReports.slice(0, 12).map((r) => ({
+        source: r.source || "automation", title: r.title || "", summary: r.summary || "", ok: r.ok !== false,
+      }));
 
       const dueToday = tasks.filter((t) => t && t.due_date === today && !DONE_STATES.includes(t.status));
       const events = signals
@@ -260,7 +273,8 @@ export default function DailyBriefing({ onSpeak, onActive }) {
         setLoading(false);
 
         const streaks = hydrated.filter((h) => h.streak > 0).map((h) => ({ name: h.name, days: h.streak }));
-        const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks });
+        const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks, automations });
+        markReportsAnnounced(freshReports);
         await runHabitFlow(intro, hydrated, "That's you logged — nicely done.");
       } else {
         const rem = [];
@@ -275,7 +289,9 @@ export default function DailyBriefing({ onSpeak, onActive }) {
           events: events.map((e) => `${e.title} ${e.summary || ""}`),
           commitments: commits.map((c) => c.text).filter(Boolean).slice(0, 10),
           important: important.map((s) => s.title).filter(Boolean),
+          automations,
         });
+        markReportsAnnounced(freshReports);
         await say(morningSay || "Here's what's on today.");
 
         // Catch-up: only log yesterday if nothing was logged the night before.
