@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { Sunrise, Moon, X, Check, Loader2, Plus, CalendarClock } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import { getChicagoParts } from "./checkinUtils";
+import { getChicagoParts, getBriefingParts, briefingSlotKey } from "./checkinUtils";
 
 // Morning look-ahead + evening habit review, surfaced on /cowork.
 // A top alert appears once per slot (morning / evening). Tapping it opens the panel
@@ -36,8 +36,11 @@ function computeStreak(doneSet, today) {
 }
 
 export default function DailyBriefing({ onSpeak }) {
-  const { slot, dateKey } = useMemo(() => getChicagoParts(), []);
-  const slotKey = `${dateKey}_${slot}`;
+  // Slot is anchored to 6am / 6pm; the day for data queries is the actual today.
+  const parts = getBriefingParts();
+  const slot = parts.slot;
+  const dateKey = getChicagoParts().dateKey;
+  const slotKey = briefingSlotKey(parts);
   const [dismissed, setDismissed] = useState(() => readDone().includes(slotKey));
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -170,10 +173,19 @@ export default function DailyBriefing({ onSpeak }) {
     try { await base44.entities.Task.update(item.id, { status: "done" }); } catch { /* ignore */ }
   };
 
-  if (dismissed && !open) return null;
-
   return (
     <>
+      {/* Always-available manual trigger (on demand, any time). */}
+      <button
+        type="button"
+        onClick={openBriefing}
+        className="absolute top-4 left-16 z-20 rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-blue-300"
+        title={isEvening ? "Evening review" : "Morning briefing"}
+        aria-label="Daily briefing"
+      >
+        <SlotIcon className="h-5 w-5" />
+      </button>
+
       {!open && !dismissed && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5">
           <button
