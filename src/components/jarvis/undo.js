@@ -8,6 +8,7 @@ const COLLECTION_TO_ENTITY = {
   insights: "Insight",
   pages: "Page",
   grades: "Grade",
+  tasks: "Task",
 };
 
 // Reverse a single logged action: delete the thing it created, then mark the log

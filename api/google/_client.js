@@ -114,13 +114,13 @@ export async function listRecentDriveFiles(accessToken, max = 6) {
   }));
 }
 
-// Today's calendar events → [{ id, summary, start, end, link }]
-export async function listTodayEvents(accessToken, timeZone = "America/Chicago", max = 10) {
+// Upcoming calendar events from now through `days` ahead → [{ id, summary, start, end, link }]
+// (Was today-only; widened so the assistant can answer "what's on next week".)
+export async function listUpcomingEvents(accessToken, days = 14, timeZone = "America/Chicago", max = 40) {
   const now = new Date();
-  const start = new Date(now); start.setHours(0, 0, 0, 0);
-  const end = new Date(now); end.setHours(23, 59, 59, 999);
+  const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
   const params = new URLSearchParams({
-    timeMin: start.toISOString(),
+    timeMin: now.toISOString(),
     timeMax: end.toISOString(),
     singleEvents: "true",
     orderBy: "startTime",

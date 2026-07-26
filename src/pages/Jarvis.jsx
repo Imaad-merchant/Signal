@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle, RotateCcw } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle, RotateCcw, X } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/jarvis/Orb";
 import StatusGrid from "@/components/jarvis/StatusGrid";
@@ -20,6 +20,21 @@ function pickBritishVoice(voices) {
   return female || gb[0] || voices.find((v) => /^en/i.test(v.lang)) || null;
 }
 
+// Best-effort match of a spoken item ("the logo") to an existing open task,
+// preferring one in the named list. Used for complete/remove.
+function findTask(tasks, text, list) {
+  const q = (text || "").toLowerCase().trim();
+  if (!q || !Array.isArray(tasks)) return null;
+  const open = tasks.filter((t) => t && t.status !== "done");
+  const scoped = list ? open.filter((t) => (t.category || "").toLowerCase() === String(list).toLowerCase()) : open;
+  const pool = scoped.length ? scoped : open;
+  return (
+    pool.find((t) => (t.title || "").toLowerCase().includes(q)) ||
+    pool.find((t) => (t.title || "").length > 2 && q.includes((t.title || "").toLowerCase())) ||
+    null
+  );
+}
+
 export default function Jarvis() {
   const [mode, setMode] = useState("idle"); // idle | listening | processing | speaking
   const [heard, setHeard] = useState("");
@@ -29,6 +44,7 @@ export default function Jarvis() {
   const [ttsSupported, setTtsSupported] = useState(true);
   const [lastActions, setLastActions] = useState([]); // undoable records from the last command
   const [undoing, setUndoing] = useState(false);
+  const [nudgeReady, setNudgeReady] = useState(false); // Signal has a follow-up to voice
   const queryClient = useQueryClient();
 
   // Handle a finished transcript (from voice or the type box).
@@ -40,16 +56,41 @@ export default function Jarvis() {
     setNote("");
     setMode("processing");
     try {
-      const [commitments, tasksRaw, domains] = await Promise.all([
+      const [commitments, tasksRaw, domains, signalsRaw] = await Promise.all([
         base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
         base44.entities.Task.list("-created_date").catch(() => []),
         base44.entities.Domain.list("sort_order").catch(() => []),
+        base44.entities.Signal.list("-created_date", 80).catch(() => []),
       ]);
       const today = todayKey();
-      const todayTasks = (Array.isArray(tasksRaw) ? tasksRaw : [])
+      const allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      const todayTasks = allTasks
         .filter((x) => x && x.due_date === today)
         .slice(0, 25)
         .map((x) => ({ title: x.title || "", status: x.status || "" }));
+
+      // Derive calendar + email context from ingested Google signals (Phase C).
+      const signals = Array.isArray(signalsRaw) ? signalsRaw : [];
+      const nowMs = Date.now();
+      const calendar = signals
+        .filter((s) => s && s.kind === "calendar" && s.occurred_at)
+        .filter((s) => new Date(s.occurred_at).getTime() > nowMs - 2 * 3600 * 1000)
+        .sort((a, b) => new Date(a.occurred_at) - new Date(b.occurred_at))
+        .slice(0, 30)
+        .map((s) => ({ title: s.title || "", when: s.summary || s.occurred_at }));
+      const emails = signals
+        .filter((s) => s && s.kind === "email")
+        .slice(0, 15)
+        .map((s) => ({ subject: s.title || "", summary: s.summary || "" }));
+
+      // Open to-do lists = open tasks grouped by category (the list name).
+      const openTasks = allTasks.filter((x) => x && x.status !== "done");
+      const listMap = {};
+      for (const x of openTasks) {
+        const k = x.category || "General";
+        (listMap[k] = listMap[k] || []).push(x.title || "");
+      }
+      const lists = Object.entries(listMap).map(([name, items]) => ({ name, items: items.slice(0, 25) })).slice(0, 12);
 
       const res = await base44.functions.invoke("jarvis", {
         route: "intent",
@@ -58,6 +99,9 @@ export default function Jarvis() {
           today,
           commitments: (Array.isArray(commitments) ? commitments : []).map((c) => ({ text: c.text, due_on: c.due_on })),
           tasks: todayTasks,
+          lists,
+          calendar,
+          emails,
           domains: Array.isArray(domains) ? domains : [],
         },
       });
@@ -65,7 +109,7 @@ export default function Jarvis() {
       const actions = Array.isArray(data.actions) ? data.actions : [];
       const spoken = data.reply ? String(data.reply) : "Noted.";
 
-      const { count, records } = await applyActions(actions, today);
+      const { count, records } = await applyActions(actions, today, allTasks);
       setLastActions(records);
       setReply(spoken);
       if (count) {
@@ -115,10 +159,72 @@ export default function Jarvis() {
     };
   }, []);
 
+  // Decide (once, on load) whether Signal has something worth asking about — i.e.
+  // there are open commitments or open list items — and it hasn't nudged recently.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const until = Number(localStorage.getItem("jarvis_nudge_until") || 0);
+        if (Date.now() < until) return;
+        const [commits, tasksRaw] = await Promise.all([
+          base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
+          base44.entities.Task.list("-created_date", 100).catch(() => []),
+        ]);
+        const openTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter((x) => x && x.status !== "done");
+        const openCount = (Array.isArray(commits) ? commits.length : 0) + openTasks.length;
+        if (!cancelled && openCount > 0) setNudgeReady(true);
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Silence the nudge for a while (after it's heard or dismissed).
+  const quietNudge = () => {
+    try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 6 * 3600 * 1000)); } catch { /* ignore */ }
+    setNudgeReady(false);
+  };
+
+  // The user granted "permission to talk" — fetch a short proactive question and speak it.
+  const hearNudge = async () => {
+    if (mode === "processing") return;
+    primeTTS();
+    quietNudge();
+    setHeard(""); setReply(""); setNote(""); setLastActions([]);
+    setMode("processing");
+    try {
+      const today = todayKey();
+      const [commits, tasksRaw] = await Promise.all([
+        base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
+        base44.entities.Task.list("-created_date", 100).catch(() => []),
+      ]);
+      const openTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter((x) => x && x.status !== "done");
+      const listMap = {};
+      for (const x of openTasks) { const k = x.category || "General"; (listMap[k] = listMap[k] || []).push(x.title || ""); }
+      const lists = Object.entries(listMap).map(([name, items]) => ({ name, items: items.slice(0, 20) })).slice(0, 12);
+      const res = await base44.functions.invoke("jarvis", {
+        route: "nudge",
+        context: {
+          today,
+          commitments: (Array.isArray(commits) ? commits : []).map((c) => ({ text: c.text, due_on: c.due_on })),
+          lists,
+          tasks: openTasks.slice(0, 20).map((x) => ({ title: x.title, category: x.category })),
+        },
+      });
+      const data = res && res.data ? res.data : res || {};
+      const say = data.say ? String(data.say) : "";
+      if (say) { setReply(say); speak(say); }
+      else setMode("idle");
+    } catch {
+      setMode("idle");
+      setNote("Couldn't reach the server — try again.");
+    }
+  };
+
   // ---- create the entities the intent asked for, logging each to AgentAction ----
   // Returns { count, records } where records are the AgentAction docs (with id +
   // target) so the caller can offer an immediate Undo.
-  async function applyActions(actions, today) {
+  async function applyActions(actions, today, allTasks = []) {
     if (!actions.length) return { count: 0, records: [] };
     let n = 0;
     const records = [];
@@ -150,6 +256,21 @@ export default function Jarvis() {
             graded_on: today, source: "pasted",
           });
           target = "grades/" + (rec?.id || "");
+        } else if (a.type === "add") {
+          // A new item on a named to-do list = a Task tagged with the list name.
+          const rec = await base44.entities.Task.create({
+            title: a.text, category: a.list || "Business", status: "not_started",
+          });
+          target = "tasks/" + (rec?.id || "");
+        } else if (a.type === "complete" || a.type === "remove") {
+          // Resolve which existing list item they meant, then complete/delete it.
+          const match = findTask(allTasks, a.text, a.list);
+          if (match?.id) {
+            if (a.type === "complete") await base44.entities.Task.update(match.id, { status: "done" });
+            else await base44.entities.Task.delete(match.id);
+            n++;
+          }
+          continue; // executed in place; not part of the create-then-undo trail
         } else {
           continue;
         }
@@ -259,6 +380,26 @@ export default function Jarvis() {
         <ArrowLeft className="h-5 w-5" />
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Signal</h1>
+
+      {/* Proactive nudge: Signal asks permission to speak; tap to hear it. */}
+      {nudgeReady && mode === "idle" && (
+        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={hearNudge}
+            className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-400/15 px-3.5 py-1.5 text-xs font-medium text-amber-100 shadow-lg backdrop-blur-sm hover:bg-amber-400/25 transition-colors"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-70" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+            </span>
+            Signal has a word — tap to listen
+          </button>
+          <button type="button" onClick={quietNudge} aria-label="Dismiss" className="p-1 text-gray-500 hover:text-gray-300">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* The status "matrix" — tiles framing the orb (reads live entities). */}
       <StatusGrid />

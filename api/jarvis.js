@@ -11,7 +11,7 @@ import { buildAuthUrl } from "./google/_client.js";
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 
-const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "ask", "none"];
+const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "ask", "none"];
 
 function summarize(value, max = 25) {
   if (Array.isArray(value)) return value.slice(0, max);
@@ -35,6 +35,7 @@ export default async function handler(req, res) {
   try {
     if (route === "checkin") return await checkin(body, res);
     if (route === "intent") return await intent(body, res);
+    if (route === "nudge") return await nudge(body, res);
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
     if (route === "google-disconnect") return await googleDisconnect(auth, res);
@@ -149,28 +150,33 @@ async function intent(body, res) {
   const context = body.context && typeof body.context === "object" ? body.context : {};
   const today = context.today || new Date().toISOString().slice(0, 10);
 
-  const system = `You are Signal — a sharp, warm, unflappable British chief of staff. You speak in clear, concise British English: direct, dry, never fawning, never verbose. You turn what the user says into actions and reply as if briefing a busy principal.
+  const system = `You are Signal — a sharp, warm, unflappable British chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
 
 Return JSON only (no markdown):
 {
-  "reply": string,        // one or two crisp spoken sentences, British tone
-  "intent": "remind" | "log" | "monitor" | "write" | "grade" | "ask" | "none",
-  "actions": [ ... ]      // zero or more of the actions below
+  "reply": string,        // 1-2 crisp spoken sentences, British tone; may end with ONE short follow-up question to keep things moving
+  "intent": string,       // best single label from the action types, or "ask"/"none"
+  "actions": [ ... ]      // zero or more of the actions below — extract EVERY distinct item from what they said
 }
 
 ACTION TYPES:
-- { "type": "remind",  "text": string, "due_on": "YYYY-MM-DD" | null }
-- { "type": "log",     "text": string, "domain": string | null }
+- { "type": "add",     "list": string, "text": string }                  // add an item to a named to-do LIST (e.g. list "Business", text "hire a designer")
+- { "type": "complete","list": string | null, "text": string }          // mark a list item done (match by its wording)
+- { "type": "remove",  "list": string | null, "text": string }          // remove a list item
+- { "type": "remind",  "text": string, "due_on": "YYYY-MM-DD" | null }   // a time-bound commitment / to-do
+- { "type": "log",     "text": string, "domain": string | null }         // capture a thought/observation worth remembering
 - { "type": "monitor", "metric": string, "value": number | null, "note": string | null }
-- { "type": "write",   "title": string, "body": string }
+- { "type": "write",   "title": string, "body": string }                 // draft a note/document
 - { "type": "grade",   "course": string, "assignment": string | null, "score": number, "max": number | null }
 
 RULES:
-- Only create actions the user clearly asked for. If it's just a question or chat, use intent "ask"/"none" with an empty actions array and answer in "reply".
-- Never invent obligations the user didn't state.
-- Resolve relative dates against today (${today}); use null if no date is implied.
-- GRADES: if the user pastes or reads out grades, emit one "grade" action per grade. Put a percentage or points in "score", the total in "max" when stated. Use intent "grade" and announce the notable new grade(s) crisply in "reply".
-- Keep "reply" short and spoken-aloud friendly — read by a voice, so no lists, no markdown, no emoji.`;
+- ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
+- LISTS: when the user talks about a project/list ("my business list", "for the app"), use add/complete/remove with that list name. Default the list to "Business" only if they clearly mean their main venture and name none.
+- QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos.
+- If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
+- Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
+- GRADES: emit one "grade" per grade read out; put the score in "score", total in "max" when stated.
+- "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.`;
 
   const user = `The user said: "${transcript}"
 
@@ -178,8 +184,11 @@ Context (JSON): ${JSON.stringify({
     today,
     open_commitments: Array.isArray(context.commitments) ? context.commitments.slice(0, 25) : [],
     today_tasks: Array.isArray(context.tasks) ? context.tasks.slice(0, 25) : [],
+    lists: Array.isArray(context.lists) ? context.lists.slice(0, 12) : [],
+    upcoming_calendar: Array.isArray(context.calendar) ? context.calendar.slice(0, 30) : [],
+    recent_emails: Array.isArray(context.emails) ? context.emails.slice(0, 15) : [],
     domains: Array.isArray(context.domains) ? context.domains : [],
-  }).slice(0, 3500)}
+  }).slice(0, 6000)}
 
 Parse it now.`;
 
@@ -193,6 +202,9 @@ Parse it now.`;
     .filter((a) => a && typeof a === "object")
     .map((a) => {
       const type = a.type;
+      if (type === "add") return { type, list: String(a.list || "Business").slice(0, 80), text: String(a.text || "").slice(0, 300) };
+      if (type === "complete") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
+      if (type === "remove") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remind") return { type, text: String(a.text || ""), due_on: a.due_on || null };
       if (type === "log") return { type, text: String(a.text || ""), domain: a.domain || null };
       if (type === "monitor") return { type, metric: String(a.metric || ""), value: Number.isFinite(a.value) ? a.value : null, note: a.note || null };
@@ -209,6 +221,28 @@ Parse it now.`;
     .filter((a) => a && (a.text || a.title || a.metric || (a.type === "grade" && a.score != null)));
 
   return res.status(200).json({ reply, intent: intentType, actions });
+}
+
+// ---- route: nudge (a short proactive question about an open item) ----
+async function nudge(body, res) {
+  const context = body.context && typeof body.context === "object" ? body.context : {};
+  const today = context.today || new Date().toISOString().slice(0, 10);
+
+  const system = `You are Signal, a British chief of staff. Based on the principal's OPEN items, produce ONE short spoken check-in — a single friendly question or prompt to nudge them on something that's open or stale. Pick the most useful thing to ask about (an open list item, an aging commitment, something due). Warm, dry, British, ONE sentence, read aloud (no markdown/emoji/lists).
+Return JSON: { "say": string, "about": string }  // "about" = short tag of what it concerns.`;
+
+  const user = `today: ${today}
+open_commitments: ${JSON.stringify(Array.isArray(context.commitments) ? context.commitments.slice(0, 20) : [])}
+lists: ${JSON.stringify(Array.isArray(context.lists) ? context.lists.slice(0, 12) : [])}
+today_tasks: ${JSON.stringify(Array.isArray(context.tasks) ? context.tasks.slice(0, 20) : [])}
+
+Give me one nudge now.`;
+
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw);
+  const say = parsed?.say ? String(parsed.say) : "";
+  const about = parsed?.about ? String(parsed.about) : "";
+  return res.status(200).json({ say, about });
 }
 
 // ---- route: seed (cluster tasks into candidate domains) ----
