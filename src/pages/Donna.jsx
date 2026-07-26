@@ -63,6 +63,17 @@ function rankNotes(notes, query) {
     .sort((a, b) => b._score - a._score || (new Date(b.modified || 0) - new Date(a.modified || 0)));
 }
 
+// Pull out the individual questions from Donna's reply so multi-question prompts
+// ("…have you vaped today? did you go to the gym?") can be listed on the side.
+function extractQuestions(text) {
+  if (!text) return [];
+  return String(text)
+    .split(/(?<=[?？])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => /[?？]$/.test(s) && s.length > 3)
+    .slice(0, 8);
+}
+
 export default function Donna() {
   const [mode, setMode] = useState("idle"); // idle | listening | processing | speaking
   const [heard, setHeard] = useState("");
@@ -599,6 +610,14 @@ export default function Donna() {
     speaking: "Speaking",
   }[mode];
 
+  // Donna's line (captions above the orb); your words (small, below the orb).
+  const donnaLine = mode === "processing" ? "" : (reply || "");
+  const userLine =
+    mode === "listening" ? (voice.partial || "Listening…")
+    : (heard && mode !== "idle") ? heard
+    : (mode === "idle" && !reply) ? statusLabel : "";
+  const donnaQuestions = extractQuestions(reply);
+
   return (
     <div
       className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden"
@@ -638,69 +657,59 @@ export default function Donna() {
       {/* Morning look-ahead / evening habit review (speaks via the orb). */}
       <DailyBriefing onSpeak={speak} />
 
-      <button
-        type="button"
-        onClick={onOrbAction}
-        aria-label="Talk to Donna"
-        className="relative z-[6] outline-none"
-        style={{ width: "min(72vw, 46vh)", height: "min(72vw, 46vh)" }}
-      >
-        <Orb state={mode} amplitudeRef={voice.amplitudeRef} attention={mode === "idle" && nudgeReady} />
-      </button>
+      {/* Donna's captions ABOVE the orb; your words small BELOW it. */}
+      <div className="relative z-[6] flex flex-col items-center gap-2 px-4">
+        {/* caption above (Donna) */}
+        <div className="flex min-h-[3rem] w-[min(92vw,620px)] items-end justify-center">
+          {mode === "processing" ? (
+            <p className="inline-flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-sm text-gray-300 backdrop-blur-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-amber-400" /> On it…
+            </p>
+          ) : donnaLine ? (
+            <p className={`inline-block max-w-full rounded-2xl px-4 py-2 text-center text-sm leading-snug shadow-lg backdrop-blur-sm ${mode === "speaking" ? "bg-cyan-500/15 text-cyan-50" : "bg-black/50 text-gray-100"}`}>
+              {donnaLine}
+            </p>
+          ) : null}
+        </div>
 
-      {/* Captioned transcript — both sides of the conversation, with live partial. */}
-      <div className="absolute bottom-36 left-0 right-0 z-[7] flex flex-col items-center px-4">
-        <div
-          ref={transcriptRef}
-          className="flex w-[min(94vw,600px)] flex-col gap-1.5 overflow-y-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{ maxHeight: "26vh" }}
+        <button
+          type="button"
+          onClick={onOrbAction}
+          aria-label="Talk to Donna"
+          className="relative outline-none"
+          style={{ width: "min(66vw, 42vh)", height: "min(66vw, 42vh)" }}
         >
-          {turns.map((turn) => (
-            <div
-              key={turn.id}
-              className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-snug ${
-                turn.who === "you"
-                  ? "self-end bg-white/[0.07] text-gray-100"
-                  : "self-start border border-cyan-400/15 bg-cyan-500/10 text-cyan-50"
-              }`}
-            >
-              <span className="mb-0.5 block text-[9px] font-semibold uppercase tracking-[0.15em] opacity-45">
-                {turn.who === "you" ? "You" : "Donna"}
-              </span>
-              {turn.text}
-            </div>
-          ))}
-          {/* Live partial while listening. */}
-          {mode === "listening" && (
-            <div className="max-w-[85%] self-end rounded-2xl bg-white/[0.04] px-3.5 py-2 text-sm italic text-gray-400">
-              {voice.partial || "Listening…"}
+          <Orb state={mode} amplitudeRef={voice.amplitudeRef} attention={mode === "idle" && nudgeReady} />
+        </button>
+
+        {/* your words small below the orb */}
+        <div className="flex min-h-[1.5rem] w-[min(92vw,620px)] flex-col items-center gap-0.5">
+          {userLine && <p className="text-center text-xs text-gray-400">{userLine}</p>}
+          {note && <p className="text-center text-[11px] text-gray-500">{note}</p>}
+          {voice.micError && <p className="flex items-center justify-center gap-1 text-[11px] text-amber-400/80"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
+          {sources.length > 0 && (
+            <div className="mt-0.5 flex max-w-[min(92vw,620px)] flex-wrap justify-center gap-1.5">
+              {sources.slice(0, 5).map((s, i) => (
+                <a key={i} href={s.url} target="_blank" rel="noopener noreferrer" className="max-w-[46%] truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-blue-300 hover:border-blue-400/40" title={s.title || s.url}>
+                  {s.title || s.url}
+                </a>
+              ))}
             </div>
           )}
         </div>
-        {/* Compact status line under the captions. */}
-        <p className={`mt-1.5 flex items-center justify-center gap-2 text-xs ${mode === "speaking" ? "text-cyan-300" : "text-gray-500"}`}>
-          {mode === "processing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />}
-          {mode === "idle" ? (turns.length ? "" : statusLabel) : statusLabel}
-        </p>
-        {note && <p className="text-center text-[11px] text-gray-500">{note}</p>}
-        {sources.length > 0 && (
-          <div className="mt-1 flex max-w-[min(94vw,600px)] flex-wrap justify-center gap-1.5">
-            {sources.slice(0, 5).map((s, i) => (
-              <a
-                key={i}
-                href={s.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="max-w-[46%] truncate rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-blue-300 hover:border-blue-400/40"
-                title={s.title || s.url}
-              >
-                {s.title || s.url}
-              </a>
-            ))}
-          </div>
-        )}
-        {voice.micError && <p className="mt-0.5 flex items-center justify-center gap-1 text-[11px] text-amber-400/80"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
       </div>
+
+      {/* When Donna asks several things, list them on the right so you can track answers. */}
+      {donnaQuestions.length >= 2 && mode !== "listening" && (
+        <div className="absolute right-3 top-1/2 z-[8] hidden max-h-[64vh] w-60 -translate-y-1/2 overflow-y-auto rounded-2xl border border-cyan-400/20 bg-[#0e1015]/92 p-3 shadow-2xl backdrop-blur-md sm:block">
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80">To answer</div>
+          <ul className="flex flex-col gap-1.5">
+            {donnaQuestions.map((q, i) => (
+              <li key={i} className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-xs leading-snug text-gray-200">{q}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Controls: undo (when available) + mic + always-available type fallback.
           Sits above the safe area and, crucially, above the orb in stacking order
@@ -730,26 +739,27 @@ export default function Donna() {
             {handsFree ? "Listening for “Donna”" : "Hands-free"}
           </button>
         )}
-        {voice.supported && (
-          <button
-            onClick={onOrbAction}
-            className={`flex h-14 w-14 items-center justify-center rounded-full transition-all ${
-              mode === "listening" ? "bg-cyan-500 text-white shadow-[0_0_28px_-4px_rgba(34,211,238,0.7)]" : "border border-white/10 bg-white/5 text-gray-200"
-            }`}
-            title={mode === "listening" ? "Stop & send" : "Talk"}
-            aria-label={mode === "listening" ? "Stop and send" : "Talk"}
-          >
-            {mode === "listening" ? <Square className="h-5 w-5" /> : <Mic className="h-6 w-6" />}
-          </button>
-        )}
-        <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(88vw,420px)]">
+        <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(92vw,460px)]">
+          {voice.supported && (
+            <button
+              type="button"
+              onClick={onOrbAction}
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-all ${
+                mode === "listening" ? "bg-cyan-500 text-white shadow-[0_0_20px_-4px_rgba(34,211,238,0.7)]" : "border border-white/10 bg-white/5 text-gray-200 hover:text-white"
+              }`}
+              title={mode === "listening" ? "Stop & send" : "Talk"}
+              aria-label={mode === "listening" ? "Stop and send" : "Talk"}
+            >
+              {mode === "listening" ? <Square className="h-4 w-4" /> : <Mic className="h-5 w-5" />}
+            </button>
+          )}
           <input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             placeholder={voice.supported ? "…or type a command" : "Type a command (voice not supported here)"}
             className="flex-1 rounded-xl bg-white/[0.05] border border-white/10 px-3.5 py-2.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25"
           />
-          <button type="submit" disabled={!typed.trim() || mode === "processing"} className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-500 transition-colors" aria-label="Send">
+          <button type="submit" disabled={!typed.trim() || mode === "processing"} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-500 transition-colors" aria-label="Send">
             <Send className="h-4 w-4" />
           </button>
         </form>
