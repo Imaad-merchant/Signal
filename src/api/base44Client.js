@@ -186,6 +186,8 @@ export const base44 = {
     // Daily habits the evening review tracks (e.g. gym, sober) + their day logs.
     Habit: createEntityHandler("habits"),
     HabitLog: createEntityHandler("habit_logs"),
+    // Local knowledge notes indexed by the worker (Obsidian vault / folders).
+    Note: createEntityHandler("notes"),
   },
 
   functions: {

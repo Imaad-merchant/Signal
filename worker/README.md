@@ -73,6 +73,32 @@ SIGNAL_WORKER_PASSPHRASE='…' pm2 start signal-worker.mjs --name signal-worker
 pm2 save && pm2 startup
 ```
 
+## Local knowledge (Obsidian vault + folders)
+
+Let Donna search your notes. In `config.json`, set the `knowledge` block:
+
+```json
+"knowledge": {
+  "enabled": true,
+  "paths": [
+    "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/YOUR_VAULT",
+    "~/Documents"
+  ],
+  "sinceDays": 45,
+  "intervalMinutes": 20
+}
+```
+
+The worker indexes text files (`.md`/`.txt`/`.markdown`) modified in the last
+`sinceDays`, every `intervalMinutes`, and pushes `{title, folder, content, path}`
+to your `notes` store (read-only; dotfolders like `.obsidian` are skipped). Then in
+Donna say **"search my notes for micro-influencers"** or **"find my note about the
+SaaS launch"** — she reads back the top matches, and on desktop the result chips
+deep-link straight into Obsidian (`obsidian://`).
+
+> Find your iCloud Obsidian path with: `ls ~/Library/Mobile\ Documents/ | grep obsidian`
+> — the vault folder is under `iCloud~md~obsidian/Documents/`.
+
 ## ⚠️ UH grades scraper — read before enabling
 
 The recommended way to log grades is **manual paste**: just say them to the orb
