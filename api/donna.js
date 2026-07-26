@@ -39,6 +39,7 @@ export default async function handler(req, res) {
     if (route === "nudge") return await nudge(body, res);
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
+    if (route === "cleanup") return await cleanup(body, res);
     if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
     if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
@@ -289,6 +290,29 @@ Give me the spoken briefing now.`;
   const parsed = parseJSON(raw);
   const say = parsed?.say ? String(parsed.say) : (slot === "morning" ? "Good morning. Your day looks clear so far." : "Evening. Let's run through your day.");
   return res.status(200).json({ say });
+}
+
+// ---- route: cleanup (a messy brain-dump → a clean, organised note) ----
+async function cleanup(body, res) {
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Text required" });
+
+  const system = `You are Donna. Turn the principal's messy, rambling brain-dump into a clean, organised note. Give it a short title, then tight, actionable bullet points grouped under a few headings where it helps. Preserve their meaning and any concrete to-dos; cut filler, repetition and tangents. Markdown only — no preamble.
+Return JSON: { "title": string, "content": string /* markdown */, "spoken": string /* one short spoken confirmation */ }`;
+  const user = `Brain dump:
+"""
+${text.slice(0, 8000)}
+"""
+
+Organise it now.`;
+
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw);
+  return res.status(200).json({
+    title: parsed?.title ? String(parsed.title).slice(0, 160) : "Note",
+    content: parsed?.content ? String(parsed.content) : "",
+    spoken: parsed?.spoken ? String(parsed.spoken) : "Sorted — saved to your notes.",
+  });
 }
 
 // ---- route: research (web search via Tavily → concise synthesized answer + sources) ----
