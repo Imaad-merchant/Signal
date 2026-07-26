@@ -12,7 +12,7 @@ export default function Layout({ children, currentPageName }) {
     return () => { window.removeEventListener("storage", sync); window.removeEventListener("focus", sync); };
   }, []);
 
-  const isFullHeight = currentPageName === "Dashboard" || currentPageName === "Tasks" || currentPageName === "Jarvis";
+  const isFullHeight = currentPageName === "Dashboard" || currentPageName === "Tasks" || currentPageName === "Donna";
 
   return (
     <div className="min-h-[100dvh] bg-[#1e1f20]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
