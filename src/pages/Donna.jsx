@@ -91,6 +91,8 @@ export default function Donna() {
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
   const [sources, setSources] = useState([]); // web-research source links for the last answer
+  const [answeredQ, setAnsweredQ] = useState(() => new Set()); // questions answered in the right-side box
+  const answeringRef = useRef(null); // the question currently being answered
   const turnId = useRef(0);
   const transcriptRef = useRef(null);
   const queryClient = useQueryClient();
@@ -107,6 +109,10 @@ export default function Donna() {
     const t = (text || "").trim();
     if (!t) { setMode("idle"); return; }
     setHeard(t);
+    // If this input answers a tapped question in the "To answer" box, check it off.
+    const answeringQ = answeringRef.current;
+    answeringRef.current = null;
+    if (answeringQ) setAnsweredQ((prev) => new Set(prev).add(answeringQ));
     pushTurn("you", t);
     setReply("");
     setNote("");
@@ -302,6 +308,9 @@ export default function Donna() {
   // Hands-free: while enabled and the orb is idle, listen for "Donna" / "Hey Donna"
   // and treat what follows as the command.
   useWakeWord({ enabled: handsFree, active: mode !== "idle", onCommand: handleTranscript });
+
+  // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
+  useEffect(() => { setAnsweredQ(new Set()); answeringRef.current = null; }, [reply]);
   const toggleHandsFree = () => {
     setHandsFree((v) => {
       const next = !v;
@@ -569,6 +578,19 @@ export default function Donna() {
     try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } catch { /* ignore */ }
   }
 
+  // Tap a question in the "To answer" box → answer it by voice (or the type box);
+  // the next thing you say/type checks it off.
+  const answerQuestion = (q) => {
+    if (answeredQ.has(q)) { setAnsweredQ((prev) => { const n = new Set(prev); n.delete(q); return n; }); return; }
+    answeringRef.current = q;
+    if (voice.supported && mode === "idle") {
+      primeTTS();
+      setHeard(""); setReply(""); setNote("");
+      setMode("listening");
+      voice.start();
+    }
+  };
+
   const onOrbAction = () => {
     if (mode === "idle") {
       // If the orb is pulsing to talk, a tap hears the nudge instead of listening.
@@ -702,11 +724,26 @@ export default function Donna() {
       {/* When Donna asks several things, list them on the right so you can track answers. */}
       {donnaQuestions.length >= 2 && mode !== "listening" && (
         <div className="absolute right-3 top-1/2 z-[8] hidden max-h-[64vh] w-60 -translate-y-1/2 overflow-y-auto rounded-2xl border border-cyan-400/20 bg-[#0e1015]/92 p-3 shadow-2xl backdrop-blur-md sm:block">
-          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80">To answer</div>
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80">Tap to answer</div>
           <ul className="flex flex-col gap-1.5">
-            {donnaQuestions.map((q, i) => (
-              <li key={i} className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-2.5 py-1.5 text-xs leading-snug text-gray-200">{q}</li>
-            ))}
+            {donnaQuestions.map((q, i) => {
+              const done = answeredQ.has(q);
+              return (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => answerQuestion(q)}
+                    className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs leading-snug transition-colors ${
+                      done ? "border-emerald-400/40 bg-emerald-500/10 text-gray-400 line-through" : "border-white/[0.06] bg-white/[0.03] text-gray-200 hover:border-cyan-400/40"
+                    }`}
+                    title={done ? "Answered — tap to un-check" : "Tap and answer by voice"}
+                  >
+                    {done ? <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400" /> : <Mic className="mt-0.5 h-3 w-3 shrink-0 text-cyan-300/70" />}
+                    <span className="min-w-0">{q}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
