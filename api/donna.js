@@ -7,7 +7,7 @@
 // Each route keeps its original request/response shape.
 import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
-import { callLLM, parseJSON } from "./_llm.js";
+import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
 import { buildAuthUrl } from "./google/_client.js";
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
@@ -40,6 +40,9 @@ export default async function handler(req, res) {
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
     if (route === "cleanup") return await cleanup(body, res);
+    if (route === "capture") return await capture(auth, body, res);
+    if (route === "semantic-search") return await semanticSearch(auth, body, res);
+    if (route === "command") return await command(auth, body, res);
     if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
     if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
@@ -313,6 +316,103 @@ Organise it now.`;
     content: parsed?.content ? String(parsed.content) : "",
     spoken: parsed?.spoken ? String(parsed.spoken) : "Sorted — saved to your notes.",
   });
+}
+
+// ---- route: capture (categorise an idea → queue for Obsidian + flag duplicates) ----
+async function capture(auth, body, res) {
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Text required" });
+
+  const system = `You are Donna. Categorise the principal's idea/note into ONE bucket and tidy it up.
+Buckets: "SaaS Idea", "Marketing Tactic", "Research", "Task", "Note".
+Return JSON: { "bucket": one of those, "title": short string, "content": markdown (a tight, slightly expanded version), "spoken": one short British confirmation }`;
+  const user = `Idea:
+"""
+${text.slice(0, 4000)}
+"""
+
+Categorise and tidy it.`;
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw);
+  const VALID = ["SaaS Idea", "Marketing Tactic", "Research", "Task", "Note"];
+  const bucket = VALID.includes(parsed?.bucket) ? parsed.bucket : "Note";
+  const title = parsed?.title ? String(parsed.title).slice(0, 160) : "Idea";
+  const content = parsed?.content ? String(parsed.content) : text;
+  let spoken = parsed?.spoken ? String(parsed.spoken) : `Filed under ${bucket}.`;
+
+  let duplicate = null;
+  try {
+    if (isAdminConfigured()) {
+      const db = getAdminDb();
+      const snap = await db.collection("notes").where("userId", "==", auth.uid).get();
+      const terms = title.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      let best = null, bestScore = 0;
+      snap.forEach((d) => {
+        const n = d.data();
+        const hay = `${n.title || ""} ${n.content || ""}`.toLowerCase();
+        let s = 0; for (const t of terms) if (hay.includes(t)) s++;
+        if (s > bestScore) { bestScore = s; best = n; }
+      });
+      if (best && bestScore >= 2) {
+        duplicate = { title: best.title, folder: best.folder };
+        spoken += ` This is close to your note "${best.title}" — say "merge" to append, or I've filed it as new.`;
+      }
+      // Queue for the local worker to write into the Obsidian vault.
+      await db.collection("note_outbox").add({
+        userId: auth.uid, bucket, title, content, status: "pending", created_date: new Date().toISOString(),
+      });
+    }
+  } catch (err) { console.error("capture queue error:", err); }
+
+  return res.status(200).json({ bucket, title, spoken, duplicate });
+}
+
+// ---- route: semantic-search (embed the query + candidate notes, cosine rank) ----
+async function semanticSearch(auth, body, res) {
+  const q = typeof body.query === "string" ? body.query.trim() : "";
+  if (!q) return res.status(400).json({ error: "Query required" });
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Notes not available" });
+
+  const db = getAdminDb();
+  const snap = await db.collection("notes").where("userId", "==", auth.uid).get();
+  const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if (!notes.length) return res.status(200).json({ results: [] });
+
+  const terms = q.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  const ranked = notes
+    .map((n) => {
+      const hay = `${n.title || ""} ${n.content || ""}`.toLowerCase();
+      let s = 0; for (const t of terms) if (hay.includes(t)) s++;
+      return { n, s };
+    })
+    .sort((a, b) => b.s - a.s)
+    .map((x) => x.n);
+  const pool = ranked.slice(0, 30);
+
+  let results;
+  try {
+    const vecs = await embed([q, ...pool.map((c) => `${c.title}\n${(c.content || "").slice(0, 1500)}`)]);
+    const qv = vecs[0];
+    results = pool
+      .map((c, i) => ({ title: c.title, folder: c.folder, path: c.path, score: cosine(qv, vecs[i + 1]) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+  } catch {
+    results = pool.slice(0, 5).map((c) => ({ title: c.title, folder: c.folder, path: c.path, score: 0 }));
+  }
+  return res.status(200).json({ results });
+}
+
+// ---- route: command (queue a shell/dev command for the local worker to run) ----
+async function command(auth, body, res) {
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Command required" });
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
+  const db = getAdminDb();
+  const ref = await db.collection("commands").add({
+    userId: auth.uid, text, status: "pending", output: "", created_date: new Date().toISOString(),
+  });
+  return res.status(200).json({ queued: true, id: ref.id });
 }
 
 // ---- route: research (web search via Tavily → concise synthesized answer + sources) ----

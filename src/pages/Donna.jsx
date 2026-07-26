@@ -125,8 +125,17 @@ export default function Donna() {
         /^find\s+(my\s+|the\s+)?note[s]?\s+(about|on|for|called)\s+/i.exec(t);
       if (searchMatch) {
         const q = t.slice(searchMatch[0].length).trim() || t;
-        const all = await base44.entities.Note.list("-modified", 400).catch(() => []);
-        const results = rankNotes(Array.isArray(all) ? all : [], q).slice(0, 5);
+        // Try semantic search (embeddings) first; fall back to client keyword ranking.
+        let results = [];
+        try {
+          const sres = await base44.functions.invoke("donna", { route: "semantic-search", query: q });
+          const sdata = sres && sres.data ? sres.data : sres || {};
+          results = Array.isArray(sdata.results) ? sdata.results : [];
+        } catch { /* fall through */ }
+        if (!results.length) {
+          const all = await base44.entities.Note.list("-modified", 400).catch(() => []);
+          results = rankNotes(Array.isArray(all) ? all : [], q).slice(0, 5);
+        }
         let spoken;
         if (!results.length) {
           spoken = `I couldn't find anything about ${q} in your notes. Is the local worker indexing them?`;
@@ -140,6 +149,44 @@ export default function Donna() {
         }
         setReply(spoken); pushTurn("signal", spoken); speak(spoken);
         return;
+      }
+
+      // Capture an idea: "capture this idea …", "new idea …", "save this idea …"
+      // → categorised + queued for the Obsidian vault, with a duplicate check.
+      const captureMatch =
+        /^(capture|save|jot|note|log)\s+(this\s+)?(idea|thought)\b[:,]?\s*/i.exec(t) ||
+        /^(new idea|idea)[:,]\s*/i.exec(t);
+      if (captureMatch) {
+        const idea = t.slice(captureMatch[0].length).trim() || t;
+        const cres = await base44.functions.invoke("donna", { route: "capture", text: idea });
+        const cdata = cres && cres.data ? cres.data : cres || {};
+        const spoken = cdata.spoken || `Filed under ${cdata.bucket || "Note"}.`;
+        setNote(`Captured → ${cdata.bucket || "Note"}: ${cdata.title || ""}`);
+        setReply(spoken); pushTurn("signal", spoken); speak(spoken);
+        return;
+      }
+
+      // Orchestration: "orchestrate …", "run command …", "execute …", "tell claude …"
+      // → queued for the local worker to run (only executes if orchestration is on).
+      const commandMatch =
+        /^orchestrate\s+/i.exec(t) ||
+        /^(tell|ask)\s+claude(\s+code)?\b[:,]?\s*(to\s+)?/i.exec(t) ||
+        /^run\s+command\b[:,]?\s*/i.exec(t) ||
+        /^execute\b[:,]?\s*/i.exec(t);
+      if (commandMatch) {
+        const cmd = t.slice(commandMatch[0].length).trim();
+        if (cmd) {
+          const qres = await base44.functions.invoke("donna", { route: "command", text: cmd });
+          const qdata = qres && qres.data ? qres.data : qres || {};
+          if (qdata.queued) {
+            const spoken = "On it — running that now.";
+            setNote("Running…"); setReply(spoken); pushTurn("signal", spoken); speak(spoken);
+            pollCommand(qdata.id);
+          } else {
+            setMode("idle"); setNote("Couldn't queue that command.");
+          }
+          return;
+        }
       }
 
       const [commitments, tasksRaw, domains, signalsRaw] = await Promise.all([
@@ -485,6 +532,24 @@ export default function Donna() {
       setNote(err?.message || "Couldn't send the email.");
     }
     setEmailSending(false);
+  }
+
+  // Poll a queued orchestration command for its result, then speak/show it.
+  async function pollCommand(id) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const list = await base44.entities.Command.list("-created_date", 20).catch(() => []);
+      const doc = (Array.isArray(list) ? list : []).find((c) => c.id === id);
+      if (doc && doc.status === "done") {
+        const out = String(doc.output || "").trim();
+        const spoken = doc.ok ? "Done." : "That command errored.";
+        setNote(out ? out.slice(0, 1500) : spoken);
+        pushTurn("signal", spoken + (out ? ` — ${out.slice(0, 200)}` : ""));
+        speak(spoken);
+        return;
+      }
+    }
+    setNote("Still running — I'll have the output when it finishes.");
   }
 
   // Prime the speech engine inside a user gesture so iOS Safari lets the reply play later.

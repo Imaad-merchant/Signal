@@ -3,16 +3,34 @@
   "deviceToken": "the same value you set as DEVICE_TOKEN in Vercel",
   "intervalSeconds": 300,
   "cronSecret": "(optional) the same CRON_SECRET, to nudge the Google poller more often than the daily Vercel cron",
+  "openaiKey": "(optional) OpenAI key — only for the audio brain-dump parser (Whisper)",
   "knowledge": {
     "enabled": false,
     "paths": [
       "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/YOUR_VAULT",
       "~/Documents"
     ],
+    "vaultPath": "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/YOUR_VAULT",
     "sinceDays": 45,
     "maxFiles": 400,
     "maxChars": 4000,
     "intervalMinutes": 20
+  },
+  "audio": {
+    "enabled": false,
+    "paths": ["~/Library/Mobile Documents/com~apple~CloudDocs/VoiceMemos"],
+    "sinceHours": 48
+  },
+  "context": {
+    "enabled": false,
+    "rules": [
+      { "app": "Code", "everyMinutes": 120, "message": "You've been coding two hours — stretch and drink some water." }
+    ]
+  },
+  "orchestration": {
+    "enabled": false,
+    "cwd": "~/",
+    "timeoutSeconds": 120
   },
   "uh": {
     "enabled": false,

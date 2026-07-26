@@ -11,6 +11,10 @@ import os from "node:os";
 import { loadConfig } from "./lib/config.mjs";
 import { scrapeGrades } from "./uh-grades.mjs";
 import { indexKnowledge } from "./knowledge.mjs";
+import { processOutbox } from "./outbox.mjs";
+import { processCommands } from "./commands.mjs";
+import { sampleContext } from "./context.mjs";
+import { processAudio } from "./audio.mjs";
 
 const cfg = loadConfig();
 const API = (cfg.apiUrl || "").replace(/\/$/, "");
@@ -83,9 +87,41 @@ async function tick() {
       }
     }
 
+    // Active-app context → time-blindness notifications (macOS).
+    if (cfg.context?.enabled) {
+      try {
+        const active = await sampleContext(cfg.context);
+        if (active?.app) payload.active = { app: active.app, minutes: active.minutes };
+      } catch (err) { console.warn("[worker] context failed:", err.message); }
+    }
+
+    // Audio brain-dumps → Whisper → captures (server categorises + files them).
+    if (cfg.audio?.enabled) {
+      try {
+        const caps = await processAudio({ ...cfg.audio, openaiKey: cfg.openaiKey });
+        if (caps.length) payload.capture = caps;
+      } catch (err) { console.warn("[worker] audio failed:", err.message); }
+    }
+
     const out = await post(payload);
     console.log(`[worker] pushed @ ${new Date().toLocaleTimeString()} → ${out}`);
     await kickGoogleCron();
+
+    // Write Donna's categorised notes into the Obsidian vault.
+    if (cfg.knowledge?.vaultPath) {
+      try {
+        const n = await processOutbox({ apiUrl: API, deviceToken: cfg.deviceToken, vaultPath: cfg.knowledge.vaultPath });
+        if (n) console.log(`[worker] wrote ${n} note(s) to the vault`);
+      } catch (err) { console.warn("[worker] outbox failed:", err.message); }
+    }
+
+    // Run any voice-queued commands (OFF unless orchestration.enabled).
+    if (cfg.orchestration?.enabled) {
+      try {
+        const n = await processCommands({ apiUrl: API, deviceToken: cfg.deviceToken, cwd: cfg.orchestration.cwd, timeoutMs: (cfg.orchestration.timeoutSeconds || 120) * 1000 });
+        if (n) console.log(`[worker] ran ${n} command(s)`);
+      } catch (err) { console.warn("[worker] commands failed:", err.message); }
+    }
   } catch (err) {
     console.error("[worker] tick error:", err.message);
   }

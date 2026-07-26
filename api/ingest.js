@@ -8,6 +8,7 @@ import { timingSafeEqual } from "node:crypto";
 import webpush from "web-push";
 import nodemailer from "nodemailer";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
+import { callLLM, parseJSON } from "./_llm.js";
 import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents } from "./google/_client.js";
 
 function matches(header, secret) {
@@ -42,6 +43,10 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ok: true, ...out, ran_at: new Date().toISOString() });
     }
+    // Device (worker) — GET pulls pending work; POST pushes data + results.
+    const job = req.query && req.query.job;
+    if (job === "outbox") return await pullOutbox(db, res);
+    if (job === "commands") return await pullCommands(db, res);
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
     return await workerPush(db, req, res);
   } catch (err) {
@@ -182,7 +187,87 @@ async function workerPush(db, req, res) {
     result.notes = slice.length;
   }
 
+  // Active-app context (time-blindness) → merge onto the telemetry doc.
+  if (body.active && typeof body.active === "object") {
+    await db.collection("telemetry").doc(uid).set({ userId: uid, active: body.active, updated_date: now }, { merge: true });
+    result.active = 1;
+  }
+
+  // Audio-memo / scratchpad captures → categorise + queue for the vault.
+  if (Array.isArray(body.capture) && body.capture.length) {
+    for (const c of body.capture.slice(0, 20)) {
+      const text = String(c?.text || "").trim();
+      if (text) await categorizeAndQueue(db, uid, text, now);
+    }
+    result.captured = Math.min(body.capture.length, 20);
+  }
+
+  // Worker reports it wrote these outbox notes into the vault.
+  if (Array.isArray(body.outbox_done) && body.outbox_done.length) {
+    const batch = db.batch();
+    for (const id of body.outbox_done.slice(0, 100)) batch.set(db.collection("note_outbox").doc(String(id)), { status: "done", updated_date: now }, { merge: true });
+    await batch.commit();
+    result.outbox_done = body.outbox_done.length;
+  }
+
+  // Command execution results from the worker.
+  if (Array.isArray(body.command_results) && body.command_results.length) {
+    const batch = db.batch();
+    for (const r of body.command_results.slice(0, 50)) {
+      if (!r || !r.id) continue;
+      batch.set(db.collection("commands").doc(String(r.id)), { status: "done", ok: !!r.ok, output: String(r.output || "").slice(0, 12000), updated_date: now }, { merge: true });
+    }
+    await batch.commit();
+    result.command_results = body.command_results.length;
+  }
+
   return res.status(200).json({ ok: true, ...result, at: now });
+}
+
+// Categorise a raw note and queue it for the worker to write into the Obsidian vault.
+async function categorizeAndQueue(db, uid, text, now) {
+  try {
+    const system = `You are Donna. Categorise this note into ONE bucket ("SaaS Idea","Marketing Tactic","Research","Task","Note") and tidy it.
+Return JSON: { "bucket": string, "title": string, "content": markdown }`;
+    const raw = await callLLM({ system, user: `"""${text.slice(0, 4000)}"""`, json: true });
+    const p = parseJSON(raw);
+    const VALID = ["SaaS Idea", "Marketing Tactic", "Research", "Task", "Note"];
+    await db.collection("note_outbox").add({
+      userId: uid,
+      bucket: VALID.includes(p?.bucket) ? p.bucket : "Note",
+      title: p?.title ? String(p.title).slice(0, 160) : "Note",
+      content: p?.content ? String(p.content) : text,
+      status: "pending", created_date: now,
+    });
+  } catch { /* ignore */ }
+}
+
+// GET ?job=outbox — pending notes for the worker to write into the vault (marks them "writing").
+async function pullOutbox(db, res) {
+  const uid = process.env.DEVICE_USER_ID;
+  if (!uid) return res.status(503).json({ error: "DEVICE_USER_ID not configured" });
+  const snap = await db.collection("note_outbox").where("userId", "==", uid).limit(100).get();
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((x) => x.status === "pending").slice(0, 50);
+  if (items.length) {
+    const batch = db.batch();
+    for (const it of items) batch.set(db.collection("note_outbox").doc(it.id), { status: "writing" }, { merge: true });
+    await batch.commit();
+  }
+  return res.status(200).json({ items: items.map((i) => ({ id: i.id, bucket: i.bucket, title: i.title, content: i.content })) });
+}
+
+// GET ?job=commands — pending commands for the worker to run (marks them "running").
+async function pullCommands(db, res) {
+  const uid = process.env.DEVICE_USER_ID;
+  if (!uid) return res.status(503).json({ error: "DEVICE_USER_ID not configured" });
+  const snap = await db.collection("commands").where("userId", "==", uid).limit(100).get();
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((x) => x.status === "pending").slice(0, 10);
+  if (items.length) {
+    const batch = db.batch();
+    for (const it of items) batch.set(db.collection("commands").doc(it.id), { status: "running" }, { merge: true });
+    await batch.commit();
+  }
+  return res.status(200).json({ items: items.map((i) => ({ id: i.id, text: i.text })) });
 }
 
 // ---- cron: pull Gmail / Drive / Calendar for every connected user ----

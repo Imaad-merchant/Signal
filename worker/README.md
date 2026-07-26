@@ -99,6 +99,44 @@ deep-link straight into Obsidian (`obsidian://`).
 > Find your iCloud Obsidian path with: `ls ~/Library/Mobile\ Documents/ | grep obsidian`
 > — the vault folder is under `iCloud~md~obsidian/Documents/`.
 
+## Write-back to Obsidian + audio + context + orchestration (Worker v2)
+
+All opt-in via `config.json`. All run on your Mac.
+
+**Obsidian write-back.** Set `knowledge.vaultPath` to your vault. When you say
+**"capture this idea …"** to Donna, she categorises it (SaaS / Marketing / Research /
+Task / Note) and queues it; the worker writes a markdown file into
+`vaultPath/<Ideas|Marketing|Research|Tasks|Notes>/`. She also flags likely
+duplicates ("close to your note X — say 'merge'…").
+
+**Audio brain-dumps.** Point `audio.paths` at a folder your iPhone voice memos sync
+to (iCloud), set `openaiKey`, `audio.enabled: true`. New recordings are transcribed
+with Whisper, categorised, and filed into the vault automatically.
+
+```json
+"openaiKey": "sk-...",
+"audio": { "enabled": true, "paths": ["~/Library/Mobile Documents/com~apple~CloudDocs/VoiceMemos"], "sinceHours": 48 }
+```
+
+**Time-blindness context.** `context.enabled: true` samples your frontmost app and
+fires native macOS notifications per rule:
+
+```json
+"context": { "enabled": true, "rules": [
+  { "app": "Code", "everyMinutes": 120, "message": "Two hours in the editor — stretch, water." }
+] }
+```
+
+**Orchestration (FULL ACCESS — off by default).** `orchestration.enabled: true` lets
+Donna run shell commands you queue by voice ("orchestrate …", "run command …", "tell
+claude …", "execute …"). It runs them in `orchestration.cwd` and streams output back
+to Donna. Every command is logged to the worker console. **This executes arbitrary
+commands from voice — enable only if you accept that.**
+
+```json
+"orchestration": { "enabled": true, "cwd": "~/dev", "timeoutSeconds": 180 }
+```
+
 ## ⚠️ UH grades scraper — read before enabling
 
 The recommended way to log grades is **manual paste**: just say them to the orb
