@@ -46,6 +46,8 @@ export default function Jarvis() {
   const [undoing, setUndoing] = useState(false);
   const [nudgeReady, setNudgeReady] = useState(false); // Signal has a follow-up to voice
   const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
+  const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
+  const [emailSending, setEmailSending] = useState(false);
   const turnId = useRef(0);
   const transcriptRef = useRef(null);
   const queryClient = useQueryClient();
@@ -120,7 +122,13 @@ export default function Jarvis() {
       const actions = Array.isArray(data.actions) ? data.actions : [];
       const spoken = data.reply ? String(data.reply) : "Noted.";
 
-      const { count, records } = await applyActions(actions, today, allTasks);
+      // Email actions are DRAFTS — never auto-sent. Stage the first for review.
+      const emailAction = actions.find((a) => a && a.type === "email");
+      if (emailAction) {
+        setEmailDraft({ to: emailAction.to || "", subject: emailAction.subject || "", body: emailAction.body || "" });
+      }
+      const otherActions = actions.filter((a) => a && a.type !== "email");
+      const { count, records } = await applyActions(otherActions, today, allTasks);
       setLastActions(records);
       setReply(spoken);
       pushTurn("signal", spoken);
@@ -344,6 +352,30 @@ export default function Jarvis() {
     setUndoing(false);
   }
 
+  // Send the reviewed email draft via the user's SMTP (server-side).
+  async function sendEmailDraft() {
+    if (!emailDraft || emailSending) return;
+    const to = (emailDraft.to || "").trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { setNote("Add a valid recipient email first."); return; }
+    setEmailSending(true);
+    try {
+      const res = await base44.functions.invoke("jarvis", {
+        route: "send-email", to, subject: emailDraft.subject || "", body: emailDraft.body || "",
+      });
+      const data = res && res.data ? res.data : res || {};
+      if (data.sent) {
+        setEmailDraft(null);
+        setNote("Email sent.");
+        pushTurn("signal", `Sent your email to ${to}.`);
+      } else {
+        setNote(data.error || "Couldn't send — check the SMTP settings.");
+      }
+    } catch (err) {
+      setNote(err?.message || "Couldn't send the email.");
+    }
+    setEmailSending(false);
+  }
+
   // Prime the speech engine inside a user gesture so iOS Safari lets the reply play later.
   function primeTTS() {
     if (!ttsSupported) return;
@@ -512,6 +544,62 @@ export default function Jarvis() {
           </button>
         </form>
       </div>
+
+      {/* Email draft — review & edit, then send. Never sent automatically. */}
+      {emailDraft && (
+        <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center" onClick={() => !emailSending && setEmailDraft(null)}>
+          <div
+            className="w-full max-w-lg rounded-t-2xl border border-white/10 bg-[#0e1015] p-4 shadow-2xl sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-200">Review email</h2>
+              <button type="button" onClick={() => setEmailDraft(null)} disabled={emailSending} className="p-1 text-gray-500 hover:text-gray-200" aria-label="Cancel">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <label className="mb-1.5 block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-gray-500">To</span>
+              <input
+                type="email"
+                value={emailDraft.to}
+                onChange={(e) => setEmailDraft((d) => ({ ...d, to: e.target.value }))}
+                placeholder="recipient@example.com"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25"
+              />
+            </label>
+            <label className="mb-1.5 block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-gray-500">Subject</span>
+              <input
+                value={emailDraft.subject}
+                onChange={(e) => setEmailDraft((d) => ({ ...d, subject: e.target.value }))}
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-gray-100 outline-none focus:border-white/25"
+              />
+            </label>
+            <label className="mb-3 block">
+              <span className="mb-0.5 block text-[10px] uppercase tracking-wider text-gray-500">Message</span>
+              <textarea
+                value={emailDraft.body}
+                onChange={(e) => setEmailDraft((d) => ({ ...d, body: e.target.value }))}
+                rows={7}
+                className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-gray-100 outline-none focus:border-white/25"
+              />
+            </label>
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" onClick={() => setEmailDraft(null)} disabled={emailSending} className="rounded-lg px-3 py-2 text-sm text-gray-400 hover:text-gray-200">Cancel</button>
+              <button
+                type="button"
+                onClick={sendEmailDraft}
+                disabled={emailSending}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {emailSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

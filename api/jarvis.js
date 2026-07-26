@@ -5,13 +5,14 @@
 // routes that used to be separate files (checkin, intent, seedDomains, and the
 // Google connect/disconnect kickoff) are merged here and dispatched on `body.route`.
 // Each route keeps its original request/response shape.
+import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON } from "./_llm.js";
 import { buildAuthUrl } from "./google/_client.js";
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 
-const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "ask", "none"];
+const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "ask", "none"];
 
 function summarize(value, max = 25) {
   if (Array.isArray(value)) return value.slice(0, max);
@@ -36,6 +37,7 @@ export default async function handler(req, res) {
     if (route === "checkin") return await checkin(body, res);
     if (route === "intent") return await intent(body, res);
     if (route === "nudge") return await nudge(body, res);
+    if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
     if (route === "google-disconnect") return await googleDisconnect(auth, res);
@@ -168,6 +170,7 @@ ACTION TYPES:
 - { "type": "monitor", "metric": string, "value": number | null, "note": string | null }
 - { "type": "write",   "title": string, "body": string }                 // draft a note/document
 - { "type": "grade",   "course": string, "assignment": string | null, "score": number, "max": number | null }
+- { "type": "email",   "to": string | null, "subject": string, "body": string }  // DRAFT an email (never sent automatically — the user confirms & sends)
 
 RULES:
 - ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
@@ -176,6 +179,7 @@ RULES:
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
 - GRADES: emit one "grade" per grade read out; put the score in "score", total in "max" when stated.
+- EMAIL: if they ask to email/message someone, emit an "email" action — write a clear subject and a complete, well-phrased body in their voice. Put a real address in "to" only if they gave one; otherwise null (they'll fill it). Say in "reply" that you've drafted it for them to review and send — it is NOT sent automatically.
 - "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.`;
 
   const user = `The user said: "${transcript}"
@@ -216,9 +220,15 @@ Parse it now.`;
         score: Number.isFinite(a.score) ? a.score : (Number.isFinite(Number(a.score)) ? Number(a.score) : null),
         max: Number.isFinite(a.max) ? a.max : (Number.isFinite(Number(a.max)) ? Number(a.max) : null),
       };
+      if (type === "email") return {
+        type,
+        to: a.to ? String(a.to).slice(0, 200) : null,
+        subject: String(a.subject || "").slice(0, 200),
+        body: String(a.body || "").slice(0, 5000),
+      };
       return null;
     })
-    .filter((a) => a && (a.text || a.title || a.metric || (a.type === "grade" && a.score != null)));
+    .filter((a) => a && (a.text || a.title || a.metric || (a.type === "grade" && a.score != null) || (a.type === "email" && a.body)));
 
   return res.status(200).json({ reply, intent: intentType, actions });
 }
@@ -318,4 +328,36 @@ async function googleDisconnect(auth, res) {
   }
   await ref.delete();
   return res.status(200).json({ disconnected: true });
+}
+
+// ---- route: send-email (the user reviewed the draft and pressed Send) ----
+async function sendEmail(body, res) {
+  const to = String(body.to || "").trim();
+  const subject = String(body.subject || "").trim();
+  const text = String(body.body || "").trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return res.status(400).json({ error: "A valid recipient email is required" });
+  if (!text) return res.status(400).json({ error: "Email body is required" });
+
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || user;
+  if (!host || !user || !pass) {
+    return res.status(503).json({ error: "Email sending not configured (set SMTP_HOST / SMTP_USER / SMTP_PASS)" });
+  }
+
+  const transport = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465, // 465 = implicit TLS; 587 = STARTTLS
+    auth: { user, pass },
+  });
+  try {
+    const info = await transport.sendMail({ from, to, subject: subject || "(no subject)", text });
+    return res.status(200).json({ sent: true, id: info?.messageId || "" });
+  } catch (err) {
+    console.error("send-email error:", err);
+    return res.status(502).json({ error: err.message || "Send failed" });
+  }
 }
