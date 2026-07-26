@@ -9,15 +9,14 @@ import RecentActions from "@/components/jarvis/RecentActions";
 import DailyBriefing from "@/components/jarvis/DailyBriefing";
 import { useVoice } from "@/components/jarvis/useVoice";
 import { reverseMany } from "@/components/jarvis/undo";
-import { getChicagoParts } from "@/components/jarvis/checkinUtils";
+import { getBriefingParts, briefingSlotKey } from "@/components/jarvis/checkinUtils";
 
 // Is this slot's morning/evening briefing still pending? If so it owns the top
 // alert and the generic nudge stands down to avoid stacking two alerts.
 function briefingPending() {
   try {
-    const { slot, dateKey } = getChicagoParts();
     const done = JSON.parse(localStorage.getItem("pulse_briefing_done") || "[]");
-    return !done.includes(`${dateKey}_${slot}`);
+    return !done.includes(briefingSlotKey(getBriefingParts()));
   } catch { return false; }
 }
 

@@ -32,6 +32,28 @@ export function slotKeyOf(dateKey, slot) {
   return `${dateKey}_${slot}`;
 }
 
+// Shift a YYYY-MM-DD key by whole days (UTC math; DST-agnostic, fine for keying).
+function shiftDateKey(key, deltaDays) {
+  const d = new Date(key + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return d.toISOString().slice(0, 10);
+}
+
+// Daily-briefing slots, anchored to the clock: the MORNING run-through is due from
+// 6am, the EVENING run-through from 6pm (America/Chicago). Times before 6am belong
+// to the previous night's evening slot (so it isn't re-shown, and the 6pm slot is
+// still fresh later that day).
+export function getBriefingParts(date = new Date()) {
+  const { hour, dateKey } = getChicagoParts(date);
+  if (hour >= 6 && hour < 18) return { hour, slot: "morning", slotDate: dateKey };
+  const slotDate = hour < 6 ? shiftDateKey(dateKey, -1) : dateKey;
+  return { hour, slot: "evening", slotDate };
+}
+
+export function briefingSlotKey(parts) {
+  return `${parts.slotDate}_${parts.slot}`;
+}
+
 // localStorage read/write are wrapped so a disabled/quota'd store never throws.
 export function getStoredCheckinKey() {
   try {
