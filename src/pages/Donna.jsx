@@ -1,15 +1,16 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle, RotateCcw, X } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, Square, Send, AlertTriangle, RotateCcw, X, AudioLines } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import Orb from "@/components/jarvis/Orb";
-import StatusGrid from "@/components/jarvis/StatusGrid";
-import RecentActions from "@/components/jarvis/RecentActions";
-import DailyBriefing from "@/components/jarvis/DailyBriefing";
-import { useVoice } from "@/components/jarvis/useVoice";
-import { reverseMany } from "@/components/jarvis/undo";
-import { getBriefingParts, briefingSlotKey } from "@/components/jarvis/checkinUtils";
+import Orb from "@/components/donna/Orb";
+import StatusGrid from "@/components/donna/StatusGrid";
+import RecentActions from "@/components/donna/RecentActions";
+import DailyBriefing from "@/components/donna/DailyBriefing";
+import { useVoice } from "@/components/donna/useVoice";
+import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
+import { reverseMany } from "@/components/donna/undo";
+import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
 
 // Is this slot's morning/evening briefing still pending? If so it owns the top
 // alert and the generic nudge stands down to avoid stacking two alerts.
@@ -46,7 +47,7 @@ function findTask(tasks, text, list) {
   );
 }
 
-export default function Jarvis() {
+export default function Donna() {
   const [mode, setMode] = useState("idle"); // idle | listening | processing | speaking
   const [heard, setHeard] = useState("");
   const [reply, setReply] = useState("");
@@ -55,7 +56,10 @@ export default function Jarvis() {
   const [ttsSupported, setTtsSupported] = useState(true);
   const [lastActions, setLastActions] = useState([]); // undoable records from the last command
   const [undoing, setUndoing] = useState(false);
-  const [nudgeReady, setNudgeReady] = useState(false); // Signal has a follow-up to voice
+  const [nudgeReady, setNudgeReady] = useState(false); // Donna has a follow-up to voice
+  const [handsFree, setHandsFree] = useState(() => {
+    try { return localStorage.getItem("donna_handsfree") === "1"; } catch { return false; }
+  });
   const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
@@ -118,7 +122,7 @@ export default function Jarvis() {
       }
       const lists = Object.entries(listMap).map(([name, items]) => ({ name, items: items.slice(0, 25) })).slice(0, 12);
 
-      const res = await base44.functions.invoke("jarvis", {
+      const res = await base44.functions.invoke("donna", {
         route: "intent",
         transcript: t,
         context: {
@@ -156,7 +160,7 @@ export default function Jarvis() {
         pushTurn("signal", spoken);
         setNote("Looking that up…");
         try {
-          const rres = await base44.functions.invoke("jarvis", { route: "research", query: researchAction.query });
+          const rres = await base44.functions.invoke("donna", { route: "research", query: researchAction.query });
           const rdata = rres && rres.data ? rres.data : rres || {};
           const answer = rdata.answer ? String(rdata.answer) : "I couldn't find much on that.";
           setSources(Array.isArray(rdata.sources) ? rdata.sources.filter((s) => s && s.url) : []);
@@ -180,6 +184,18 @@ export default function Jarvis() {
   }, [queryClient, pushTurn]);
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
+
+  // Hands-free: while enabled and the orb is idle, listen for "Donna" / "Hey Donna"
+  // and treat what follows as the command.
+  useWakeWord({ enabled: handsFree, active: mode !== "idle", onCommand: handleTranscript });
+  const toggleHandsFree = () => {
+    setHandsFree((v) => {
+      const next = !v;
+      try { localStorage.setItem("donna_handsfree", next ? "1" : "0"); } catch { /* ignore */ }
+      if (next) primeTTS(); // in-gesture: unlock TTS + prompt mic for the wake listener
+      return next;
+    });
+  };
 
   // Surface the result of the Google OAuth round-trip (?google=connected|denied|…).
   useEffect(() => {
@@ -263,7 +279,7 @@ export default function Jarvis() {
       const listMap = {};
       for (const x of openTasks) { const k = x.category || "General"; (listMap[k] = listMap[k] || []).push(x.title || ""); }
       const lists = Object.entries(listMap).map(([name, items]) => ({ name, items: items.slice(0, 20) })).slice(0, 12);
-      const res = await base44.functions.invoke("jarvis", {
+      const res = await base44.functions.invoke("donna", {
         route: "nudge",
         context: {
           today,
@@ -394,7 +410,7 @@ export default function Jarvis() {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) { setNote("Add a valid recipient email first."); return; }
     setEmailSending(true);
     try {
-      const res = await base44.functions.invoke("jarvis", {
+      const res = await base44.functions.invoke("donna", {
         route: "send-email", to, subject: emailDraft.subject || "", body: emailDraft.body || "",
       });
       const data = res && res.data ? res.data : res || {};
@@ -464,9 +480,9 @@ export default function Jarvis() {
       <Link to="/Dashboard" className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors" title="Back" aria-label="Back">
         <ArrowLeft className="h-5 w-5" />
       </Link>
-      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Signal</h1>
+      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Donna</h1>
 
-      {/* Proactive nudge: Signal asks permission to speak; tap to hear it. */}
+      {/* Proactive nudge: Donna asks permission to speak; tap to hear it. */}
       {nudgeReady && mode === "idle" && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
           <button
@@ -478,7 +494,7 @@ export default function Jarvis() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-70" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
             </span>
-            Signal has a word — tap to listen
+            Donna has a word — tap to listen
           </button>
           <button type="button" onClick={quietNudge} aria-label="Dismiss" className="p-1 text-gray-500 hover:text-gray-300">
             <X className="h-4 w-4" />
@@ -498,7 +514,7 @@ export default function Jarvis() {
       <button
         type="button"
         onClick={onOrbAction}
-        aria-label="Talk to Signal"
+        aria-label="Talk to Donna"
         className="relative z-[6] outline-none"
         style={{ width: "min(72vw, 46vh)", height: "min(72vw, 46vh)" }}
       >
@@ -522,7 +538,7 @@ export default function Jarvis() {
               }`}
             >
               <span className="mb-0.5 block text-[9px] font-semibold uppercase tracking-[0.15em] opacity-45">
-                {turn.who === "you" ? "You" : "Signal"}
+                {turn.who === "you" ? "You" : "Donna"}
               </span>
               {turn.text}
             </div>
@@ -572,6 +588,19 @@ export default function Jarvis() {
           >
             {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
             Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
+          </button>
+        )}
+        {wakeSupported() && (
+          <button
+            type="button"
+            onClick={toggleHandsFree}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+              handsFree ? "border border-cyan-400/40 bg-cyan-500/15 text-cyan-200" : "border border-white/10 bg-white/5 text-gray-400 hover:text-gray-200"
+            }`}
+            title={handsFree ? "Hands-free on — say “Donna”" : "Enable hands-free (say “Donna”)"}
+          >
+            <AudioLines className="h-3.5 w-3.5" />
+            {handsFree ? "Listening for “Donna”" : "Hands-free"}
           </button>
         )}
         {voice.supported && (

@@ -12,9 +12,9 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'logo.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Signal',
-        short_name: 'Signal',
-        description: 'Signal Calendar',
+        name: 'Donna',
+        short_name: 'Donna',
+        description: 'Donna — your chief of staff',
         start_url: '/',
         scope: '/',
         display: 'standalone',

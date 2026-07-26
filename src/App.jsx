@@ -6,7 +6,7 @@ import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import Login from './pages/Login';
-import Jarvis from './pages/Jarvis';
+import Donna from './pages/Donna';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -49,7 +49,7 @@ const AuthenticatedApp = () => {
           }
         />
       ))}
-      <Route path="/cowork" element={<LayoutWrapper currentPageName="Jarvis"><Jarvis /></LayoutWrapper>} />
+      <Route path="/cowork" element={<LayoutWrapper currentPageName="Donna"><Donna /></LayoutWrapper>} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );
