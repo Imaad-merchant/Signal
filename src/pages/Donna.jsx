@@ -516,7 +516,10 @@ export default function Donna() {
 
         setSpoken({ text, idx: 0 });
         let boundaryFired = false;
+        let started = false;
+        let done = false;
         let timer = null;
+        let watchdog = null;
         const startTs = Date.now();
         const startTimer = () => {
           // Advance the karaoke cursor by a time estimate; boundary events (when the
@@ -528,25 +531,51 @@ export default function Donna() {
           }, 80);
         };
         const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
+        const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
+        const finish = () => {
+          if (done) return; done = true;
+          clearWatchdog(); stopTimer();
+          setMode("idle"); voice.amplitudeRef.current = 0;
+          resolve();
+        };
 
-        u.onstart = () => { setMode("speaking"); voice.amplitudeRef.current = 1; startTimer(); };
+        u.onstart = () => { started = true; clearWatchdog(); setMode("speaking"); voice.amplitudeRef.current = 1; startTimer(); };
         u.onboundary = (e) => {
           boundaryFired = true; voice.amplitudeRef.current = 1;
           if (typeof e.charIndex === "number") setSpoken((s) => (s.text === text ? { ...s, idx: e.charIndex } : s));
         };
         u.onend = () => {
-          stopTimer();
           setSpoken((s) => (s.text === text ? { ...s, idx: text.length } : s));
-          setMode("idle"); voice.amplitudeRef.current = 0;
           // Clear the caption a beat after she finishes talking.
           window.setTimeout(() => setSpoken((s) => (s.text === text ? { text: "", idx: 0 } : s)), 800);
-          resolve();
+          finish();
         };
-        u.onerror = () => { stopTimer(); setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+        u.onerror = () => finish();
 
         setMode("speaking");
-        try { synth.resume(); } catch { /* some browsers start paused */ }
-        synth.speak(u);
+        // Chrome silently drops an utterance queued in the same tick as cancel()
+        // (no onstart/onend → no audio and a stuck orb). Queue on the next tick,
+        // and if it never starts, retry once, then recover gracefully.
+        let retried = false;
+        const fire = () => {
+          if (done) return;
+          try { synth.resume(); } catch { /* some browsers start paused */ }
+          try { synth.speak(u); } catch { finish(); return; }
+          clearWatchdog();
+          watchdog = window.setTimeout(() => {
+            if (started || done) return;
+            if (!retried) {
+              retried = true;
+              try { synth.cancel(); } catch { /* ignore */ }
+              window.setTimeout(fire, 60);
+            } else {
+              // The engine won't start — don't hang the orb on "speaking".
+              setSpoken((s) => (s.text === text ? { text: "", idx: 0 } : s));
+              finish();
+            }
+          }, 1600);
+        };
+        window.setTimeout(fire, 60);
       } catch {
         setMode("idle");
         resolve();
