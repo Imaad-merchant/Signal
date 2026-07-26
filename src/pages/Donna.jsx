@@ -86,6 +86,23 @@ export default function Donna() {
     setSources([]);
     setMode("processing");
     try {
+      // Brain-dump cleaner: "brain dump …", "clean this up …", "organise this …"
+      // → sends the ramble to the cleanup route and saves a tidy note.
+      const cleanupMatch = /^(brain\s*dump|clean\s+(this\s+)?up|organi[sz]e\s+(this|these|my)\b)[:,]?\s*/i.exec(t);
+      if (cleanupMatch) {
+        const raw = t.slice(cleanupMatch[0].length).trim() || t;
+        const cres = await base44.functions.invoke("donna", { route: "cleanup", text: raw });
+        const cdata = cres && cres.data ? cres.data : cres || {};
+        if (cdata.content) {
+          await base44.entities.Page.create({ title: cdata.title || "Note", type: "document", content: cdata.content }).catch(() => null);
+        }
+        const spoken = cdata.spoken || `Sorted — saved "${cdata.title || "your note"}".`;
+        setNote(`Saved "${cdata.title || "Note"}" to your notes`);
+        setReply(spoken); pushTurn("signal", spoken); speak(spoken);
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        return;
+      }
+
       const [commitments, tasksRaw, domains, signalsRaw] = await Promise.all([
         base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
         base44.entities.Task.list("-created_date").catch(() => []),
