@@ -183,6 +183,9 @@ export const base44 = {
     Signal: createEntityHandler("signals"),
     Grade: createEntityHandler("grades"),
     Telemetry: createEntityHandler("telemetry"),
+    // Daily habits the evening review tracks (e.g. gym, sober) + their day logs.
+    Habit: createEntityHandler("habits"),
+    HabitLog: createEntityHandler("habit_logs"),
   },
 
   functions: {

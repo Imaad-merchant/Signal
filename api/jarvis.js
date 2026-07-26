@@ -37,6 +37,7 @@ export default async function handler(req, res) {
     if (route === "checkin") return await checkin(body, res);
     if (route === "intent") return await intent(body, res);
     if (route === "nudge") return await nudge(body, res);
+    if (route === "briefing") return await briefing(body, res);
     if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
@@ -253,6 +254,36 @@ Give me one nudge now.`;
   const say = parsed?.say ? String(parsed.say) : "";
   const about = parsed?.about ? String(parsed.about) : "";
   return res.status(200).json({ say, about });
+}
+
+// ---- route: briefing (spoken morning look-ahead / evening reflection) ----
+async function briefing(body, res) {
+  const context = body.context && typeof body.context === "object" ? body.context : {};
+  const slot = body.slot === "evening" ? "evening" : "morning";
+  const today = context.today || new Date().toISOString().slice(0, 10);
+
+  const system =
+    slot === "morning"
+      ? `You are Signal, a warm, dry British chief of staff giving a SPOKEN good-morning briefing. In 2-4 short sentences: greet briefly, tell the principal what's on today (events, things due, key commitments), and flag anything that looks important so they don't forget it. Encouraging, never naggy. Read aloud — no lists, markdown or emoji. If there's genuinely nothing on, say the day's clear.
+Return JSON: { "say": string }.`
+      : `You are Signal, a warm, dry British chief of staff opening the EVENING review. In 1-3 short spoken sentences: acknowledge the day, celebrate any habit streak you're told about, and gently set up the check-in (habits + anything left unchecked today). Kind and human, never preachy. Read aloud — no lists, markdown or emoji.
+Return JSON: { "say": string }.`;
+
+  const user = `slot: ${slot}
+today: ${today}
+due_today: ${JSON.stringify(Array.isArray(context.due_today) ? context.due_today.slice(0, 15) : [])}
+events: ${JSON.stringify(Array.isArray(context.events) ? context.events.slice(0, 15) : [])}
+commitments: ${JSON.stringify(Array.isArray(context.commitments) ? context.commitments.slice(0, 15) : [])}
+important: ${JSON.stringify(Array.isArray(context.important) ? context.important.slice(0, 10) : [])}
+streaks: ${JSON.stringify(Array.isArray(context.streaks) ? context.streaks.slice(0, 10) : [])}
+still_unchecked: ${JSON.stringify(Array.isArray(context.incomplete) ? context.incomplete.slice(0, 15) : [])}
+
+Give me the spoken briefing now.`;
+
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw);
+  const say = parsed?.say ? String(parsed.say) : (slot === "morning" ? "Good morning. Your day looks clear so far." : "Evening. Let's run through your day.");
+  return res.status(200).json({ say });
 }
 
 // ---- route: seed (cluster tasks into candidate domains) ----

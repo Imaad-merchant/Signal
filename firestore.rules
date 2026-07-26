@@ -111,6 +111,17 @@ service cloud.firestore {
       allow update: if canUpdate();
       allow create: if isCreatingOwner();
     }
+    // Daily habits + their per-day logs (evening review).
+    match /habits/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    match /habit_logs/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
     // Google OAuth refresh tokens — written ONLY by the server (Admin SDK). No
     // client access at all: tokens must never be readable from the browser.
     match /google_tokens/{docId} {

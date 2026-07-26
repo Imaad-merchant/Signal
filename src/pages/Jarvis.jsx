@@ -6,8 +6,20 @@ import { base44 } from "@/api/base44Client";
 import Orb from "@/components/jarvis/Orb";
 import StatusGrid from "@/components/jarvis/StatusGrid";
 import RecentActions from "@/components/jarvis/RecentActions";
+import DailyBriefing from "@/components/jarvis/DailyBriefing";
 import { useVoice } from "@/components/jarvis/useVoice";
 import { reverseMany } from "@/components/jarvis/undo";
+import { getChicagoParts } from "@/components/jarvis/checkinUtils";
+
+// Is this slot's morning/evening briefing still pending? If so it owns the top
+// alert and the generic nudge stands down to avoid stacking two alerts.
+function briefingPending() {
+  try {
+    const { slot, dateKey } = getChicagoParts();
+    const done = JSON.parse(localStorage.getItem("pulse_briefing_done") || "[]");
+    return !done.includes(`${dateKey}_${slot}`);
+  } catch { return false; }
+}
 
 const todayKey = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
@@ -187,6 +199,7 @@ export default function Jarvis() {
       try {
         const until = Number(localStorage.getItem("jarvis_nudge_until") || 0);
         if (Date.now() < until) return;
+        if (briefingPending()) return; // let the daily briefing own the alert first
         const [commits, tasksRaw] = await Promise.all([
           base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
           base44.entities.Task.list("-created_date", 100).catch(() => []),
@@ -456,6 +469,9 @@ export default function Jarvis() {
 
       {/* Recent orb actions still inside their 24h undo window. */}
       <RecentActions />
+
+      {/* Morning look-ahead / evening habit review (speaks via the orb). */}
+      <DailyBriefing onSpeak={speak} />
 
       <button
         type="button"
