@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -9,6 +9,8 @@ import RecentActions from "@/components/donna/RecentActions";
 import DailyBriefing from "@/components/donna/DailyBriefing";
 import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
+import CustomizePanel from "@/components/donna/CustomizePanel";
+import { resolveTileKey, setTileHidden, ALL_TILES } from "@/components/donna/dashboardConfig";
 import { useVoice } from "@/components/donna/useVoice";
 import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
@@ -113,6 +115,8 @@ export default function Donna() {
   const [orbAlert, setOrbAlert] = useState(false); // orb-delivery glow
   const [reminderToast, setReminderToast] = useState(""); // on-screen reminder banner
   const [showRoutines, setShowRoutines] = useState(false); // routines editor panel
+  const [showCustomize, setShowCustomize] = useState(false); // dashboard customize panel
+  const [briefingActive, setBriefingActive] = useState(false); // daily review owns the mic
 
   const commitReminders = useCallback((next) => {
     remindersRef.current = next;
@@ -223,6 +227,33 @@ export default function Donna() {
       let say;
       if (target) { removeReminder(target.id); say = `Stopped reminding you to ${target.title}.`; }
       else say = "You don't have a reminder like that set.";
+      setReply(say); pushTurn("signal", say); speak(say);
+      return;
+    }
+
+    // ---- Dashboard customisation by voice ----
+    // "customize/edit my dashboard" opens the panel; "hide/show the X tile" toggles one.
+    if (/\b(customi[sz]e|edit|change|set\s*up)\s+(my\s+|the\s+)?dashboard\b/i.test(t)) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      setShowCustomize(true);
+      const say = "Here's your dashboard — hide, show, or reorder any tile.";
+      setReply(say); pushTurn("signal", say); speak(say);
+      return;
+    }
+    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|dashboard|from\s+my\s+dashboard)\b/i.test(t)
+      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?)\b/i.test(t);
+    if (tileToggle) {
+      const key = resolveTileKey(t);
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      let say;
+      if (!key) {
+        say = "Which tile — Today, Open, Latest, Grades, Inbox, or Machine?";
+      } else {
+        const hide = /\b(hide|remove)\b/i.test(t);
+        setTileHidden(key, hide);
+        const label = (ALL_TILES.find((x) => x.key === key) || {}).label || key;
+        say = hide ? `Hidden the ${label} tile.` : `The ${label} tile is back.`;
+      }
       setReply(say); pushTurn("signal", say); speak(say);
       return;
     }
@@ -429,7 +460,7 @@ export default function Donna() {
   // being captured/handled so we don't re-trigger mid-thought.
   useWakeWord({
     enabled: !muted,
-    active: mode === "listening" || mode === "processing",
+    active: mode === "listening" || mode === "processing" || briefingActive,
     onCommand: handleTranscript,
     echoText: spoken.text,   // ignore her own audio echoing back through the mic
   });
@@ -834,12 +865,23 @@ export default function Donna() {
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Donna</h1>
 
+      {/* Customize dashboard. */}
+      <button
+        type="button"
+        onClick={() => setShowCustomize(true)}
+        className="absolute top-4 left-[6.5rem] z-20 rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-cyan-300"
+        title="Customize dashboard"
+        aria-label="Customize dashboard"
+      >
+        <LayoutGrid className="h-5 w-5" />
+      </button>
+
       {/* Routines opener (shows a count when reminders exist). */}
       {reminders.length > 0 && (
         <button
           type="button"
           onClick={() => setShowRoutines(true)}
-          className="absolute top-4 left-14 z-20 flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/10"
+          className="absolute top-4 left-[9rem] z-20 flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/10"
           title="Your routines"
         >
           <Bell className="h-3.5 w-3.5" /> {reminders.length}
@@ -871,6 +913,15 @@ export default function Donna() {
         </div>
       )}
 
+      {/* Customize-dashboard overlay. */}
+      {showCustomize && (
+        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <CustomizePanel />
+          </div>
+        </div>
+      )}
+
       {/* Proactive nudge: Donna asks permission to speak; tap to hear it. */}
       {nudgeReady && mode === "idle" && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
@@ -898,7 +949,7 @@ export default function Donna() {
       <RecentActions />
 
       {/* Morning look-ahead / evening habit review (speaks via the orb). */}
-      <DailyBriefing onSpeak={speak} />
+      <DailyBriefing onSpeak={speak} onActive={setBriefingActive} />
 
       {/* Donna's captions ABOVE the orb; your words small BELOW it. */}
       <div className="relative z-[6] flex flex-col items-center gap-2 px-4">
