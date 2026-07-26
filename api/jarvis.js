@@ -39,6 +39,7 @@ export default async function handler(req, res) {
     if (route === "nudge") return await nudge(body, res);
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
+    if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
     if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
@@ -404,6 +405,21 @@ async function googleDisconnect(auth, res) {
   }
   await ref.delete();
   return res.status(200).json({ disconnected: true });
+}
+
+// ---- route: push-subscribe (store this browser's Web Push subscription) ----
+async function pushSubscribe(auth, body, res) {
+  const sub = body.subscription;
+  if (!sub || !sub.endpoint) return res.status(400).json({ error: "subscription required" });
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
+  const db = getAdminDb();
+  // Deterministic id from the endpoint so re-subscribing updates in place.
+  const id = Buffer.from(sub.endpoint).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 200);
+  await db.collection("push_subscriptions").doc(id).set(
+    { userId: auth.uid, subscription: sub, updated_date: new Date().toISOString() },
+    { merge: true }
+  );
+  return res.status(200).json({ subscribed: true });
 }
 
 // ---- route: send-email (the user reviewed the draft and pressed Send) ----

@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from "react";
-import { Sunrise, Moon, X, Check, Loader2, Plus, CalendarClock } from "lucide-react";
+import { Sunrise, Moon, X, Check, Loader2, Plus, CalendarClock, Bell } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { getChicagoParts, getBriefingParts, briefingSlotKey } from "./checkinUtils";
+import { enablePush, pushSupported } from "./push";
 
 // Morning look-ahead + evening habit review, surfaced on /cowork.
 // A top alert appears once per slot (morning / evening). Tapping it opens the panel
@@ -49,6 +50,13 @@ export default function DailyBriefing({ onSpeak }) {
   const [habits, setHabits] = useState([]);        // evening: [{ id, name, question, done, streak }]
   const [incomplete, setIncomplete] = useState([]); // evening: [{ id, title, done }]
   const [newHabit, setNewHabit] = useState("");
+  const [pushMsg, setPushMsg] = useState("");
+
+  const onEnablePush = async () => {
+    setPushMsg("…");
+    const r = await enablePush();
+    setPushMsg(r.ok ? "Reminders on ✓" : r.reason);
+  };
 
   const isEvening = slot === "evening";
   const SlotIcon = isEvening ? Moon : Sunrise;
@@ -267,7 +275,12 @@ export default function DailyBriefing({ onSpeak }) {
             )}
 
             {!loading && (
-              <div className="mt-4 flex justify-end">
+              <div className="mt-4 flex items-center justify-between gap-2">
+                {pushSupported() ? (
+                  <button type="button" onClick={onEnablePush} className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs text-gray-300 transition-colors hover:border-blue-400/40">
+                    <Bell className="h-3.5 w-3.5" /> {pushMsg || "Get 6am & 6pm reminders"}
+                  </button>
+                ) : <span />}
                 <button type="button" onClick={finish} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500">
                   {isEvening ? "Done for tonight" : "Got it"}
                 </button>
