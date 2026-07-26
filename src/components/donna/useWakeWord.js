@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 
 // Always-on voice. A continuous SpeechRecognition runs while `enabled` and the
-// assistant isn't mid-command (`active`). Two modes:
-//   - normal (not speaking): needs the "Donna" / "Hey Donna" wake word; the words
-//     after it are the command (or the next utterance if you just say "Donna").
-//   - interrupt (Donna is speaking): ANY speech barges in — no wake word — except
-//     her own audio echoing back, which is filtered out by comparing to `echoText`.
-// Delivered via onCommand(text). One recognizer at a time.
-const WAKE = /\b(hey\s+|ok\s+|okay\s+)?donna\b[\s,.!]*/i;
+// assistant isn't mid-command (`active`). No wake word required: ANY speech you
+// make is treated as a command — whether she's idle or mid-sentence (barge-in).
+// The only thing filtered out is her own audio echoing back through the mic
+// (compared to `echoText`). Saying "Donna" / "Hey Donna" is still fine — it's
+// just stripped from the front of the command. Delivered via onCommand(text).
+// One recognizer at a time.
+const WAKE = /^\s*(hey\s+|ok\s+|okay\s+)?donna\b[\s,.!]*/i;
 
 export function wakeSupported() {
   return typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
@@ -23,12 +23,10 @@ function isEcho(said, spoken) {
   return overlap >= 0.5;
 }
 
-export function useWakeWord({ enabled, active, onCommand, interrupt = false, echoText = "" }) {
+export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
   const armedRef = useRef(false);
   const stoppedRef = useRef(true);
-  const interruptRef = useRef(interrupt);
   const echoRef = useRef(echoText);
-  useEffect(() => { interruptRef.current = interrupt; }, [interrupt]);
   useEffect(() => { echoRef.current = echoText; }, [echoText]);
 
   useEffect(() => {
@@ -46,18 +44,15 @@ export function useWakeWord({ enabled, active, onCommand, interrupt = false, ech
     const handle = (text) => {
       const t = (text || "").trim();
       if (!t) return;
-      // Barge-in: while Donna is speaking, any of YOUR speech interrupts (no wake
-      // word), but ignore her own voice echoing back through the mic.
-      if (interruptRef.current) {
-        if (!isEcho(t, echoRef.current)) { armedRef.current = false; onCommand && onCommand(t); }
-        return;
-      }
-      if (armedRef.current) { armedRef.current = false; onCommand && onCommand(t); return; }
-      const m = WAKE.exec(t);
-      if (!m) return;
-      const after = t.slice(m.index + m[0].length).trim();
-      if (after) onCommand && onCommand(after);
-      else armedRef.current = true; // wake only — capture the next utterance
+      // Ignore Donna's own voice echoing back through the mic (whether she's
+      // speaking now or the tail of what she just said).
+      if (isEcho(t, echoRef.current)) return;
+      // No wake word needed: any speech is a command. Strip a leading
+      // "Donna"/"Hey Donna" if the user happens to say it.
+      const cmd = t.replace(WAKE, "").trim();
+      if (!cmd) { armedRef.current = true; return; } // said only "Donna" — take the next utterance
+      armedRef.current = false;
+      onCommand && onCommand(cmd);
     };
 
     rec.onresult = (e) => {
