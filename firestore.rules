@@ -128,7 +128,7 @@ service cloud.firestore {
       allow read, write: if false;
     }
     // Web Push subscriptions — written by the server (Admin SDK) after the client
-    // hands over its subscription via /api/jarvis; not client-readable.
+    // hands over its subscription via /api/donna; not client-readable.
     match /push_subscriptions/{docId} {
       allow read, write: if false;
     }

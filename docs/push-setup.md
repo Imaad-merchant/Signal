@@ -1,6 +1,6 @@
 # 6am / 6pm reminders (web push + email)
 
-Signal can alert you at **6am** (morning briefing) and **6pm** (evening review) even
+Donna can alert you at **6am** (morning briefing) and **6pm** (evening review) even
 when the app is closed — via a browser **push notification** and, as a dependable
 backup, an **email** reminder.
 
@@ -12,21 +12,31 @@ Generate a key pair once (locally):
 npx web-push generate-vapid-keys
 ```
 
-Add in **Vercel → Settings → Environment Variables**:
+It prints a **Public Key** (safe to expose) and a **Private Key** (secret → Vercel
+only, never chat/git). Add these in **Vercel → Settings → Environment Variables** —
+type secret values directly into Vercel:
 
-| Variable | Value |
-| --- | --- |
-| `VAPID_PUBLIC_KEY` | the public key |
-| `VAPID_PRIVATE_KEY` | the private key |
-| `VAPID_SUBJECT` | `mailto:you@example.com` |
-| `VITE_VAPID_PUBLIC_KEY` | the **same** public key (exposed to the app so it can subscribe) |
-| `CRON_SECRET` | already set (the crons use it) |
-| `FIREBASE_SERVICE_ACCOUNT` | already set (stores subscriptions) |
+| Variable | Value | Read by |
+| --- | --- | --- |
+| `VAPID_PUBLIC_KEY` | the public key | `api/ingest.js` (server) |
+| `VITE_VAPID_PUBLIC_KEY` | the **same** public key, again | `src/components/donna/push.js` (browser) |
+| `VAPID_PRIVATE_KEY` | the private key | `api/ingest.js` (server) |
+| `VAPID_SUBJECT` | `mailto:imaadmerchant@gmail.com` | `api/ingest.js` (server) |
+| `CRON_SECRET` | already set (the crons use it) | |
+| `FIREBASE_SERVICE_ACCOUNT` | already set (stores subscriptions) | |
 
-Redeploy, then on `/cowork` open a briefing → **"Get 6am & 6pm reminders"** → allow
-notifications.
+**The gotcha — get these exactly right or push silently never fires:**
+- The **public key is set twice**, same value: `VAPID_PUBLIC_KEY` (server) **and**
+  `VITE_VAPID_PUBLIC_KEY` (browser). The private key is set once, as `VAPID_PRIVATE_KEY`.
+- This is a **Vite** app, so the browser can only read env vars prefixed **`VITE_`**.
+  It is **not** Next.js — `NEXT_PUBLIC_VAPID_PUBLIC_KEY` would be ignored and the
+  browser would never subscribe.
+- `VITE_*` vars are **baked in at build time**, so you **must redeploy** after adding
+  them — a running deploy won't pick up the value.
 
-> **iPhone:** web push only works if Signal is **added to the Home Screen** (Share →
+Then on `/cowork` open a briefing → **"Get 6am & 6pm reminders"** → allow notifications.
+
+> **iPhone:** web push only works if Donna is **added to the Home Screen** (Share →
 > Add to Home Screen) and opened from there — that's an Apple limitation, not the app.
 > The email reminder below has no such requirement.
 
