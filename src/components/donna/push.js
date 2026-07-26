@@ -35,7 +35,7 @@ export async function enablePush() {
         applicationServerKey: urlBase64ToUint8Array(vapid),
       });
     }
-    await base44.functions.invoke("jarvis", { route: "push-subscribe", subscription: sub.toJSON() });
+    await base44.functions.invoke("donna", { route: "push-subscribe", subscription: sub.toJSON() });
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: err?.message || "Couldn't enable reminders." };

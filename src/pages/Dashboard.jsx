@@ -17,7 +17,7 @@ import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import EditTaskDialog from "../components/dashboard/EditTaskDialog";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 import { useIsMobile } from "../components/useIsMobile";
-import CheckInLauncher from "../components/jarvis/CheckInLauncher";
+import CheckInLauncher from "../components/donna/CheckInLauncher";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
 const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly" };

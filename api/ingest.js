@@ -100,8 +100,8 @@ async function sendBriefingEmail(slot) {
     await transport.sendMail({
       from: process.env.SMTP_FROM || user,
       to,
-      subject: `Signal — ${copy.title}`,
-      text: `${copy.body}\n\nOpen Signal: ${(process.env.APP_URL || "").replace(/\/$/, "")}/cowork`,
+      subject: `Donna — ${copy.title}`,
+      text: `${copy.body}\n\nOpen Donna: ${(process.env.APP_URL || "").replace(/\/$/, "")}/cowork`,
     });
     return true;
   } catch {

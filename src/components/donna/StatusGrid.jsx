@@ -113,7 +113,7 @@ function useTileData() {
       },
       {
         key: "signal",
-        label: "Signal",
+        label: "Latest",
         icon: Sparkles,
         loading: checkins.isLoading || insights.isLoading,
         value: latestCheckin ? "Check-in" : latestInsight ? "Insight" : "—",
@@ -171,7 +171,7 @@ const TONE = {
 // (owner-scoped), then navigate to it.
 async function connectGoogle() {
   try {
-    const res = await base44.functions.invoke("jarvis", { route: "google-connect" });
+    const res = await base44.functions.invoke("donna", { route: "google-connect" });
     const url = res?.data?.url || res?.url;
     if (url) window.location.href = url;
   } catch {

@@ -6,7 +6,7 @@
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = {}; }
-  const title = data.title || "Signal";
+  const title = data.title || "Donna";
   const body = data.body || "You have a briefing waiting.";
   const options = {
     body,

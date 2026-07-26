@@ -145,7 +145,7 @@ export default function DailyBriefing({ onSpeak }) {
 
   async function fetchBriefing(s, context) {
     try {
-      const res = await base44.functions.invoke("jarvis", { route: "briefing", slot: s, context });
+      const res = await base44.functions.invoke("donna", { route: "briefing", slot: s, context });
       const data = res && res.data ? res.data : res || {};
       return data.say ? String(data.say) : "";
     } catch { return ""; }

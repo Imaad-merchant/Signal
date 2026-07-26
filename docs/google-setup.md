@@ -95,5 +95,5 @@ re-running never creates duplicates.
 
 ### Disconnecting
 
-`POST /api/jarvis` with `{ "route": "google-disconnect" }` (owner-scoped) revokes the token at Google and
+`POST /api/donna` with `{ "route": "google-disconnect" }` (owner-scoped) revokes the token at Google and
 deletes it from Firestore.
