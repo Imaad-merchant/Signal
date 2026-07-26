@@ -316,18 +316,16 @@ export default function DailyBriefing({ onSpeak }) {
 
       {open && (
         <>
-          {/* Captions at the top — what Donna is saying right now. */}
-          <div className="pointer-events-none absolute top-16 left-1/2 z-[45] w-[min(92vw,640px)] -translate-x-1/2 px-4 text-center">
-            {loading && <p className="inline-flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-sm text-gray-300 backdrop-blur-sm"><Loader2 className="h-4 w-4 animate-spin" /> Pulling your day together…</p>}
-            {!loading && caption && (
-              <p className="inline-block rounded-2xl bg-black/55 px-4 py-2 text-sm leading-snug text-gray-100 shadow-lg backdrop-blur-sm">{caption}</p>
-            )}
-            {currentId && (
-              <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-cyan-300/90">
-                <Mic className="h-3 w-3" /> say “yes” or “no” — or tap on the right
-              </p>
-            )}
-          </div>
+          {/* Donna's words are shown by the main page caption (avoid a duplicate box);
+              here we only surface a loading state and the yes/no hint. */}
+          {(loading || currentId) && (
+            <div className="pointer-events-none absolute top-16 left-1/2 z-[45] w-[min(92vw,640px)] -translate-x-1/2 px-4 text-center">
+              {loading && <p className="inline-flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-sm text-gray-300 backdrop-blur-sm"><Loader2 className="h-4 w-4 animate-spin" /> Pulling your day together…</p>}
+              {!loading && currentId && (
+                <p className="inline-flex items-center gap-1 text-[11px] text-cyan-300/90"><Mic className="h-3 w-3" /> say “yes” or “no” — or tap on the right</p>
+              )}
+            </div>
+          )}
 
           {/* Question / review panel — right-docked on desktop, bottom sheet on mobile. */}
           <div className="absolute z-[45] inset-x-0 bottom-0 flex max-h-[68vh] flex-col gap-3 overflow-y-auto rounded-t-2xl border-t border-white/10 bg-[#0e1015]/95 p-4 shadow-2xl backdrop-blur-md sm:inset-y-0 sm:bottom-auto sm:left-auto sm:right-0 sm:max-h-none sm:w-80 sm:rounded-t-none sm:border-l sm:border-t-0">

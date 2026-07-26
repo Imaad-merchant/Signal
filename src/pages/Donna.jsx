@@ -310,7 +310,13 @@ export default function Donna() {
 
   // Always listening (unless muted) — including while Donna is speaking, so you can
   // interrupt with "Donna …". Pause only while a command is being captured/handled.
-  useWakeWord({ enabled: !muted, active: mode === "listening" || mode === "processing", onCommand: handleTranscript });
+  useWakeWord({
+    enabled: !muted,
+    active: mode === "listening" || mode === "processing",
+    onCommand: handleTranscript,
+    interrupt: mode === "speaking",   // barge in on any speech while she's talking
+    echoText: spoken.text,            // …but ignore her own audio echoing back
+  });
 
   // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
   useEffect(() => { setAnsweredQ(new Set()); answeringRef.current = null; }, [reply]);
