@@ -47,6 +47,22 @@ function findTask(tasks, text, list) {
   );
 }
 
+// Keyword-rank the worker-indexed notes for a search query (title hits weigh more).
+function rankNotes(notes, query) {
+  const terms = (query || "").toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  if (!terms.length || !Array.isArray(notes)) return [];
+  return notes
+    .map((n) => {
+      const title = (n.title || "").toLowerCase();
+      const hay = `${title} ${(n.folder || "").toLowerCase()} ${(n.content || "").toLowerCase()}`;
+      let score = 0;
+      for (const t of terms) { if (title.includes(t)) score += 5; if (hay.includes(t)) score += 1; }
+      return { ...n, _score: score };
+    })
+    .filter((n) => n._score > 0)
+    .sort((a, b) => b._score - a._score || (new Date(b.modified || 0) - new Date(a.modified || 0)));
+}
+
 export default function Donna() {
   const [mode, setMode] = useState("idle"); // idle | listening | processing | speaking
   const [heard, setHeard] = useState("");
@@ -100,6 +116,29 @@ export default function Donna() {
         setNote(`Saved "${cdata.title || "Note"}" to your notes`);
         setReply(spoken); pushTurn("signal", spoken); speak(spoken);
         queryClient.invalidateQueries({ queryKey: ["grid"] });
+        return;
+      }
+
+      // Local knowledge search: "search my notes for X" / "find my note about X".
+      const searchMatch =
+        /^(search|find|look\s+up)\s+(my\s+)?(notes?|files?|vault|documents?)\b[:\s]*(for|about|on)?\s*/i.exec(t) ||
+        /^find\s+(my\s+|the\s+)?note[s]?\s+(about|on|for|called)\s+/i.exec(t);
+      if (searchMatch) {
+        const q = t.slice(searchMatch[0].length).trim() || t;
+        const all = await base44.entities.Note.list("-modified", 400).catch(() => []);
+        const results = rankNotes(Array.isArray(all) ? all : [], q).slice(0, 5);
+        let spoken;
+        if (!results.length) {
+          spoken = `I couldn't find anything about ${q} in your notes. Is the local worker indexing them?`;
+        } else {
+          const top = results[0];
+          spoken = `Found ${results.length}. Top match: ${top.title}${top.folder ? `, in ${top.folder}` : ""}.`;
+          setSources(results.map((r) => ({
+            title: r.title + (r.folder ? ` · ${r.folder}` : ""),
+            url: r.path ? `obsidian://open?path=${encodeURIComponent(r.path)}` : "",
+          })));
+        }
+        setReply(spoken); pushTurn("signal", spoken); speak(spoken);
         return;
       }
 

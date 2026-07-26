@@ -3,6 +3,17 @@
   "deviceToken": "the same value you set as DEVICE_TOKEN in Vercel",
   "intervalSeconds": 300,
   "cronSecret": "(optional) the same CRON_SECRET, to nudge the Google poller more often than the daily Vercel cron",
+  "knowledge": {
+    "enabled": false,
+    "paths": [
+      "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/YOUR_VAULT",
+      "~/Documents"
+    ],
+    "sinceDays": 45,
+    "maxFiles": 400,
+    "maxChars": 4000,
+    "intervalMinutes": 20
+  },
   "uh": {
     "enabled": false,
     "loginUrl": "https://accessuh.uh.edu/...",

@@ -10,6 +10,7 @@
 import os from "node:os";
 import { loadConfig } from "./lib/config.mjs";
 import { scrapeGrades } from "./uh-grades.mjs";
+import { indexKnowledge } from "./knowledge.mjs";
 
 const cfg = loadConfig();
 const API = (cfg.apiUrl || "").replace(/\/$/, "");
@@ -67,6 +68,21 @@ async function tick() {
       console.warn("[worker] grades step failed:", err.message);
     }
 
+    // Local knowledge index (Obsidian vault / folders) — every N minutes, not every tick.
+    if (cfg.knowledge?.enabled) {
+      const everyMs = (cfg.knowledge.intervalMinutes ?? 20) * 60000;
+      if (Date.now() - lastIndexAt >= everyMs) {
+        try {
+          const notes = await indexKnowledge(cfg.knowledge);
+          if (notes.length) payload.notes = notes;
+          lastIndexAt = Date.now();
+          console.log(`[worker] indexed ${notes.length} note(s)`);
+        } catch (err) {
+          console.warn("[worker] knowledge index failed:", err.message);
+        }
+      }
+    }
+
     const out = await post(payload);
     console.log(`[worker] pushed @ ${new Date().toLocaleTimeString()} → ${out}`);
     await kickGoogleCron();
@@ -75,6 +91,7 @@ async function tick() {
   }
 }
 
+let lastIndexAt = 0;
 console.log(`[worker] starting — posting to ${API} every ${INTERVAL_MS / 1000}s`);
 tick();
 const timer = setInterval(tick, INTERVAL_MS);

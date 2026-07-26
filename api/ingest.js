@@ -116,7 +116,7 @@ async function workerPush(db, req, res) {
 
   const now = new Date().toISOString();
   const body = req.body || {};
-  const result = { telemetry: 0, signals: 0, grades: 0 };
+  const result = { telemetry: 0, signals: 0, grades: 0, notes: 0 };
 
   if (body.telemetry && typeof body.telemetry === "object") {
     await db.collection("telemetry").doc(uid).set(
@@ -156,6 +156,30 @@ async function workerPush(db, req, res) {
     }
     await batch.commit();
     result.grades = Math.min(body.grades.length, 200);
+  }
+
+  // Local knowledge notes (Obsidian vault / folders). Idempotent by file path;
+  // committed in chunks to stay under Firestore's 500-op batch limit.
+  if (Array.isArray(body.notes) && body.notes.length) {
+    const slice = body.notes.slice(0, 400);
+    for (let i = 0; i < slice.length; i += 400) {
+      const chunk = slice.slice(i, i + 400);
+      const batch = db.batch();
+      for (const n of chunk) {
+        const ref = db.collection("notes").doc(safeId(`${uid}_${n.path || n.title || now}`));
+        batch.set(ref, {
+          userId: uid, source: "worker",
+          title: String(n.title || "").slice(0, 200),
+          folder: String(n.folder || "").slice(0, 200),
+          path: String(n.path || "").slice(0, 500),
+          content: String(n.content || "").slice(0, 6000),
+          modified: n.modified || now,
+          created_date: now, updated_date: now,
+        }, { merge: true });
+      }
+      await batch.commit();
+    }
+    result.notes = slice.length;
   }
 
   return res.status(200).json({ ok: true, ...result, at: now });
