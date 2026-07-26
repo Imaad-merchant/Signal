@@ -3,6 +3,7 @@ import { Sunrise, Moon, X, Check, Loader2, Plus, CalendarClock, Bell, Mic } from
 import { base44 } from "@/api/base44Client";
 import { getChicagoParts, getBriefingParts, briefingSlotKey } from "./checkinUtils";
 import { enablePush, pushSupported } from "./push";
+import ContributionStrip from "./ContributionStrip";
 
 // Morning look-ahead + evening habit review, surfaced on /cowork.
 // A top alert appears once per slot. Tapping it runs a SPOKEN flow: Donna reads
@@ -34,6 +35,41 @@ function computeStreak(doneSet, today) {
   while (doneSet.has(day)) { n++; day = prevDay(day); }
   return n;
 }
+// The last `count` days ending at `endKey`, oldest → newest, classified for the
+// contribution strip: done / logged-miss / no-log.
+function buildHistory(logList, endKey, count) {
+  const doneSet = new Set(logList.filter((l) => l.done).map((l) => l.date));
+  const anySet = new Set(logList.map((l) => l.date));
+  const days = [];
+  let day = endKey;
+  for (let i = 0; i < count; i++) { days.push(day); day = prevDay(day); }
+  days.reverse();
+  return days.map((date) => ({ date, state: doneSet.has(date) ? "done" : anySet.has(date) ? "miss" : "none" }));
+}
+// Turn active habits + their logs into the review's per-habit view model, keyed to
+// the day being logged (`endKey`): today for the evening, yesterday for the morning
+// catch-up. `whenWord` phrases the question ("today?" vs "yesterday?").
+function hydrateHabits(active, logs, endKey, whenWord) {
+  const byName = {};
+  for (const l of Array.isArray(logs) ? logs : []) (byName[l.habit_name] = byName[l.habit_name] || []).push(l);
+  return active
+    .slice()
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+    .map((h) => {
+      const list = byName[h.name] || [];
+      const doneSet = new Set(list.filter((l) => l.done).map((l) => l.date));
+      const dayLog = list.find((l) => l.date === endKey);
+      const base = h.question || `${h.name} today?`;
+      const question = whenWord === "yesterday" ? base.replace(/\btoday\b/i, "yesterday") : base;
+      return {
+        id: h.id, name: h.name, question,
+        done: dayLog ? !!dayLog.done : null, logId: dayLog?.id || null,
+        streak: computeStreak(doneSet, endKey),
+        history: buildHistory(list, endKey, 21),
+        justLogged: false,
+      };
+    });
+}
 function speechAvailable() {
   return typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 }
@@ -45,7 +81,7 @@ function parseYesNo(text) {
   return null;
 }
 
-export default function DailyBriefing({ onSpeak }) {
+export default function DailyBriefing({ onSpeak, onActive }) {
   const parts = getBriefingParts();
   const slot = parts.slot;
   const dateKey = getChicagoParts().dateKey;
@@ -68,6 +104,7 @@ export default function DailyBriefing({ onSpeak }) {
   const habitsRef = useRef([]);
   const answerRef = useRef(null); // { id, resolve }
   const recRef = useRef(null);
+  const logDateRef = useRef(dateKey); // the day answers are logged against (today, or yesterday for catch-up)
   useEffect(() => { habitsRef.current = habits; }, [habits]);
   useEffect(() => () => {
     try { recRef.current && recRef.current.stop(); } catch { /* ignore */ }
@@ -88,20 +125,24 @@ export default function DailyBriefing({ onSpeak }) {
     } catch { return ""; }
   }
 
-  // ---- logging (with a brief "just logged" animation flag) ----
+  // ---- logging (with a brief "just logged" animation flag + strip update) ----
   const logHabit = async (habit, done) => {
-    setHabits((prev) => prev.map((x) =>
-      x.id === habit.id
-        ? { ...x, done, justLogged: true, streak: x.streak + (done && x.done !== true ? 1 : 0) }
-        : x));
+    const logDate = logDateRef.current;
+    setHabits((prev) => prev.map((x) => {
+      if (x.id !== habit.id) return x;
+      const history = Array.isArray(x.history)
+        ? x.history.map((c) => (c.date === logDate ? { ...c, state: done ? "done" : "miss" } : c))
+        : x.history;
+      return { ...x, done, justLogged: true, history, streak: x.streak + (done && x.done !== true ? 1 : 0) };
+    }));
     window.setTimeout(() => {
       setHabits((prev) => prev.map((x) => (x.id === habit.id ? { ...x, justLogged: false } : x)));
-    }, 1000);
+    }, 1400);
     try {
       if (habit.logId) {
         await base44.entities.HabitLog.update(habit.logId, { done });
       } else {
-        const rec = await base44.entities.HabitLog.create({ habit_name: habit.name, date: dateKey, done });
+        const rec = await base44.entities.HabitLog.create({ habit_name: habit.name, date: logDate, done });
         if (rec?.id) setHabits((prev) => prev.map((x) => (x.id === habit.id ? { ...x, logId: rec.id } : x)));
       }
     } catch { /* ignore */ }
@@ -160,8 +201,8 @@ export default function DailyBriefing({ onSpeak }) {
     if (answerRef.current && answerRef.current.id === h.id) resolveAnswer(h.id, done ? "yes" : "no");
   };
 
-  // ---- the spoken evening flow ----
-  const runEvening = async (introText, list) => {
+  // ---- the spoken habit flow (evening review, or morning catch-up) ----
+  const runHabitFlow = async (introText, list, closing) => {
     await say(introText || "Right — let's run through your day.");
     for (const h of list) {
       if (!openRef.current) break;
@@ -173,12 +214,13 @@ export default function DailyBriefing({ onSpeak }) {
       await waitForAnswer(h.id);
     }
     setCurrentId(null);
-    if (openRef.current) await say("That's you logged — nicely done.");
+    if (openRef.current && closing) await say(closing);
   };
 
   // Gather data, then either read the morning briefing or run the evening flow.
   const openBriefing = async () => {
     setOpen(true); openRef.current = true;
+    onActive && onActive(true); // pause the page's always-on listener during the review
     setLoading(true); setCaption(""); setCurrentId(null);
     try {
       const today = dateKey;
@@ -211,27 +253,15 @@ export default function DailyBriefing({ onSpeak }) {
           active = created;
         }
         const logs = (await base44.entities.HabitLog.list("-date", 400).catch(() => [])) || [];
-        const byName = {};
-        for (const l of Array.isArray(logs) ? logs : []) (byName[l.habit_name] = byName[l.habit_name] || []).push(l);
-        const hydrated = active
-          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-          .map((h) => {
-            const list = byName[h.name] || [];
-            const doneSet = new Set(list.filter((l) => l.done).map((l) => l.date));
-            const todayLog = list.find((l) => l.date === today);
-            return {
-              id: h.id, name: h.name, question: h.question || `${h.name} today?`,
-              done: todayLog ? !!todayLog.done : null, logId: todayLog?.id || null,
-              streak: computeStreak(doneSet, today), justLogged: false,
-            };
-          });
+        logDateRef.current = today;
+        const hydrated = hydrateHabits(active, logs, today, "today");
         setHabits(hydrated); habitsRef.current = hydrated;
         setIncomplete(dueToday.map((t) => ({ id: t.id, title: t.title || "(task)", done: false })));
         setLoading(false);
 
         const streaks = hydrated.filter((h) => h.streak > 0).map((h) => ({ name: h.name, days: h.streak }));
         const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks });
-        await runEvening(intro, hydrated);
+        await runHabitFlow(intro, hydrated, "That's you logged — nicely done.");
       } else {
         const rem = [];
         for (const t of dueToday.slice(0, 8)) rem.push({ kind: "task", label: t.title || "(task)" });
@@ -247,6 +277,27 @@ export default function DailyBriefing({ onSpeak }) {
           important: important.map((s) => s.title).filter(Boolean),
         });
         await say(morningSay || "Here's what's on today.");
+
+        // Catch-up: only log yesterday if nothing was logged the night before.
+        if (openRef.current) {
+          const yesterday = prevDay(today);
+          const active = (await base44.entities.Habit.filter({ active: true }).catch(() => [])) || [];
+          if (Array.isArray(active) && active.length) {
+            const logs = (await base44.entities.HabitLog.list("-date", 400).catch(() => [])) || [];
+            const loggedYesterday = (Array.isArray(logs) ? logs : []).some((l) => l.date === yesterday);
+            if (!loggedYesterday && openRef.current) {
+              logDateRef.current = yesterday;
+              const hydrated = hydrateHabits(active, logs, yesterday, "yesterday");
+              setHabits(hydrated); habitsRef.current = hydrated;
+              await runHabitFlow(
+                "Before we get into today — you didn't log last night, so let's catch up on yesterday.",
+                hydrated,
+                "Lovely — yesterday's logged. Have a good one.",
+              );
+              logDateRef.current = today;
+            }
+          }
+        }
       }
     } catch { setLoading(false); }
   };
@@ -276,6 +327,7 @@ export default function DailyBriefing({ onSpeak }) {
   // End the review (stop voice + TTS, resolve any pending question).
   const endReview = (done) => {
     openRef.current = false;
+    onActive && onActive(false); // resume the page's always-on listener
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* ignore */ }
     stopListen();
     if (answerRef.current) { const r = answerRef.current; answerRef.current = null; r.resolve("skip"); }
@@ -350,8 +402,9 @@ export default function DailyBriefing({ onSpeak }) {
               </div>
             )}
 
-            {/* Evening: habit questions (tap or say), with logging animation */}
-            {isEvening && (
+            {/* Habit questions (tap or say), with logging animation + history strip.
+                Shown in the evening review and the morning "log yesterday" catch-up. */}
+            {habits.length > 0 && (
               <>
                 <div className="flex flex-col gap-2">
                   {habits.map((h) => {
@@ -379,16 +432,20 @@ export default function DailyBriefing({ onSpeak }) {
                             <button type="button" onClick={() => handleTap(h, false)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${h.done === false ? "bg-gray-600 text-white" : "border border-white/10 text-gray-400 hover:border-white/25"}`}>No</button>
                           </div>
                         </div>
+                        {/* GitHub-style history: the answered day lands in the strip. */}
+                        <ContributionStrip history={h.history} justLogged={h.justLogged} />
                       </div>
                     );
                   })}
-                  <form onSubmit={addHabit} className="flex items-center gap-2">
-                    <input value={newHabit} onChange={(e) => setNewHabit(e.target.value)} placeholder="Track another habit…" className="flex-1 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25" />
-                    <button type="submit" disabled={!newHabit.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-gray-200 disabled:opacity-40 hover:bg-white/15" aria-label="Add habit"><Plus className="h-4 w-4" /></button>
-                  </form>
+                  {isEvening && (
+                    <form onSubmit={addHabit} className="flex items-center gap-2">
+                      <input value={newHabit} onChange={(e) => setNewHabit(e.target.value)} placeholder="Track another habit…" className="flex-1 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25" />
+                      <button type="submit" disabled={!newHabit.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-gray-200 disabled:opacity-40 hover:bg-white/15" aria-label="Add habit"><Plus className="h-4 w-4" /></button>
+                    </form>
+                  )}
                 </div>
 
-                {incomplete.length > 0 && (
+                {isEvening && incomplete.length > 0 && (
                   <div>
                     <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">Still open from today</div>
                     <div className="flex flex-col gap-1.5">
