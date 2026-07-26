@@ -5,6 +5,8 @@
 //   - the Vercel Cron poller → Authorization: Bearer <CRON_SECRET>  (GET, pull Google)
 // Both write with the Admin SDK. A leaked DEVICE_TOKEN can only touch DEVICE_USER_ID.
 import { timingSafeEqual } from "node:crypto";
+import webpush from "web-push";
+import nodemailer from "nodemailer";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents } from "./google/_client.js";
 
@@ -28,12 +30,82 @@ export default async function handler(req, res) {
 
   const db = getAdminDb();
   try {
-    if (isCron) return await pollGoogle(db, res);
+    if (isCron) {
+      // Two daily crons (see vercel.json): ?job=morning (poll Google + notify) and
+      // ?job=evening (notify). No job → just poll Google (manual/legacy).
+      const job = req.query && (req.query.job === "morning" || req.query.job === "evening") ? req.query.job : null;
+      const out = { job: job || "poll" };
+      if (!job || job === "morning") out.google = await runGooglePoll(db);
+      if (job) {
+        out.pushed = await sendBriefingPush(db, job);
+        out.emailed = await sendBriefingEmail(job);
+      }
+      return res.status(200).json({ ok: true, ...out, ran_at: new Date().toISOString() });
+    }
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
     return await workerPush(db, req, res);
   } catch (err) {
     console.error("ingest error:", err);
     return res.status(500).json({ error: err.message || "Ingest failed" });
+  }
+}
+
+// Notification copy per slot.
+function briefingCopy(slot) {
+  return slot === "evening"
+    ? { title: "Evening review", body: "Time to log your day — tap to check in.", tag: "signal-evening" }
+    : { title: "Good morning", body: "Your briefing's ready — tap to see what's on today.", tag: "signal-morning" };
+}
+
+// Send a Web Push to every stored subscription. Prunes expired ones.
+async function sendBriefingPush(db, slot) {
+  const pub = process.env.VAPID_PUBLIC_KEY;
+  const priv = process.env.VAPID_PRIVATE_KEY;
+  if (!pub || !priv) return 0;
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:signal@example.com", pub, priv);
+
+  const copy = briefingCopy(slot);
+  const payload = JSON.stringify({ ...copy, url: "/cowork" });
+  const snap = await db.collection("push_subscriptions").get();
+  let sent = 0;
+  for (const doc of snap.docs) {
+    const sub = doc.data().subscription;
+    if (!sub || !sub.endpoint) continue;
+    try {
+      await webpush.sendNotification(sub, payload);
+      sent++;
+    } catch (err) {
+      // 404/410 = gone; drop the dead subscription.
+      if (err && (err.statusCode === 404 || err.statusCode === 410)) {
+        await doc.ref.delete().catch(() => {});
+      }
+    }
+  }
+  return sent;
+}
+
+// A dependable second channel: email the reminder (works on any device, no install).
+async function sendBriefingEmail(slot) {
+  const to = process.env.NOTIFY_EMAIL || process.env.SMTP_USER;
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!to || !host || !user || !pass) return false;
+  const copy = briefingCopy(slot);
+  try {
+    const transport = nodemailer.createTransport({
+      host, port: Number(process.env.SMTP_PORT || 587), secure: Number(process.env.SMTP_PORT || 587) === 465,
+      auth: { user, pass },
+    });
+    await transport.sendMail({
+      from: process.env.SMTP_FROM || user,
+      to,
+      subject: `Signal — ${copy.title}`,
+      text: `${copy.body}\n\nOpen Signal: ${(process.env.APP_URL || "").replace(/\/$/, "")}/cowork`,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -90,10 +162,10 @@ async function workerPush(db, req, res) {
 }
 
 // ---- cron: pull Gmail / Drive / Calendar for every connected user ----
-async function pollGoogle(db, res) {
+async function runGooglePoll(db) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return res.status(503).json({ error: "Google client not configured" });
+  if (!clientId || !clientSecret) return { skipped: "google not configured" };
 
   const now = new Date().toISOString();
   const summary = { users: 0, written: 0, errors: [] };
@@ -145,5 +217,5 @@ async function pollGoogle(db, res) {
       summary.written += items.length;
     }
   }
-  return res.status(200).json({ ok: true, ...summary, ran_at: now });
+  return summary;
 }

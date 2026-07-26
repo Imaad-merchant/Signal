@@ -48,6 +48,8 @@ export default defineConfig({
         // invisible while /api changes (denylisted) still landed. Now: online
         // always fetches the current build; offline falls back to the last one seen.
         globPatterns: ['**/*.{ico,png,svg,webmanifest}'], // icons/manifest only
+        // Add push/notification handlers without touching the caching strategy.
+        importScripts: ['/push-sw.js'],
         // Disable the default navigateFallback → precached index.html (that was the
         // stale-shell). Navigations are handled network-first below instead.
         navigateFallback: null,

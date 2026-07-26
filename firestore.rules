@@ -127,6 +127,11 @@ service cloud.firestore {
     match /google_tokens/{docId} {
       allow read, write: if false;
     }
+    // Web Push subscriptions — written by the server (Admin SDK) after the client
+    // hands over its subscription via /api/jarvis; not client-readable.
+    match /push_subscriptions/{docId} {
+      allow read, write: if false;
+    }
 
     // Default deny: anything not matched above is rejected.
     match /{document=**} {
