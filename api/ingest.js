@@ -6,7 +6,7 @@
 // Both write with the Admin SDK. A leaked DEVICE_TOKEN can only touch DEVICE_USER_ID.
 import { timingSafeEqual } from "node:crypto";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
-import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listTodayEvents } from "./google/_client.js";
+import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents } from "./google/_client.js";
 
 function matches(header, secret) {
   if (!secret) return false;
@@ -127,8 +127,11 @@ async function pollGoogle(db, res) {
     } catch (err) { summary.errors.push(`drive ${uid}: ${err.message}`); }
 
     try {
-      for (const e of await listTodayEvents(accessToken)) {
-        items.push({ kind: "calendar", external_id: e.id, title: e.summary, summary: `Today ${new Date(e.start).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "America/Chicago" })}`, link: e.link, occurred_at: e.start || now });
+      for (const e of await listUpcomingEvents(accessToken, 14)) {
+        const when = e.start
+          ? new Date(e.start).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "America/Chicago" })
+          : "";
+        items.push({ kind: "calendar", external_id: e.id, title: e.summary, summary: when, link: e.link, occurred_at: e.start || now });
       }
     } catch (err) { summary.errors.push(`calendar ${uid}: ${err.message}`); }
 
