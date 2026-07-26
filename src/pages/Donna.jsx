@@ -1,17 +1,22 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
 import RecentActions from "@/components/donna/RecentActions";
 import DailyBriefing from "@/components/donna/DailyBriefing";
 import SpokenCaption from "@/components/donna/SpokenCaption";
+import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import { useVoice } from "@/components/donna/useVoice";
 import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
+import {
+  loadReminders, saveReminders, newId, parseReminderCreate, parseReminderCancel,
+  parseDelivery, matchReminder, everyLabel, deliveryLabel,
+} from "@/components/donna/reminders";
 
 // Is this slot's morning/evening briefing still pending? If so it owns the top
 // alert and the generic nudge stands down to avoid stacking two alerts.
@@ -99,6 +104,77 @@ export default function Donna() {
   const transcriptRef = useRef(null);
   const queryClient = useQueryClient();
 
+  // ---- Recurring reminders ("routines"). Stored per-device; run while this page
+  //      is open. Refs mirror state so the stable handleTranscript sees the latest. ----
+  const [reminders, setReminders] = useState(loadReminders);
+  const remindersRef = useRef(reminders);
+  const [pendingReminder, setPendingReminder] = useState(null); // awaiting a delivery choice
+  const pendingReminderRef = useRef(null);
+  const [orbAlert, setOrbAlert] = useState(false); // orb-delivery glow
+  const [reminderToast, setReminderToast] = useState(""); // on-screen reminder banner
+  const [showRoutines, setShowRoutines] = useState(false); // routines editor panel
+
+  const commitReminders = useCallback((next) => {
+    remindersRef.current = next;
+    setReminders(next);
+    saveReminders(next);
+  }, []);
+  const addReminder = useCallback((r) => {
+    const list = remindersRef.current || [];
+    commitReminders([...list, {
+      id: newId(list), title: r.title, everyMinutes: r.everyMinutes,
+      delivery: r.delivery || "text", enabled: true, lastFired: 0,
+    }]);
+  }, [commitReminders]);
+  const updateReminder = useCallback((id, patch) => {
+    commitReminders((remindersRef.current || []).map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }, [commitReminders]);
+  const removeReminder = useCallback((id) => {
+    commitReminders((remindersRef.current || []).filter((x) => x.id !== id));
+  }, [commitReminders]);
+  const setPending = useCallback((v) => { pendingReminderRef.current = v; setPendingReminder(v); }, []);
+
+  // Deliver a due reminder in its chosen style. Reassigned each render so it always
+  // closes over the current speak()/muted; the interval calls it via the ref.
+  const deliverRef = useRef(null);
+  deliverRef.current = (r) => {
+    const title = r.title;
+    pushTurn("signal", `Reminder — ${title}.`);
+    if (r.delivery === "voice" && !muted) {
+      speak(`Time to ${title}.`);
+      return;
+    }
+    if (r.delivery === "orb") {
+      setOrbAlert(true);
+      window.setTimeout(() => setOrbAlert(false), 12000);
+    }
+    // Always show the banner for orb/text (and as the fallback when voice is muted)
+    // so it's clear what the reminder is.
+    setReminderToast(title);
+    window.setTimeout(() => setReminderToast((c) => (c === title ? "" : c)), 30000);
+  };
+
+  // Fire due reminders while the page is open (checks every 15s).
+  useEffect(() => {
+    const tick = () => {
+      const now = Date.now();
+      const list = remindersRef.current || [];
+      let changed = false, fired = false;
+      for (const r of list) {
+        if (!r.enabled) continue;
+        const period = Math.max(1, r.everyMinutes || 30) * 60000;
+        if (!r.lastFired) { r.lastFired = now; changed = true; continue; } // arm on first sight
+        if (now - r.lastFired >= period) {
+          r.lastFired = now; changed = true; fired = true;
+          try { deliverRef.current && deliverRef.current(r); } catch { /* ignore */ }
+        }
+      }
+      if (changed) { saveReminders(list); if (fired) setReminders([...list]); }
+    };
+    const iv = window.setInterval(tick, 15000);
+    return () => window.clearInterval(iv);
+  }, []);
+
   // Append a caption turn ("you" or "signal") to the running transcript.
   const pushTurn = useCallback((who, text) => {
     const v = (text || "").trim();
@@ -111,6 +187,46 @@ export default function Donna() {
     const t = (text || "").trim();
     if (!t) { setMode("idle"); return; }
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt any current speech */ }
+
+    // ---- Recurring reminders ("routines"), handled locally before the server route. ----
+    // 1) We just asked HOW to deliver a reminder — this utterance is the answer.
+    if (pendingReminderRef.current) {
+      const pend = pendingReminderRef.current;
+      setPending(null);
+      const delivery = parseDelivery(t) || "text";
+      setHeard(t); pushTurn("you", t);
+      addReminder({ ...pend, delivery });
+      const say = `Done. I'll remind you to ${pend.title} ${everyLabel(pend.everyMinutes)} and ${deliveryLabel(delivery)}.`;
+      setReply(say); setNote(""); pushTurn("signal", say); speak(say);
+      return;
+    }
+    // 2) "remind me to X every N minutes [out loud | orb | on screen]"
+    const rc = parseReminderCreate(t);
+    if (rc) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      if (rc.delivery) {
+        addReminder(rc);
+        const say = `Right — I'll remind you to ${rc.title} ${everyLabel(rc.everyMinutes)} and ${deliveryLabel(rc.delivery)}.`;
+        setReply(say); pushTurn("signal", say); speak(say);
+      } else {
+        setPending({ title: rc.title, everyMinutes: rc.everyMinutes });
+        const say = `Sure. How should I remind you to ${rc.title} — shall I say it out loud, glow the orb, or show it on screen?`;
+        setReply(say); pushTurn("signal", say); speak(say);
+      }
+      return;
+    }
+    // 3) "stop reminding me [to X]" / "delete the reminder"
+    const rx = parseReminderCancel(t);
+    if (rx) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      const target = matchReminder(remindersRef.current, rx.title);
+      let say;
+      if (target) { removeReminder(target.id); say = `Stopped reminding you to ${target.title}.`; }
+      else say = "You don't have a reminder like that set.";
+      setReply(say); pushTurn("signal", say); speak(say);
+      return;
+    }
+
     setHeard(t);
     // If this input answers a tapped question in the "To answer" box, check it off.
     const answeringQ = answeringRef.current;
@@ -308,14 +424,14 @@ export default function Donna() {
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
-  // Always listening (unless muted) — including while Donna is speaking, so you can
-  // interrupt with "Donna …". Pause only while a command is being captured/handled.
+  // Always listening (unless muted) — no wake word: anything you say is a command,
+  // including while Donna is speaking (barge-in). Pause only while a command is
+  // being captured/handled so we don't re-trigger mid-thought.
   useWakeWord({
     enabled: !muted,
     active: mode === "listening" || mode === "processing",
     onCommand: handleTranscript,
-    interrupt: mode === "speaking",   // barge in on any speech while she's talking
-    echoText: spoken.text,            // …but ignore her own audio echoing back
+    echoText: spoken.text,   // ignore her own audio echoing back through the mic
   });
 
   // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
@@ -718,6 +834,43 @@ export default function Donna() {
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Donna</h1>
 
+      {/* Routines opener (shows a count when reminders exist). */}
+      {reminders.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowRoutines(true)}
+          className="absolute top-4 left-14 z-20 flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:bg-white/10"
+          title="Your routines"
+        >
+          <Bell className="h-3.5 w-3.5" /> {reminders.length}
+        </button>
+      )}
+
+      {/* On-screen reminder banner (text delivery, or orb/voice-muted fallback). */}
+      {reminderToast && (
+        <div className="absolute top-14 left-1/2 z-30 -translate-x-1/2">
+          <div className="flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-100 shadow-lg backdrop-blur-sm">
+            <Bell className="h-4 w-4 text-cyan-300" />
+            <span>Reminder — {reminderToast}</span>
+            <button type="button" onClick={() => setReminderToast("")} aria-label="Dismiss" className="ml-1 text-cyan-200/70 hover:text-cyan-100">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Routines editor overlay. */}
+      {showRoutines && (
+        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowRoutines(false)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <RoutinesPanel reminders={reminders} onUpdate={updateReminder} onDelete={removeReminder} />
+            <p className="mt-2 max-w-xs text-center text-[11px] text-gray-500">
+              Say “remind me to … every 30 minutes”. Routines run while Donna is open.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Proactive nudge: Donna asks permission to speak; tap to hear it. */}
       {nudgeReady && mode === "idle" && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
@@ -769,7 +922,7 @@ export default function Donna() {
           className="relative outline-none"
           style={{ width: "min(66vw, 42vh)", height: "min(66vw, 42vh)" }}
         >
-          <Orb state={mode} amplitudeRef={voice.amplitudeRef} attention={mode === "idle" && nudgeReady} />
+          <Orb state={mode} amplitudeRef={voice.amplitudeRef} attention={orbAlert || (mode === "idle" && nudgeReady)} />
         </button>
 
         {/* your words small below the orb */}
