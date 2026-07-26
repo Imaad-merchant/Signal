@@ -1,19 +1,18 @@
-import React, { useState, useCallback } from "react";
-import { Sunrise, Moon, X, Check, Loader2, Plus, CalendarClock, Bell } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Sunrise, Moon, X, Check, Loader2, Plus, CalendarClock, Bell, Mic } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { getChicagoParts, getBriefingParts, briefingSlotKey } from "./checkinUtils";
 import { enablePush, pushSupported } from "./push";
 
 // Morning look-ahead + evening habit review, surfaced on /cowork.
-// A top alert appears once per slot (morning / evening). Tapping it opens the panel
-// and has Signal *speak* (via onSpeak → the orb) a briefing, then:
-//   morning → reminders of what's on today
-//   evening → habit yes/no logging (with streaks) + follow-up on today's unchecked tasks
-// Habits are stored as Habit + HabitLog; the first evening seeds a starter set you edit.
+// A top alert appears once per slot. Tapping it runs a SPOKEN flow: Donna reads
+// the briefing aloud (captions at the top), and for the evening review she asks
+// each habit in turn — the questions sit in a list on the right that you can TAP
+// or answer by VOICE ("yes"/"no"), and each answer animates as it logs.
 
 const DEFAULT_HABITS = ["Stayed sober", "No vaping", "No smoking", "Went to the gym"];
 const DONE_STATES = ["done", "completed"];
-const DONE_KEY = "pulse_briefing_done"; // JSON array of finished slot keys
+const DONE_KEY = "pulse_briefing_done";
 
 function readDone() {
   try { return JSON.parse(localStorage.getItem(DONE_KEY) || "[]"); } catch { return []; }
@@ -35,39 +34,152 @@ function computeStreak(doneSet, today) {
   while (doneSet.has(day)) { n++; day = prevDay(day); }
   return n;
 }
+function speechAvailable() {
+  return typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+}
+function parseYesNo(text) {
+  const t = (text || "").toLowerCase();
+  if (/\b(skip|next|pass|dunno|not sure)\b/.test(t)) return "skip";
+  if (/\b(yes|yeah|yep|yup|ya|did|done|sure|affirmative|correct|i did|of course|absolutely)\b/.test(t)) return "yes";
+  if (/\b(no|nope|nah|didn'?t|did not|negative|never|unfortunately)\b/.test(t)) return "no";
+  return null;
+}
 
 export default function DailyBriefing({ onSpeak }) {
-  // Slot is anchored to 6am / 6pm; the day for data queries is the actual today.
   const parts = getBriefingParts();
   const slot = parts.slot;
   const dateKey = getChicagoParts().dateKey;
   const slotKey = briefingSlotKey(parts);
-  const [dismissed, setDismissed] = useState(() => readDone().includes(slotKey));
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const [reminders, setReminders] = useState([]); // morning
-  const [habits, setHabits] = useState([]);        // evening: [{ id, name, question, done, streak }]
-  const [incomplete, setIncomplete] = useState([]); // evening: [{ id, title, done }]
-  const [newHabit, setNewHabit] = useState("");
-  const [pushMsg, setPushMsg] = useState("");
-
-  const onEnablePush = async () => {
-    setPushMsg("…");
-    const r = await enablePush();
-    setPushMsg(r.ok ? "Reminders on ✓" : r.reason);
-  };
-
   const isEvening = slot === "evening";
   const SlotIcon = isEvening ? Moon : Sunrise;
 
-  const close = () => setOpen(false);
-  const finish = () => { markDone(slotKey); setDismissed(true); setOpen(false); };
+  const [dismissed, setDismissed] = useState(() => readDone().includes(slotKey));
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [caption, setCaption] = useState("");
+  const [currentId, setCurrentId] = useState(null);
+  const [reminders, setReminders] = useState([]);
+  const [habits, setHabits] = useState([]);
+  const [incomplete, setIncomplete] = useState([]);
+  const [newHabit, setNewHabit] = useState("");
+  const [pushMsg, setPushMsg] = useState("");
 
-  // Gather everything, speak the briefing, and open the panel.
-  const openBriefing = useCallback(async () => {
-    setOpen(true);
-    setLoading(true);
+  const openRef = useRef(false);
+  const habitsRef = useRef([]);
+  const answerRef = useRef(null); // { id, resolve }
+  const recRef = useRef(null);
+  useEffect(() => { habitsRef.current = habits; }, [habits]);
+  useEffect(() => () => {
+    try { recRef.current && recRef.current.stop(); } catch { /* ignore */ }
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* ignore */ }
+  }, []);
+
+  // Speak a line (caption + orb TTS) and wait for it to finish.
+  const say = async (text) => {
+    setCaption(text || "");
+    if (text && onSpeak) { try { await onSpeak(text); } catch { /* ignore */ } }
+  };
+
+  async function fetchBriefing(s, context) {
+    try {
+      const res = await base44.functions.invoke("donna", { route: "briefing", slot: s, context });
+      const data = res && res.data ? res.data : res || {};
+      return data.say ? String(data.say) : "";
+    } catch { return ""; }
+  }
+
+  // ---- logging (with a brief "just logged" animation flag) ----
+  const logHabit = async (habit, done) => {
+    setHabits((prev) => prev.map((x) =>
+      x.id === habit.id
+        ? { ...x, done, justLogged: true, streak: x.streak + (done && x.done !== true ? 1 : 0) }
+        : x));
+    window.setTimeout(() => {
+      setHabits((prev) => prev.map((x) => (x.id === habit.id ? { ...x, justLogged: false } : x)));
+    }, 1000);
+    try {
+      if (habit.logId) {
+        await base44.entities.HabitLog.update(habit.logId, { done });
+      } else {
+        const rec = await base44.entities.HabitLog.create({ habit_name: habit.name, date: dateKey, done });
+        if (rec?.id) setHabits((prev) => prev.map((x) => (x.id === habit.id ? { ...x, logId: rec.id } : x)));
+      }
+    } catch { /* ignore */ }
+  };
+
+  // ---- voice answer for the current question ----
+  const stopListen = () => {
+    const rec = recRef.current;
+    recRef.current = null;
+    if (rec) { try { rec.onend = null; rec.stop(); } catch { /* ignore */ } }
+  };
+  const startListen = (id) => {
+    if (!speechAvailable()) return; // tap-only fallback
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = "en-GB";
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.onresult = (e) => {
+      let txt = "";
+      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript + " ";
+      if (!answerRef.current || answerRef.current.id !== id) return;
+      const val = parseYesNo(txt);
+      if (val === "yes" || val === "no") {
+        const h = habitsRef.current.find((x) => x.id === id);
+        if (h) logHabit(h, val === "yes");
+        resolveAnswer(id, val);
+      } else if (val === "skip") {
+        resolveAnswer(id, "skip");
+      }
+      // no clear yes/no → onend restarts the listen
+    };
+    rec.onerror = () => { /* onend handles restart */ };
+    rec.onend = () => {
+      if (answerRef.current && answerRef.current.id === id && openRef.current) {
+        try { rec.start(); } catch { /* ignore */ }
+      }
+    };
+    recRef.current = rec;
+    try { rec.start(); } catch { /* ignore */ }
+  };
+  const waitForAnswer = (id) => new Promise((resolve) => {
+    answerRef.current = { id, resolve };
+    startListen(id);
+  });
+  const resolveAnswer = (id, val) => {
+    stopListen();
+    const r = answerRef.current;
+    answerRef.current = null;
+    if (r && r.id === id) r.resolve(val);
+  };
+
+  // Tapping Yes/No logs, and (if it's the question being asked) advances the flow.
+  const handleTap = async (h, done) => {
+    await logHabit(h, done);
+    if (answerRef.current && answerRef.current.id === h.id) resolveAnswer(h.id, done ? "yes" : "no");
+  };
+
+  // ---- the spoken evening flow ----
+  const runEvening = async (introText, list) => {
+    await say(introText || "Right — let's run through your day.");
+    for (const h of list) {
+      if (!openRef.current) break;
+      const cur = habitsRef.current.find((x) => x.id === h.id);
+      if (cur && cur.done != null) continue; // already answered by tapping ahead
+      setCurrentId(h.id);
+      await say(h.question);
+      if (!openRef.current) break;
+      await waitForAnswer(h.id);
+    }
+    setCurrentId(null);
+    if (openRef.current) await say("That's you logged — nicely done.");
+  };
+
+  // Gather data, then either read the morning briefing or run the evening flow.
+  const openBriefing = async () => {
+    setOpen(true); openRef.current = true;
+    setLoading(true); setCaption(""); setCurrentId(null);
     try {
       const today = dateKey;
       const [tasksRaw, commitsRaw, signalsRaw] = await Promise.all([
@@ -88,7 +200,6 @@ export default function DailyBriefing({ onSpeak }) {
       const important = signals.filter((s) => s && s.kind === "email").slice(0, 5);
 
       if (isEvening) {
-        // Habits (seed a starter set the first time).
         let active = (await base44.entities.Habit.filter({ active: true }).catch(() => [])) || [];
         if (!Array.isArray(active) || active.length === 0) {
           const created = [];
@@ -101,9 +212,7 @@ export default function DailyBriefing({ onSpeak }) {
         }
         const logs = (await base44.entities.HabitLog.list("-date", 400).catch(() => [])) || [];
         const byName = {};
-        for (const l of Array.isArray(logs) ? logs : []) {
-          (byName[l.habit_name] = byName[l.habit_name] || []).push(l);
-        }
+        for (const l of Array.isArray(logs) ? logs : []) (byName[l.habit_name] = byName[l.habit_name] || []).push(l);
         const hydrated = active
           .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
           .map((h) => {
@@ -113,56 +222,33 @@ export default function DailyBriefing({ onSpeak }) {
             return {
               id: h.id, name: h.name, question: h.question || `${h.name} today?`,
               done: todayLog ? !!todayLog.done : null, logId: todayLog?.id || null,
-              streak: computeStreak(doneSet, today),
+              streak: computeStreak(doneSet, today), justLogged: false,
             };
           });
-        setHabits(hydrated);
+        setHabits(hydrated); habitsRef.current = hydrated;
         setIncomplete(dueToday.map((t) => ({ id: t.id, title: t.title || "(task)", done: false })));
+        setLoading(false);
 
         const streaks = hydrated.filter((h) => h.streak > 0).map((h) => ({ name: h.name, days: h.streak }));
-        const say = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks });
-        if (say && onSpeak) onSpeak(say);
+        const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks });
+        await runEvening(intro, hydrated);
       } else {
         const rem = [];
         for (const t of dueToday.slice(0, 8)) rem.push({ kind: "task", label: t.title || "(task)" });
         for (const e of events) rem.push({ kind: "event", label: `${e.title || "(event)"} — ${e.summary || ""}` });
-        for (const c of commits.filter((c) => (c.due_on || today) <= today).slice(0, 5)) {
-          rem.push({ kind: "commitment", label: c.text || "(commitment)" });
-        }
+        for (const c of commits.filter((c) => (c.due_on || today) <= today).slice(0, 5)) rem.push({ kind: "commitment", label: c.text || "(commitment)" });
         setReminders(rem);
-        const say = await fetchBriefing("morning", {
+        setLoading(false);
+        const morningSay = await fetchBriefing("morning", {
           today,
           due_today: dueToday.map((t) => t.title),
           events: events.map((e) => `${e.title} ${e.summary || ""}`),
           commitments: commits.map((c) => c.text).filter(Boolean).slice(0, 10),
           important: important.map((s) => s.title).filter(Boolean),
         });
-        if (say && onSpeak) onSpeak(say);
+        await say(morningSay || "Here's what's on today.");
       }
-    } catch { /* non-fatal */ }
-    setLoading(false);
-  }, [dateKey, isEvening, onSpeak]);
-
-  async function fetchBriefing(s, context) {
-    try {
-      const res = await base44.functions.invoke("donna", { route: "briefing", slot: s, context });
-      const data = res && res.data ? res.data : res || {};
-      return data.say ? String(data.say) : "";
-    } catch { return ""; }
-  }
-
-  // Log a habit yes/no for today (upsert).
-  const setHabitDone = async (habit, done) => {
-    setHabits((prev) => prev.map((h) => (h.id === habit.id ? { ...h, done } : h)));
-    try {
-      if (habit.logId) {
-        await base44.entities.HabitLog.update(habit.logId, { done });
-      } else {
-        const rec = await base44.entities.HabitLog.create({ habit_name: habit.name, date: dateKey, done });
-        if (rec?.id) setHabits((prev) => prev.map((h) => (h.id === habit.id ? { ...h, logId: rec.id } : h)));
-      }
-      setHabits((prev) => prev.map((h) => (h.id === habit.id ? { ...h, streak: h.streak + (done && h.done !== true ? 1 : 0) } : h)));
-    } catch { /* ignore */ }
+    } catch { setLoading(false); }
   };
 
   const addHabit = async (e) => {
@@ -172,7 +258,7 @@ export default function DailyBriefing({ onSpeak }) {
     setNewHabit("");
     try {
       const rec = await base44.entities.Habit.create({ name, question: `${name} today?`, active: true, sort_order: habits.length + 1 });
-      if (rec?.id) setHabits((prev) => [...prev, { id: rec.id, name, question: `${name} today?`, done: null, logId: null, streak: 0 }]);
+      if (rec?.id) setHabits((prev) => [...prev, { id: rec.id, name, question: `${name} today?`, done: null, logId: null, streak: 0, justLogged: false }]);
     } catch { /* ignore */ }
   };
 
@@ -181,9 +267,26 @@ export default function DailyBriefing({ onSpeak }) {
     try { await base44.entities.Task.update(item.id, { status: "done" }); } catch { /* ignore */ }
   };
 
+  const onEnablePush = async () => {
+    setPushMsg("…");
+    const r = await enablePush();
+    setPushMsg(r.ok ? "Reminders on ✓" : r.reason);
+  };
+
+  // End the review (stop voice + TTS, resolve any pending question).
+  const endReview = (done) => {
+    openRef.current = false;
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* ignore */ }
+    stopListen();
+    if (answerRef.current) { const r = answerRef.current; answerRef.current = null; r.resolve("skip"); }
+    setCurrentId(null); setCaption("");
+    if (done) { markDone(slotKey); setDismissed(true); }
+    setOpen(false);
+  };
+
   return (
     <>
-      {/* Always-available manual trigger (on demand, any time). */}
+      {/* Always-available manual trigger. */}
       <button
         type="button"
         onClick={openBriefing}
@@ -194,6 +297,7 @@ export default function DailyBriefing({ onSpeak }) {
         <SlotIcon className="h-5 w-5" />
       </button>
 
+      {/* Once-per-slot alert. */}
       {!open && !dismissed && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5">
           <button
@@ -211,21 +315,34 @@ export default function DailyBriefing({ onSpeak }) {
       )}
 
       {open && (
-        <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center" onClick={close}>
-          <div className="max-h-[86vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-white/10 bg-[#0e1015] p-4 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center justify-between">
+        <>
+          {/* Captions at the top — what Donna is saying right now. */}
+          <div className="pointer-events-none absolute top-16 left-1/2 z-[45] w-[min(92vw,640px)] -translate-x-1/2 px-4 text-center">
+            {loading && <p className="inline-flex items-center gap-2 rounded-2xl bg-black/50 px-4 py-2 text-sm text-gray-300 backdrop-blur-sm"><Loader2 className="h-4 w-4 animate-spin" /> Pulling your day together…</p>}
+            {!loading && caption && (
+              <p className="inline-block rounded-2xl bg-black/55 px-4 py-2 text-sm leading-snug text-gray-100 shadow-lg backdrop-blur-sm">{caption}</p>
+            )}
+            {currentId && (
+              <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-cyan-300/90">
+                <Mic className="h-3 w-3" /> say “yes” or “no” — or tap on the right
+              </p>
+            )}
+          </div>
+
+          {/* Question / review panel — right-docked on desktop, bottom sheet on mobile. */}
+          <div className="absolute z-[45] inset-x-0 bottom-0 flex max-h-[68vh] flex-col gap-3 overflow-y-auto rounded-t-2xl border-t border-white/10 bg-[#0e1015]/95 p-4 shadow-2xl backdrop-blur-md sm:inset-y-0 sm:bottom-auto sm:left-auto sm:right-0 sm:max-h-none sm:w-80 sm:rounded-t-none sm:border-l sm:border-t-0">
+            <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-100">
                 <SlotIcon className="h-4 w-4 text-blue-300" />
                 {isEvening ? "Evening review" : "Morning briefing"}
               </h2>
-              <button type="button" onClick={close} className="p-1 text-gray-500 hover:text-gray-200" aria-label="Close"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={() => endReview(false)} className="p-1 text-gray-500 hover:text-gray-200" aria-label="Close"><X className="h-4 w-4" /></button>
             </div>
 
-            {loading && <div className="flex items-center gap-2 py-6 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" /> Pulling your day together…</div>}
-
-            {!loading && !isEvening && (
+            {/* Morning: reminders */}
+            {!isEvening && (
               <div className="flex flex-col gap-2">
-                {reminders.length === 0 && <p className="py-4 text-sm text-gray-500">Nothing on the books today — a clear run.</p>}
+                {reminders.length === 0 && !loading && <p className="py-4 text-sm text-gray-500">Nothing on the books today — a clear run.</p>}
                 {reminders.map((r, i) => (
                   <div key={i} className="flex items-start gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2 text-sm text-gray-200">
                     <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
@@ -235,21 +352,38 @@ export default function DailyBriefing({ onSpeak }) {
               </div>
             )}
 
-            {!loading && isEvening && (
-              <div className="flex flex-col gap-3">
+            {/* Evening: habit questions (tap or say), with logging animation */}
+            {isEvening && (
+              <>
                 <div className="flex flex-col gap-2">
-                  {habits.map((h) => (
-                    <div key={h.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-2">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-gray-200">{h.question}</div>
-                        {h.streak > 0 && <div className="text-[11px] text-emerald-400">🔥 {h.streak}-day streak</div>}
+                  {habits.map((h) => {
+                    const current = h.id === currentId;
+                    return (
+                      <div
+                        key={h.id}
+                        className={`rounded-lg border px-3 py-2 transition-all duration-300 ${
+                          h.justLogged ? "scale-[1.02] border-emerald-400/60 bg-emerald-500/15"
+                          : current ? "border-cyan-400/60 bg-cyan-500/10 ring-1 ring-cyan-400/30"
+                          : "border-white/[0.07] bg-white/[0.03]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-sm text-gray-100">
+                              {current && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-cyan-400" />}
+                              <span className="truncate">{h.question}</span>
+                            </div>
+                            {h.streak > 0 && <div className="text-[11px] text-emerald-400">🔥 {h.streak}-day streak</div>}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {h.justLogged && <Check className="h-4 w-4 text-emerald-400" />}
+                            <button type="button" onClick={() => handleTap(h, true)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${h.done === true ? "bg-emerald-500 text-white" : "border border-white/10 text-gray-300 hover:border-emerald-400/40"}`}>Yes</button>
+                            <button type="button" onClick={() => handleTap(h, false)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${h.done === false ? "bg-gray-600 text-white" : "border border-white/10 text-gray-400 hover:border-white/25"}`}>No</button>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex shrink-0 gap-1.5">
-                        <button type="button" onClick={() => setHabitDone(h, true)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${h.done === true ? "bg-emerald-500 text-white" : "border border-white/10 text-gray-300 hover:border-emerald-400/40"}`}>Yes</button>
-                        <button type="button" onClick={() => setHabitDone(h, false)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${h.done === false ? "bg-gray-600 text-white" : "border border-white/10 text-gray-400 hover:border-white/25"}`}>No</button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <form onSubmit={addHabit} className="flex items-center gap-2">
                     <input value={newHabit} onChange={(e) => setNewHabit(e.target.value)} placeholder="Track another habit…" className="flex-1 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-1.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25" />
                     <button type="submit" disabled={!newHabit.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-gray-200 disabled:opacity-40 hover:bg-white/15" aria-label="Add habit"><Plus className="h-4 w-4" /></button>
@@ -271,23 +405,21 @@ export default function DailyBriefing({ onSpeak }) {
                     </div>
                   </div>
                 )}
-              </div>
+              </>
             )}
 
-            {!loading && (
-              <div className="mt-4 flex items-center justify-between gap-2">
-                {pushSupported() ? (
-                  <button type="button" onClick={onEnablePush} className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs text-gray-300 transition-colors hover:border-blue-400/40">
-                    <Bell className="h-3.5 w-3.5" /> {pushMsg || "Get 6am & 6pm reminders"}
-                  </button>
-                ) : <span />}
-                <button type="button" onClick={finish} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500">
-                  {isEvening ? "Done for tonight" : "Got it"}
+            <div className="mt-auto flex items-center justify-between gap-2 pt-2">
+              {pushSupported() ? (
+                <button type="button" onClick={onEnablePush} className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-xs text-gray-300 transition-colors hover:border-blue-400/40">
+                  <Bell className="h-3.5 w-3.5" /> {pushMsg || "6am & 6pm reminders"}
                 </button>
-              </div>
-            )}
+              ) : <span />}
+              <button type="button" onClick={() => endReview(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500">
+                {isEvening ? "Done for tonight" : "Got it"}
+              </button>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </>
   );

@@ -368,24 +368,28 @@ export default function Donna() {
     return { count: n, records };
   }
 
-  // ---- British TTS reply ----
+  // ---- British TTS reply. Returns a Promise that resolves when speech ends, so
+  //      callers (e.g. the evening review) can speak lines in sequence. ----
   function speak(text) {
-    if (!ttsSupported || !text) { setMode("idle"); return; }
-    try {
-      const synth = window.speechSynthesis;
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.02; u.pitch = 1; u.volume = 1;
-      const v = pickBritishVoice(synth.getVoices() || []);
-      if (v) u.voice = v;
-      u.onstart = () => { setMode("speaking"); voice.amplitudeRef.current = 1; };
-      u.onboundary = () => { voice.amplitudeRef.current = 1; };
-      u.onend = () => { setMode("idle"); voice.amplitudeRef.current = 0; };
-      u.onerror = () => { setMode("idle"); voice.amplitudeRef.current = 0; };
-      setMode("speaking");
-      synth.speak(u);
-    } catch {
-      setMode("idle");
-    }
+    return new Promise((resolve) => {
+      if (!ttsSupported || !text) { setMode("idle"); resolve(); return; }
+      try {
+        const synth = window.speechSynthesis;
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 1.02; u.pitch = 1; u.volume = 1;
+        const v = pickBritishVoice(synth.getVoices() || []);
+        if (v) u.voice = v;
+        u.onstart = () => { setMode("speaking"); voice.amplitudeRef.current = 1; };
+        u.onboundary = () => { voice.amplitudeRef.current = 1; };
+        u.onend = () => { setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+        u.onerror = () => { setMode("idle"); voice.amplitudeRef.current = 0; resolve(); };
+        setMode("speaking");
+        synth.speak(u);
+      } catch {
+        setMode("idle");
+        resolve();
+      }
+    });
   }
 
   // Undo everything the last command created (within the 24h window).
