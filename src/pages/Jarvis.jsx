@@ -45,13 +45,24 @@ export default function Jarvis() {
   const [lastActions, setLastActions] = useState([]); // undoable records from the last command
   const [undoing, setUndoing] = useState(false);
   const [nudgeReady, setNudgeReady] = useState(false); // Signal has a follow-up to voice
+  const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
+  const turnId = useRef(0);
+  const transcriptRef = useRef(null);
   const queryClient = useQueryClient();
+
+  // Append a caption turn ("you" or "signal") to the running transcript.
+  const pushTurn = useCallback((who, text) => {
+    const v = (text || "").trim();
+    if (!v) return;
+    setTurns((prev) => [...prev.slice(-19), { id: ++turnId.current, who, text: v }]);
+  }, []);
 
   // Handle a finished transcript (from voice or the type box).
   const handleTranscript = useCallback(async (text) => {
     const t = (text || "").trim();
     if (!t) { setMode("idle"); return; }
     setHeard(t);
+    pushTurn("you", t);
     setReply("");
     setNote("");
     setMode("processing");
@@ -112,6 +123,7 @@ export default function Jarvis() {
       const { count, records } = await applyActions(actions, today, allTasks);
       setLastActions(records);
       setReply(spoken);
+      pushTurn("signal", spoken);
       if (count) {
         setNote(`${count} action${count > 1 ? "s" : ""} done`);
         // Refresh the grid tiles + recent list so the new thing shows immediately.
@@ -123,7 +135,7 @@ export default function Jarvis() {
       setMode("idle");
       setNote(err?.message || "I couldn't reach the server — try again.");
     }
-  }, [queryClient]);
+  }, [queryClient, pushTurn]);
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
@@ -179,6 +191,12 @@ export default function Jarvis() {
     return () => { cancelled = true; };
   }, []);
 
+  // Keep the caption transcript scrolled to the latest line.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, voice.partial, mode]);
+
   // Silence the nudge for a while (after it's heard or dismissed).
   const quietNudge = () => {
     try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 6 * 3600 * 1000)); } catch { /* ignore */ }
@@ -213,7 +231,7 @@ export default function Jarvis() {
       });
       const data = res && res.data ? res.data : res || {};
       const say = data.say ? String(data.say) : "";
-      if (say) { setReply(say); speak(say); }
+      if (say) { setReply(say); pushTurn("signal", say); speak(say); }
       else setMode("idle");
     } catch {
       setMode("idle");
@@ -417,15 +435,42 @@ export default function Jarvis() {
         <Orb state={mode} amplitudeRef={voice.amplitudeRef} />
       </button>
 
-      {/* Transcript / reply / status */}
-      <div className="absolute bottom-40 left-0 right-0 px-6 text-center">
-        {heard && mode !== "idle" && <p className="text-xs text-gray-500 mb-1 truncate">“{voice.partial || heard}”</p>}
-        <p className={`text-sm flex items-center justify-center gap-2 ${mode === "speaking" ? "text-gray-200" : "text-gray-400"}`}>
-          {mode === "processing" && <Loader2 className="h-4 w-4 animate-spin text-amber-400" />}
-          {mode === "idle" && reply ? `“${reply}”` : statusLabel}
+      {/* Captioned transcript — both sides of the conversation, with live partial. */}
+      <div className="absolute bottom-36 left-0 right-0 z-[7] flex flex-col items-center px-4">
+        <div
+          ref={transcriptRef}
+          className="flex w-[min(94vw,600px)] flex-col gap-1.5 overflow-y-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ maxHeight: "26vh" }}
+        >
+          {turns.map((turn) => (
+            <div
+              key={turn.id}
+              className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-snug ${
+                turn.who === "you"
+                  ? "self-end bg-white/[0.07] text-gray-100"
+                  : "self-start border border-cyan-400/15 bg-cyan-500/10 text-cyan-50"
+              }`}
+            >
+              <span className="mb-0.5 block text-[9px] font-semibold uppercase tracking-[0.15em] opacity-45">
+                {turn.who === "you" ? "You" : "Signal"}
+              </span>
+              {turn.text}
+            </div>
+          ))}
+          {/* Live partial while listening. */}
+          {mode === "listening" && (
+            <div className="max-w-[85%] self-end rounded-2xl bg-white/[0.04] px-3.5 py-2 text-sm italic text-gray-400">
+              {voice.partial || "Listening…"}
+            </div>
+          )}
+        </div>
+        {/* Compact status line under the captions. */}
+        <p className={`mt-1.5 flex items-center justify-center gap-2 text-xs ${mode === "speaking" ? "text-cyan-300" : "text-gray-500"}`}>
+          {mode === "processing" && <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />}
+          {mode === "idle" ? (turns.length ? "" : statusLabel) : statusLabel}
         </p>
-        {note && <p className="mt-1 text-[11px] text-gray-500">{note}</p>}
-        {voice.micError && <p className="mt-1 text-[11px] text-amber-400/80 flex items-center justify-center gap-1"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
+        {note && <p className="text-center text-[11px] text-gray-500">{note}</p>}
+        {voice.micError && <p className="mt-0.5 flex items-center justify-center gap-1 text-[11px] text-amber-400/80"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
       </div>
 
       {/* Controls: undo (when available) + mic + always-available type fallback.

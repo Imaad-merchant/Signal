@@ -69,6 +69,11 @@ function useTileData() {
     (t) => t && (t.due_date === today) && t.status !== "done" && t.status !== "completed"
   );
   const openCommitments = Array.isArray(commitments.data) ? commitments.data : [];
+  // Open list items = open tasks (the add/complete list feature stores items as Tasks).
+  const openTasks = (Array.isArray(tasks.data) ? tasks.data : []).filter(
+    (t) => t && t.status !== "done" && t.status !== "completed"
+  );
+  const openTotal = openCommitments.length + openTasks.length;
   const latestCheckin = (Array.isArray(checkins.data) ? checkins.data : [])[0] || null;
   const latestInsight = (Array.isArray(insights.data) ? insights.data : [])[0] || null;
   const gradeRows = Array.isArray(grades.data) ? grades.data : [];
@@ -99,12 +104,12 @@ function useTileData() {
         key: "commitments",
         label: "Open",
         icon: ListChecks,
-        to: "/Dashboard",
-        loading: commitments.isLoading,
-        value: openCommitments.length ? String(openCommitments.length) : "0",
-        unit: openCommitments.length === 1 ? "commitment" : "commitments",
-        sub: openCommitments[0]?.text || "All clear",
-        tone: openCommitments.length ? "blue" : "muted",
+        to: "/Tasks",
+        loading: commitments.isLoading || tasks.isLoading,
+        value: String(openTotal),
+        unit: openTotal === 1 ? "item" : "items",
+        sub: openCommitments[0]?.text || openTasks[0]?.title || "All clear",
+        tone: openTotal ? "blue" : "muted",
       },
       {
         key: "signal",
