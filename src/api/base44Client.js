@@ -188,6 +188,8 @@ export const base44 = {
     HabitLog: createEntityHandler("habit_logs"),
     // Local knowledge notes indexed by the worker (Obsidian vault / folders).
     Note: createEntityHandler("notes"),
+    // Orchestration commands (client polls for results; server/worker write).
+    Command: createEntityHandler("commands"),
   },
 
   functions: {

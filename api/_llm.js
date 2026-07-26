@@ -101,6 +101,30 @@ export async function callLLM({ system, user, json = false }) {
   return callOpenAI({ system, user, json });
 }
 
+// Embed one or more strings with OpenAI (text-embedding-3-small). Returns an array
+// of vectors. Used for semantic note search. Requires OPENAI_API_KEY.
+export async function embed(texts) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("No OPENAI_API_KEY configured for embeddings");
+  const input = (Array.isArray(texts) ? texts : [texts]).map((t) => String(t || "").slice(0, 8000) || " ");
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: "text-embedding-3-small", input }),
+  });
+  if (!response.ok) throw new Error(`Embeddings failed (${response.status}): ${(await response.text()).slice(0, 200)}`);
+  const data = await response.json();
+  return (data.data || []).map((d) => d.embedding);
+}
+
+// Cosine similarity between two equal-length vectors.
+export function cosine(a, b) {
+  if (!a || !b || a.length !== b.length) return 0;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
 // Parse a model's JSON response defensively: strips accidental code fences and
 // falls back to extracting the first {...} block.
 export function parseJSON(text) {
