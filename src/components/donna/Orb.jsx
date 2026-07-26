@@ -7,16 +7,20 @@ const STATE_COLOR = {
   processing: [245, 158, 11],
   speaking: [226, 232, 240],
 };
+// When Donna has something to say (idle + attention), the orb breathes amber.
+const ATTN_COLOR = [245, 176, 74];
 
 // A glowing particle-sphere "orb" — dependency-free 2D canvas + requestAnimationFrame.
 // Props:
 //   state        - "idle" | "listening" | "processing" | "speaking"
 //   amplitudeRef - React ref { current: 0..1 }; the page feeds it mic level (listening)
 //                  or TTS word-boundary bumps (speaking). Read + decayed each frame.
-export default function Orb({ state = "idle", amplitudeRef }) {
+export default function Orb({ state = "idle", amplitudeRef, attention = false }) {
   const canvasRef = useRef(null);
   const stateRef = useRef(state);
+  const attnRef = useRef(attention);
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { attnRef.current = attention; }, [attention]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -68,10 +72,13 @@ export default function Orb({ state = "idle", amplitudeRef }) {
       }
       if (st === "speaking") amp = Math.max(amp, 0.28 + 0.18 * Math.sin(t * 7.5));
       if (processing) amp = Math.max(amp, 0.32 + 0.22 * Math.sin(t * 9)); // amber shimmer
+      // "Wants to talk": a slow amber breathing pulse while idle.
+      const wantsToTalk = attnRef.current && st === "idle";
+      if (wantsToTalk) amp = Math.max(amp, 0.2 + 0.16 * Math.sin(t * 2.2));
       amp = Math.min(1, amp);
 
-      // Ease color toward the target for the current state.
-      const tgt = STATE_COLOR[st] || STATE_COLOR.idle;
+      // Ease color toward the target for the current state (amber when it wants to talk).
+      const tgt = wantsToTalk ? ATTN_COLOR : (STATE_COLOR[st] || STATE_COLOR.idle);
       for (let k = 0; k < 3; k++) cur[k] += (tgt[k] - cur[k]) * 0.08;
       const cr = Math.round(cur[0]), cg = Math.round(cur[1]), cb = Math.round(cur[2]);
 
