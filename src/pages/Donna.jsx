@@ -356,11 +356,12 @@ export default function Donna() {
         }
       }
 
-      const [commitments, tasksRaw, domains, signalsRaw] = await Promise.all([
+      const [commitments, tasksRaw, domains, signalsRaw, gradesRaw] = await Promise.all([
         base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
         base44.entities.Task.list("-created_date").catch(() => []),
         base44.entities.Domain.list("sort_order").catch(() => []),
         base44.entities.Signal.list("-created_date", 80).catch(() => []),
+        base44.entities.Grade.list("-updated_date", 60).catch(() => []),
       ]);
       const today = todayKey();
       const allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
@@ -392,6 +393,11 @@ export default function Donna() {
       }
       const lists = Object.entries(listMap).map(([name, items]) => ({ name, items: items.slice(0, 25) })).slice(0, 12);
 
+      const grades = (Array.isArray(gradesRaw) ? gradesRaw : []).slice(0, 40).map((g) => ({
+        course: g.course || "", assignment: g.assignment || null,
+        score: g.score ?? null, max: g.max_score ?? g.max ?? null,
+      }));
+
       const res = await base44.functions.invoke("donna", {
         route: "intent",
         transcript: t,
@@ -402,6 +408,7 @@ export default function Donna() {
           lists,
           calendar,
           emails,
+          grades,
           domains: Array.isArray(domains) ? domains : [],
         },
       });
