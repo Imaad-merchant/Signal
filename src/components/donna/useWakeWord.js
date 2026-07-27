@@ -3,10 +3,15 @@ import { useEffect, useRef } from "react";
 // Always-on voice. A continuous SpeechRecognition runs while `enabled` and the
 // assistant isn't mid-command (`active`). No wake word required: ANY speech you
 // make is treated as a command — whether she's idle or mid-sentence (barge-in).
-// The only thing filtered out is her own audio echoing back through the mic
-// (compared to `echoText`). Saying "Donna" / "Hey Donna" is still fine — it's
-// just stripped from the front of the command. Delivered via onCommand(text).
-// One recognizer at a time.
+//
+// ENDPOINTING: the browser marks a clause "final" the instant you pause, which
+// would cut you off mid-thought. Instead we BUFFER every final/interim fragment
+// and only commit the whole thing once you've been SILENT for `pauseMs` (~1.5s).
+// Natural pauses within a sentence no longer end your turn.
+//
+// Her own audio echoing back through the mic (compared to `echoText`) is filtered
+// out at commit time. Saying "Donna"/"Hey Donna" is fine — it's stripped from the
+// front. Delivered via onCommand(text). One recognizer at a time.
 const WAKE = /^\s*(hey\s+|ok\s+|okay\s+)?donna\b[\s,.!]*/i;
 
 export function wakeSupported() {
@@ -23,7 +28,7 @@ function isEcho(said, spoken) {
   return overlap >= 0.5;
 }
 
-export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
+export function useWakeWord({ enabled, active, onCommand, echoText = "", pauseMs = 1500 }) {
   const armedRef = useRef(false);
   const stoppedRef = useRef(true);
   const runningRef = useRef(false);
@@ -39,22 +44,30 @@ export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
     rec.continuous = true;
-    rec.interimResults = false;
+    rec.interimResults = true; // needed so pauses reset the silence timer, not end the turn
     rec.lang = "en-GB";
 
-    const handle = (text) => {
-      const t = (text || "").trim();
-      if (!t) return;
-      // Ignore Donna's own voice echoing back through the mic (whether she's
-      // speaking now or the tail of what she just said).
-      if (isEcho(t, echoRef.current)) return;
-      // No wake word needed: any speech is a command. Strip a leading
-      // "Donna"/"Hey Donna" if the user happens to say it.
-      const cmd = t.replace(WAKE, "").trim();
-      if (!cmd) { armedRef.current = true; return; } // said only "Donna" — take the next utterance
+    // Endpointing buffer: accumulate finalized clauses; `interim` is the live tail.
+    let buffer = "";
+    let interim = "";
+    let silenceTimer = null;
+    const clearSilence = () => { if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; } };
+
+    const commit = () => {
+      clearSilence();
+      const full = `${buffer} ${interim}`.trim();
+      buffer = ""; interim = "";
+      if (!full) return;
+      // Ignore Donna's own voice echoing back through the mic.
+      if (isEcho(full, echoRef.current)) return;
+      // No wake word needed: strip a leading "Donna"/"Hey Donna" if said.
+      const cmd = full.replace(WAKE, "").trim();
+      if (!cmd) { armedRef.current = true; return; } // only "Donna" — wait for the next utterance
       armedRef.current = false;
       onCommand && onCommand(cmd);
     };
+    // Only fire once you've gone quiet for pauseMs — pauses shorter than that keep the turn open.
+    const scheduleCommit = () => { clearSilence(); silenceTimer = setTimeout(commit, pauseMs); };
 
     const startRec = () => {
       if (stoppedRef.current || runningRef.current) return;
@@ -63,14 +76,20 @@ export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
 
     rec.onstart = () => { runningRef.current = true; };
     rec.onresult = (e) => {
+      let live = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) handle(e.results[i][0].transcript);
+        const r = e.results[i];
+        const txt = (r[0] && r[0].transcript) || "";
+        if (r.isFinal) buffer += (buffer ? " " : "") + txt.trim();
+        else live += txt;
       }
+      interim = live;
+      scheduleCommit(); // any speech (final or interim) keeps the turn open another pauseMs
     };
     rec.onerror = () => { runningRef.current = false; /* onend handles restart */ };
     rec.onend = () => {
       runningRef.current = false;
-      // Restart immediately so listening never lapses between utterances.
+      commit(); // flush anything buffered before the engine stopped
       if (!stoppedRef.current) { try { rec.start(); runningRef.current = true; } catch { /* watchdog will retry */ } }
     };
 
@@ -83,8 +102,9 @@ export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
     return () => {
       stoppedRef.current = true;
       runningRef.current = false;
+      clearSilence();
       window.clearInterval(watchdog);
       try { rec.onend = null; rec.stop(); } catch { /* ignore */ }
     };
-  }, [enabled, active, onCommand]);
+  }, [enabled, active, onCommand, pauseMs]);
 }
