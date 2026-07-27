@@ -21,6 +21,11 @@
 // `gradesUrls` — one per-course "My Grades" URL — instead of a single `gradesUrl`.
 // On each page `sel.pageCourse` reads the course title once (used when a row has no
 // course of its own). Single-portal sites can still use one `gradesUrl`.
+//
+// 2FA: if the portal emails a one-time code, set `sel.otpInput` (+ optional
+// `sel.otpSubmit` / `sel.trustDevice`) and an `otp` block; the code is read from
+// Gmail via otp-gmail.mjs. Tick "trust this device" to skip the code on later runs.
+import { getGmailOtp } from "./otp-gmail.mjs";
 
 export async function scrapeGrades(uh) {
   if (!uh || !uh.enabled) return [];
@@ -55,6 +60,24 @@ export async function scrapeGrades(uh) {
       page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {}),
       page.click(sel.submit),
     ]);
+
+    // 2FA: if a one-time-code field appears, fetch the code from Gmail and enter it.
+    if (sel.otpInput && uh.otp?.enabled) {
+      const needsCode = await page.waitForSelector(sel.otpInput, { timeout: 12000 }).then(() => true).catch(() => false);
+      if (needsCode) {
+        const code = await getGmailOtp(uh.otp);
+        if (code) {
+          await page.fill(sel.otpInput, code);
+          if (sel.trustDevice) await page.click(sel.trustDevice).catch(() => {}); // "remember this device" → skip code next time
+          await Promise.all([
+            page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {}),
+            sel.otpSubmit ? page.click(sel.otpSubmit).catch(() => {}) : page.keyboard.press("Enter").catch(() => {}),
+          ]);
+        } else {
+          console.warn("[uh-grades] a login code was required but none was read from Gmail — check the otp config.");
+        }
+      }
+    }
 
     const all = [];
     for (const url of urls) {

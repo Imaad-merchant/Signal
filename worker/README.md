@@ -177,3 +177,22 @@ Brightspace (D2L) keeps grades on a **separate page per course**, so use
    it reads Brightspace in your already-logged-in browser and POSTs to
    `/api/ingest`, so no password is ever stored. The worker path is only for
    fully-unattended runs.
+
+### 2FA login code (emailed to Gmail)
+
+If the portal emails a **one-time code** to sign in, the worker can read it from
+Gmail automatically:
+
+1. `npm install imapflow`
+2. Create a Gmail **App Password** at https://myaccount.google.com/apppasswords
+   (needs 2-Step Verification on your Google account). This is a 16-char value —
+   **not** your normal Gmail password.
+3. Fill the `uh.otp` block: `user` (your Gmail), `appPassword`, and tune
+   `fromContains` / `subjectContains` / `codeRegex` to match the code email.
+4. Set the `selectors.otpInput` (and `otpSubmit` / `trustDevice`) to the portal's
+   code field. **Tick `trustDevice`** so the portal remembers the browser profile
+   and stops asking for a code on later runs.
+
+The code is fetched over IMAP locally; nothing about your Gmail leaves your machine.
+If a code is needed but 2FA reading isn't set up, the run just logs a warning and
+skips grades that cycle — use Claude in Chrome for that run instead.
