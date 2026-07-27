@@ -86,10 +86,22 @@ const ANSWER_OPTS = [
   { value: "skip", label: "Skip" },
 ];
 
-function QuestionRow({ question, index, value, onAnswer }) {
+// Voice-answering (so the whole check-in works hands-free; buttons stay as a fallback).
+function speechAvailable() {
+  return typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+}
+function parseYesNo(text) {
+  const t = (text || "").toLowerCase();
+  if (/\b(skip|next|pass|dunno|not sure|don'?t know)\b/.test(t)) return "skip";
+  if (/\b(yes|yeah|yep|yup|ya|did|done|sure|affirmative|correct|i did|of course|absolutely)\b/.test(t)) return "yes";
+  if (/\b(no|nope|nah|didn'?t|did not|negative|never|not yet|unfortunately)\b/.test(t)) return "no";
+  return null;
+}
+
+function QuestionRow({ question, index, value, onAnswer, current }) {
   const text = question?.text ? String(question.text) : `Question ${index + 1}`;
   return (
-    <div className="rounded-xl border border-white/10 bg-[#232425] p-3.5">
+    <div className={`rounded-xl border bg-[#232425] p-3.5 transition-all ${current ? "border-cyan-400/60 ring-1 ring-cyan-400/30" : "border-white/10"}`}>
       <p className="text-sm font-medium text-gray-100 leading-snug mb-3">{text}</p>
       <div className="grid grid-cols-3 gap-2">
         {ANSWER_OPTS.map((opt) => {
@@ -295,9 +307,17 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
     }
   }, [questions, ctx]);
 
+  // Refs so the voice recognizer (created once) always sees the latest answers.
+  const answersRef = useRef(answers);
+  const questionsRef = useRef(questions);
+  useEffect(() => { answersRef.current = answers; }, [answers]);
+  useEffect(() => { questionsRef.current = questions; }, [questions]);
+  const [voiceOn, setVoiceOn] = useState(false);
+
   // ---- answer a question; the instant the last one is answered, reveal + fire payback ----
   const answerQuestion = (qid, value) => {
-    const next = { ...answers, [qid]: value };
+    const next = { ...answersRef.current, [qid]: value };
+    answersRef.current = next;
     setAnswers(next);
     const allAnswered = questions.length > 0 && questions.every((q, i) => next[q?.id || `q${i + 1}`]);
     if (allAnswered && !paybackStartedRef.current) {
@@ -306,6 +326,40 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
       generatePayback(next);
     }
   };
+
+  // ---- voice answering: while showing questions, listen for yes/no/skip and apply
+  //      to the first unanswered question. Buttons still work; this is the hands-free path.
+  useEffect(() => {
+    if (phase !== "questions" || !speechAvailable()) return undefined;
+    const anyUnanswered = questions.some((q, i) => !answersRef.current[q?.id || `q${i + 1}`]);
+    if (!anyUnanswered) return undefined;
+    let stopped = false;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.lang = "en-GB"; rec.continuous = false; rec.interimResults = false;
+    const applyToNext = (val) => {
+      const qs = questionsRef.current, ans = answersRef.current;
+      for (let i = 0; i < qs.length; i++) {
+        const id = qs[i]?.id || `q${i + 1}`;
+        if (!ans[id]) { answerQuestion(id, val); return true; }
+      }
+      return false;
+    };
+    rec.onresult = (e) => {
+      let txt = "";
+      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript + " ";
+      const val = parseYesNo(txt);
+      if (val) applyToNext(val);
+    };
+    rec.onerror = () => { setVoiceOn(false); };
+    rec.onend = () => {
+      if (stopped) return;
+      const more = questionsRef.current.some((q, i) => !answersRef.current[q?.id || `q${i + 1}`]);
+      if (more) { try { rec.start(); } catch { /* ignore */ } } else setVoiceOn(false);
+    };
+    try { rec.start(); setVoiceOn(true); } catch { setVoiceOn(false); }
+    return () => { stopped = true; try { rec.onend = null; rec.stop(); } catch { /* ignore */ } setVoiceOn(false); };
+  }, [phase, questions]);
 
   // Empty-questions escape hatch: proceed straight to the reveal.
   const proceedWithoutQuestions = () => {
@@ -454,17 +508,30 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
 
           {!loadingQuestions && !questionsError && questions.length > 0 && (
             <>
-              {questions.map((q, i) => (
-                <QuestionRow
-                  key={q?.id || `q${i + 1}`}
-                  question={q}
-                  index={i}
-                  value={answers[q?.id || `q${i + 1}`]}
-                  onAnswer={(v) => answerQuestion(q?.id || `q${i + 1}`, v)}
-                />
-              ))}
+              {(() => {
+                let firstOpen = null;
+                for (let i = 0; i < questions.length; i++) {
+                  const id = questions[i]?.id || `q${i + 1}`;
+                  if (!answers[id]) { firstOpen = id; break; }
+                }
+                return questions.map((q, i) => {
+                  const id = q?.id || `q${i + 1}`;
+                  return (
+                    <QuestionRow
+                      key={id}
+                      question={q}
+                      index={i}
+                      value={answers[id]}
+                      current={id === firstOpen}
+                      onAnswer={(v) => answerQuestion(id, v)}
+                    />
+                  );
+                });
+              })()}
               {!allAnswered && (
-                <p className="text-[11px] text-gray-500 text-center">Answer each question to see your payback.</p>
+                voiceOn
+                  ? <p className="text-[11px] text-cyan-300/90 text-center">🎙 Listening — say “yes”, “no”, or “skip” (or tap).</p>
+                  : <p className="text-[11px] text-gray-500 text-center">Answer each question — tap, or say “yes / no / skip”.</p>
               )}
             </>
           )}
