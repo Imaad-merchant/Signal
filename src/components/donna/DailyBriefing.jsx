@@ -356,26 +356,19 @@ export default function DailyBriefing({ onSpeak, onActive }) {
 
   return (
     <>
-      {/* Always-available manual trigger. */}
-      <button
-        type="button"
-        onClick={openBriefing}
-        className="absolute top-4 left-16 z-20 rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-blue-300"
-        title={isEvening ? "Evening review" : "Morning briefing"}
-        aria-label="Daily briefing"
-      >
-        <SlotIcon className="h-5 w-5" />
-      </button>
-
-      {/* Once-per-slot alert. */}
+      {/* One clean prompt: Donna offers the briefing; tap to hear it. No stray icon
+          button — this pill (styled like the proactive nudge) is the single trigger. */}
       {!open && !dismissed && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5">
           <button
             type="button"
             onClick={openBriefing}
-            className="flex items-center gap-2 rounded-full border border-blue-400/40 bg-blue-500/15 px-3.5 py-1.5 text-xs font-medium text-blue-100 shadow-lg backdrop-blur-sm hover:bg-blue-500/25 transition-colors"
+            className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-400/15 px-3.5 py-1.5 text-xs font-medium text-amber-100 shadow-lg backdrop-blur-sm hover:bg-amber-400/25 transition-colors"
           >
-            <SlotIcon className="h-3.5 w-3.5" />
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-300 opacity-70" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-400" />
+            </span>
             {isEvening ? "Evening review — tap when ready" : "Good morning — tap for your briefing"}
           </button>
           <button type="button" onClick={() => { markDone(slotKey); setDismissed(true); }} aria-label="Dismiss" className="p-1 text-gray-500 hover:text-gray-300">

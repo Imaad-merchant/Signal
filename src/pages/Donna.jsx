@@ -19,6 +19,10 @@ import {
   loadReminders, saveReminders, newId, parseReminderCreate, parseReminderCancel,
   parseDelivery, matchReminder, everyLabel, deliveryLabel,
 } from "@/components/donna/reminders";
+import {
+  parseLogStart, parseLogAppend, parseLogContinue, parseLogRead, parseLogBare,
+  getActiveLog, setActiveLog, normalizeLogName, appendToLog, readLog, listLogs,
+} from "@/components/donna/logs";
 
 // Is this slot's morning/evening briefing still pending? If so it owns the top
 // alert and the generic nudge stands down to avoid stacking two alerts.
@@ -117,6 +121,9 @@ export default function Donna() {
   const [showRoutines, setShowRoutines] = useState(false); // routines editor panel
   const [showCustomize, setShowCustomize] = useState(false); // dashboard customize panel
   const [briefingActive, setBriefingActive] = useState(false); // daily review owns the mic
+  const [pendingLog, setPendingLogState] = useState(null); // awaiting "which log?" answer
+  const pendingLogRef = useRef(null);
+  const setPendingLog = useCallback((v) => { pendingLogRef.current = v; setPendingLogState(v); }, []);
 
   const commitReminders = useCallback((next) => {
     remindersRef.current = next;
@@ -192,6 +199,82 @@ export default function Donna() {
     if (!t) { setMode("idle"); return; }
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt any current speech */ }
 
+    // ---- Logging helpers (Page-backed logs; entries condensed by the server `log`
+    //      route; smart-routed to an existing log or a new one). ----
+    const logDate = todayKey();
+    const commitLine = async (name, line) => {
+      setMode("processing");
+      try {
+        const { page, created, prevContent, title } = await appendToLog(name, line, logDate);
+        setLastActions([{ kind: "log", pageId: page.id, prevContent, created }]);
+        const say = `Logged to ${title}.`;
+        setNote(""); setReply(say); pushTurn("signal", say); speak(say);
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+      } catch {
+        setMode("idle"); setNote("I couldn't save that to your log.");
+      }
+    };
+    const tidyLine = async (rawText, forcedLog) => {
+      try {
+        const res = await base44.functions.invoke("donna", { route: "log", text: rawText, log: forcedLog || null });
+        const data = res && res.data ? res.data : res || {};
+        return data.line || rawText;
+      } catch { return rawText; }
+    };
+    const logToNamed = async (name, rawText) => { setMode("processing"); await commitLine(name, await tidyLine(rawText, name)); };
+    const smartLog = async (content) => {
+      setMode("processing");
+      const existingLogs = await listLogs().catch(() => []);
+      let data = {};
+      try {
+        const res = await base44.functions.invoke("donna", { route: "log", text: content, existingLogs });
+        data = res && res.data ? res.data : res || {};
+      } catch { /* ignore */ }
+      const line = data.line || content;
+      const targetLog = data.targetLog || null;
+      const confidence = Number(data.confidence) || 0;
+      const suggestedNewName = data.suggestedNewName || "";
+      if (targetLog && confidence >= 0.55) {
+        setPendingLog({ line, targetLog, suggestedNewName });
+        const say = `That sounds like your ${targetLog} log — add it there, or start a new one?`;
+        setReply(say); setNote(""); pushTurn("signal", say); speak(say);
+      } else if (suggestedNewName) {
+        setPendingLog({ line, targetLog: null, suggestedNewName });
+        const say = `Shall I start a new ${suggestedNewName} log for this?`;
+        setReply(say); setNote(""); pushTurn("signal", say); speak(say);
+      } else {
+        await commitLine("Journal", line);
+      }
+    };
+
+    // We just asked "which log?" — this utterance chooses.
+    if (pendingLogRef.current) {
+      const p = pendingLogRef.current; setPendingLog(null);
+      setHeard(t); pushTurn("you", t);
+      const said = t.toLowerCase();
+      const affirmative = /\b(yes|yeah|yep|yup|sure|ok|okay|please|do it|go ahead|that one|there|same|existing|the first)\b/.test(said);
+      const wantsNew = /\b(new|separate|another|different|fresh|its own|start a)\b/.test(said);
+      const negative = /\b(no|nah|nope)\b/.test(said);
+      const spokenName = (() => {
+        if (t.trim().split(/\s+/).length > 5) return "";
+        const cleaned = t.replace(/^(yes|yeah|sure|ok|okay|please|no|nah|new|start|a|the|my|in|to|call it|called)\b[,\s]*/gi, "");
+        return normalizeLogName(cleaned);
+      })();
+      let target;
+      if (p.targetLog) {
+        if (wantsNew) target = p.suggestedNewName || spokenName || "Journal";
+        else if (affirmative) target = p.targetLog;
+        else if (spokenName) target = spokenName;
+        else target = p.targetLog;
+      } else {
+        if (negative && !wantsNew && !spokenName) target = "Journal";
+        else if (affirmative) target = p.suggestedNewName || "Journal";
+        else target = spokenName || p.suggestedNewName || "Journal";
+      }
+      await commitLine(target, p.line);
+      return;
+    }
+
     // ---- Recurring reminders ("routines"), handled locally before the server route. ----
     // 1) We just asked HOW to deliver a reminder — this utterance is the answer.
     if (pendingReminderRef.current) {
@@ -255,6 +338,56 @@ export default function Donna() {
         say = hide ? `Hidden the ${label} tile.` : `The ${label} tile is back.`;
       }
       setReply(say); pushTurn("signal", say); speak(say);
+      return;
+    }
+
+    // ---- Logs: create / append / continue / read / bare-journal ----
+    const logStart = parseLogStart(t);
+    const logAppend = !logStart ? parseLogAppend(t) : null;
+    const logRead = !logStart && !logAppend ? parseLogRead(t) : null;
+    const logContinue = !logStart && !logAppend && !logRead ? parseLogContinue(t) : null;
+    const logBare = !logStart && !logAppend && !logRead && !logContinue ? parseLogBare(t) : null;
+    if (logRead) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      const r = await readLog(logRead.name);
+      const spoken = !r ? `You don't have a ${logRead.name} log yet.`
+        : r.entries.length ? `Your ${r.title} log — ${r.entries.join("; ")}.`
+        : `Your ${r.title} log is empty so far.`;
+      setReply(spoken); pushTurn("signal", spoken); speak(spoken);
+      return;
+    }
+    if (logStart) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      setActiveLog(logStart.name);
+      if (logStart.entry) { await logToNamed(logStart.name, logStart.entry); }
+      else { const say = `Started your ${logStart.name} log — what's the first entry?`; setReply(say); pushTurn("signal", say); speak(say); }
+      return;
+    }
+    if (logAppend) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      setActiveLog(logAppend.name);
+      if (logAppend.entry) { await logToNamed(logAppend.name, logAppend.entry); }
+      else { const say = `Go on — what shall I add to your ${logAppend.name} log?`; setReply(say); pushTurn("signal", say); speak(say); }
+      return;
+    }
+    if (logContinue) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      const active = getActiveLog();
+      if (!active) { const say = "Which log? Say, for instance, add to my workouts log."; setReply(say); pushTurn("signal", say); speak(say); return; }
+      if (logContinue.entry) { await logToNamed(active, logContinue.entry); }
+      else { const say = `Go on — what's next for your ${active} log?`; setReply(say); pushTurn("signal", say); speak(say); }
+      return;
+    }
+    if (logBare) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      // Deictic "log it/this" with nothing after → use the last thing Donna said.
+      let content = logBare.entry;
+      if (!content) {
+        const lastSignal = [...turns].reverse().find((x) => x.who === "signal");
+        content = (lastSignal && lastSignal.text) || reply || "";
+      }
+      if (!content) { const say = "What would you like me to log?"; setReply(say); pushTurn("signal", say); speak(say); return; }
+      await smartLog(content);
       return;
     }
 
@@ -601,10 +734,11 @@ export default function Donna() {
           });
           target = "commitments/" + (rec?.id || "");
         } else if (a.type === "log") {
-          const rec = await base44.entities.Memory.create({
-            kind: "observed", content: a.text, source: "observed", domain_id: null,
-          });
-          target = "memory/" + (rec?.id || "");
+          // Append to a running LOG document (named, or the default Journal).
+          const { page, created, prevContent } = await appendToLog(a.log || "Journal", a.text, today);
+          n++;
+          records.push({ kind: "log", pageId: page.id, prevContent, created });
+          continue; // carries its own undo record; skip the generic AgentAction below
         } else if (a.type === "monitor") {
           const rec = await base44.entities.Insight.create({
             kind: "metric", content: a.metric + (a.value != null ? ": " + a.value : ""), evidence: a.note ? { note: a.note } : null,

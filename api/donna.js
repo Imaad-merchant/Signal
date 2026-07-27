@@ -40,6 +40,7 @@ export default async function handler(req, res) {
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
     if (route === "cleanup") return await cleanup(body, res);
+    if (route === "log") return await logEntry(body, res);
     if (route === "capture") return await capture(auth, body, res);
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
     if (route === "command") return await command(auth, body, res);
@@ -173,7 +174,7 @@ ACTION TYPES:
 - { "type": "complete","list": string | null, "text": string }          // mark a list item done (match by its wording)
 - { "type": "remove",  "list": string | null, "text": string }          // remove a list item
 - { "type": "remind",  "text": string, "due_on": "YYYY-MM-DD" | null }   // a time-bound commitment / to-do
-- { "type": "log",     "text": string, "domain": string | null }         // capture a thought/observation worth remembering
+- { "type": "log",     "text": string, "log": string | null, "domain": string | null }  // append to a running LOG document; `log` = the named log if they say one ("in my workouts log …"), else null for the default journal
 - { "type": "monitor", "metric": string, "value": number | null, "note": string | null }
 - { "type": "write",   "title": string, "body": string }                 // draft a note/document
 - { "type": "grade",   "course": string, "assignment": string | null, "score": number, "max": number | null }
@@ -188,6 +189,7 @@ RULES:
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
 - GRADES: emit one "grade" per grade read out; put the score in "score", total in "max" when stated.
+- LOG: when they want to record/journal something ("log that …", "log in my workouts that …", "add to my journal …"), emit ONE "log" action with the observation in "text"; if they name a specific log ("my workouts log", "the volunteering log"), put that name in "log", else leave "log" null.
 - EMAIL: if they ask to email/message someone, emit an "email" action — write a clear subject and a complete, well-phrased body in their voice. Put a real address in "to" only if they gave one; otherwise null (they'll fill it). Say in "reply" that you've drafted it for them to review and send — it is NOT sent automatically.
 - RESEARCH: if they ask you to look something up / find CURRENT external info you can't know from their data (available services, schedules, opening hours, prices, news, "what tutoring does UH offer"), emit ONE "research" action with a focused, specific web-search query (fold in the specifics they mentioned — school, classes, professor). In "reply" just say you'll look it up. Do NOT invent the facts yourself.
 - "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.`;
@@ -221,7 +223,7 @@ Parse it now.`;
       if (type === "complete") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remove") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remind") return { type, text: String(a.text || ""), due_on: a.due_on || null };
-      if (type === "log") return { type, text: String(a.text || ""), domain: a.domain || null };
+      if (type === "log") return { type, text: String(a.text || ""), log: a.log ? String(a.log).slice(0, 80) : null, domain: a.domain || null };
       if (type === "monitor") return { type, metric: String(a.metric || ""), value: Number.isFinite(a.value) ? a.value : null, note: a.note || null };
       if (type === "write") return { type, title: String(a.title || "Note"), body: String(a.body || "") };
       if (type === "grade") return {
@@ -320,6 +322,44 @@ Organise it now.`;
     content: parsed?.content ? String(parsed.content) : "",
     spoken: parsed?.spoken ? String(parsed.spoken) : "Sorted — saved to your notes.",
   });
+}
+
+// ---- route: log (tidy a spoken log entry to one condensed line + smart-route it to
+//      an existing log or suggest a new one). `log` (when named by the user) forces the
+//      target and skips routing. `existingLogs` = [{ name, summary }]. ----
+async function logEntry(body, res) {
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) return res.status(400).json({ error: "Text required" });
+  const forced = typeof body.log === "string" && body.log.trim() ? body.log.trim().slice(0, 80) : null;
+  const existing = Array.isArray(body.existingLogs)
+    ? body.existingLogs.filter((l) => l && l.name).slice(0, 40).map((l) => ({
+        name: String(l.name).slice(0, 80),
+        summary: String(l.summary || "").slice(0, 200),
+      }))
+    : [];
+
+  const system = `You are Donna, filing a spoken LOG entry for the principal.
+1) Rewrite the entry as ONE terse, information-dense line: keep facts, numbers, names, dates, links; drop filler, hedging, "um/like/you know". No leading bullet or date — just the content. British tone, telegraphic is fine.
+2) Decide where it belongs. If a "forced" log name is given, use it. Otherwise look at the existing logs: if the entry clearly belongs to one, set targetLog to that EXACT existing name with a confidence 0-1; if it's a new topic, set targetLog null and propose a short Title-Case suggestedNewName (1-3 words, e.g. "Volunteering", "Book Ideas").
+Return JSON: { "line": string, "targetLog": string|null, "confidence": number, "suggestedNewName": string }`;
+
+  const user = `entry: """${text.slice(0, 2000)}"""
+forced_log: ${forced ? JSON.stringify(forced) : "null"}
+existing_logs: ${JSON.stringify(existing)}
+
+File it now.`;
+
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw) || {};
+  const line = parsed.line ? String(parsed.line).replace(/^[-*]\s*/, "").slice(0, 400) : text.slice(0, 400);
+  let targetLog = forced || (parsed.targetLog ? String(parsed.targetLog).slice(0, 80) : null);
+  // Only accept a matched existing log if it really exists (guard LLM drift).
+  if (!forced && targetLog && !existing.some((l) => l.name.toLowerCase() === targetLog.toLowerCase())) {
+    targetLog = null;
+  }
+  const confidence = forced ? 1 : (Number.isFinite(Number(parsed.confidence)) ? Number(parsed.confidence) : 0);
+  const suggestedNewName = parsed.suggestedNewName ? String(parsed.suggestedNewName).slice(0, 80) : "";
+  return res.status(200).json({ line, targetLog, confidence, suggestedNewName });
 }
 
 // ---- route: capture (categorise an idea → queue for Obsidian + flag duplicates) ----
