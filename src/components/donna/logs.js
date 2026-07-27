@@ -118,18 +118,6 @@ async function loadLogPages() {
   return Array.isArray(pages) ? pages : [];
 }
 
-// Ensure a "Logs" folder exists in the Tasks/docs tree so logs group under it.
-// The folder itself has no LOG_CATEGORY, so it never shows up as a log.
-async function ensureLogsFolder() {
-  const named = await base44.entities.Page.filter({ title: "Logs" }).catch(() => []);
-  const folder = (Array.isArray(named) ? named : []).find((p) => p.icon === "folder");
-  if (folder) return folder.id;
-  const rec = await base44.entities.Page.create({
-    title: "Logs", icon: "folder", parent_id: null, section: "private", content: "",
-  }).catch(() => null);
-  return rec?.id || null;
-}
-
 export function findLogPage(pages, name) {
   const q = (name || "").toLowerCase().trim();
   if (!q) return null;
@@ -163,10 +151,11 @@ export async function appendToLog(name, line, dateKey) {
     await base44.entities.Page.update(page.id, { content: nextContent });
     page = { ...page, content: nextContent };
   } else {
-    const parentId = await ensureLogsFolder();
+    // A regular Document (type "document"), so it renders correctly in the docs
+    // workspace — NOT a whiteboard.
     page = await base44.entities.Page.create({
       title, type: "document", category: LOG_CATEGORY, content: nextContent,
-      parent_id: parentId || null, section: "private", status: "not_started",
+      parent_id: null, section: "private", status: "not_started",
     });
   }
   return { page, created, prevContent, title };
