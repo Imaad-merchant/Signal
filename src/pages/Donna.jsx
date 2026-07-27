@@ -124,6 +124,9 @@ export default function Donna() {
   const [pendingLog, setPendingLogState] = useState(null); // awaiting "which log?" answer
   const pendingLogRef = useRef(null);
   const setPendingLog = useCallback((v) => { pendingLogRef.current = v; setPendingLogState(v); }, []);
+  const lastEmailRef = useRef(null); // { from, subject } of the last email read (for replies)
+  const emailDraftRef = useRef(null); // mirror so a voice "send it" can act on the staged draft
+  useEffect(() => { emailDraftRef.current = emailDraft; }, [emailDraft]);
 
   const commitReminders = useCallback((next) => {
     remindersRef.current = next;
@@ -388,6 +391,66 @@ export default function Donna() {
       }
       if (!content) { const say = "What would you like me to log?"; setReply(say); pushTurn("signal", say); speak(say); return; }
       await smartLog(content);
+      return;
+    }
+
+    // ---- Google: read Gmail / Docs / Slides, and reply by voice ----
+    // Confirm a staged reply/email draft by voice.
+    if (emailDraftRef.current && /^\s*(send(\s+it)?|confirm|yes,?\s*send|go ahead|send that|send the email)\s*[.!]?$/i.test(t)) {
+      setHeard(t); pushTurn("you", t); sendEmailDraft(); return;
+    }
+    const isSendish = /^\s*(send|write|draft|compose|reply)\b/i.test(t) || /^\s*e?mails?\s+(my|to|him|her|them|the|prof|\w+@)/i.test(t);
+    const mailRead = !isSendish && /\b(e?mails?|inbox|gmail)\b/i.test(t)
+      && /\b(read|check|show|any|have|got|what|whats|summari[sz]e|go\s+through|latest|new|newest|recent|unread|from|about|catch)\b/i.test(t);
+    const docM = /\bdoc(ument)?s?\b/i.test(t) && /\b(read|open|show|summari[sz]e|what|whats|pull\s*up|find|get|about|on|called|titled)\b/i.test(t);
+    const slideM = /\b(slides?|deck|presentation|powerpoint)\b/i.test(t) && /\b(read|open|show|summar|what|whats|about|on|for|find|pull\s*up|get)\b/i.test(t);
+
+    if (mailRead) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply(""); setSources([]); setMode("processing");
+      let mailQuery = "in:inbox newer_than:7d";
+      const fromM = /\bfrom\s+([a-z0-9 ._@-]{2,40})/i.exec(t);
+      if (fromM) { const nm = fromM[1].replace(/^(my|the)\s+/i, "").trim().split(/\s+/)[0]; if (nm) mailQuery = `from:${nm}`; }
+      else if (/\bunread\b/i.test(t)) mailQuery = "is:unread newer_than:7d";
+      else if (/\b(latest|last|newest)\b/i.test(t)) mailQuery = "in:inbox";
+      try {
+        const r = await base44.functions.invoke("donna", { route: "google", op: "mail", query: mailQuery, question: t });
+        const d = r && r.data ? r.data : r || {};
+        if (d.from) lastEmailRef.current = { from: d.from, subject: (d.items && d.items[0] && d.items[0].subject) || "" };
+        const spoken = d.spoken || "I couldn't read your inbox.";
+        setReply(spoken); pushTurn("signal", spoken); speak(spoken);
+      } catch { setMode("idle"); setNote("I couldn't reach your Google account."); }
+      return;
+    }
+    if (/^\s*reply\b/i.test(t)) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      const addr = (lastEmailRef.current?.from || "").match(/[^<>\s]+@[^<>\s]+/);
+      const sayM = /\b(saying|say|that|with the message|with)\s+(.+)$/i.exec(t);
+      const replyBody = sayM ? sayM[2].trim() : "";
+      let say;
+      if (!addr) say = "Read an email first, then I'll know who to reply to.";
+      else if (!replyBody) say = "What should the reply say?";
+      else {
+        const subj = lastEmailRef.current?.subject || "";
+        setEmailDraft({ to: addr[0], subject: subj ? (/^re:/i.test(subj) ? subj : `Re: ${subj}`) : "Re:", body: replyBody });
+        const who = (lastEmailRef.current?.from || "").replace(/<[^>]+>/, "").trim() || addr[0];
+        say = `Here's your reply to ${who} — say "send it" to send, or edit it below.`;
+      }
+      setReply(say); pushTurn("signal", say); speak(say);
+      return;
+    }
+    if (docM || slideM) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply(""); setSources([]); setMode("processing");
+      const op = slideM ? "slides" : "doc";
+      const topicM = /\b(?:about|on|called|named|titled|for|regarding)\s+(.+)$/i.exec(t);
+      const query = topicM ? topicM[1].replace(/[.?!]$/, "").trim()
+        : t.replace(/\b(read|open|show|summari[sz]e|what.?s|whats|in|my|the|a|an|doc|document|documents|slides?|deck|presentation|powerpoint|pull|up|find|get)\b/gi, " ").replace(/\s+/g, " ").trim();
+      try {
+        const r = await base44.functions.invoke("donna", { route: "google", op, query, question: t });
+        const d = r && r.data ? r.data : r || {};
+        if (d.link) setSources([{ title: d.title || (op === "slides" ? "Slides" : "Document"), url: d.link }]);
+        const spoken = d.spoken || "I couldn't find that.";
+        setReply(spoken); pushTurn("signal", spoken); speak(spoken);
+      } catch { setMode("idle"); setNote("I couldn't reach your Drive."); }
       return;
     }
 

@@ -8,7 +8,7 @@
 import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
-import { buildAuthUrl } from "./google/_client.js";
+import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText } from "./google/_client.js";
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 
@@ -49,6 +49,7 @@ export default async function handler(req, res) {
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
     if (route === "google-disconnect") return await googleDisconnect(auth, res);
+    if (route === "google") return await googleRead(auth, body, res);
     return res.status(400).json({ error: "Unknown route" });
   } catch (err) {
     console.error(`Jarvis route "${route}" error:`, err);
@@ -174,7 +175,7 @@ ACTION TYPES:
 - { "type": "complete","list": string | null, "text": string }          // mark a list item done (match by its wording)
 - { "type": "remove",  "list": string | null, "text": string }          // remove a list item
 - { "type": "remind",  "text": string, "due_on": "YYYY-MM-DD" | null }   // a time-bound commitment / to-do
-- { "type": "log",     "text": string, "log": string | null, "domain": string | null }  // append to a running LOG document; `log` = the named log if they say one ("in my workouts log …"), else null for the default journal
+- { "type": "log",     "text": string, "log": string | null, "domain": string | null }  // append to a running LOG document; "log" is the named log if they say one (e.g. "in my workouts log"), else null for the default journal
 - { "type": "monitor", "metric": string, "value": number | null, "note": string | null }
 - { "type": "write",   "title": string, "body": string }                 // draft a note/document
 - { "type": "grade",   "course": string, "assignment": string | null, "score": number, "max": number | null }
@@ -573,6 +574,63 @@ async function googleDisconnect(auth, res) {
   }
   await ref.delete();
   return res.status(200).json({ disconnected: true });
+}
+
+// Load the owner's Google refresh token and mint a fresh access token, or null.
+async function getAccessTokenForUid(uid) {
+  if (!isAdminConfigured()) return null;
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return null;
+  const snap = await getAdminDb().collection("google_tokens").doc(uid).get();
+  const refreshToken = snap.exists ? snap.data().refresh_token : null;
+  if (!refreshToken) return null;
+  try { return await refreshAccessToken({ clientId, clientSecret, refreshToken }); }
+  catch { return null; }
+}
+
+// ---- route: google (live, owner-scoped Gmail / Docs / Slides reads for the voice
+//      assistant). op = "mail" | "doc" | "slides". Returns a short SPOKEN answer. ----
+async function googleRead(auth, body, res) {
+  const op = body.op;
+  const question = String(body.question || "").slice(0, 500);
+  const token = await getAccessTokenForUid(auth.uid);
+  if (!token) return res.status(200).json({ spoken: "I can't reach your Google account — try reconnecting it from the Inbox tile.", items: [], link: "" });
+
+  try {
+    if (op === "mail") {
+      const query = String(body.query || "in:inbox").slice(0, 200);
+      const msgs = await searchMail(token, query, 6);
+      if (!msgs.length) return res.status(200).json({ spoken: "I didn't find any emails matching that.", items: [], from: "" });
+      const system = `You are Donna, a concise British chief of staff answering a SPOKEN question about the principal's email. In 2-4 short sentences answer directly from the messages — who it's from, the subject, the gist, and anything needing action. No markdown, no lists — this is read aloud. Return JSON { "spoken": string }.`;
+      const user = `Question: ${question || "What are these emails?"}
+Messages: ${JSON.stringify(msgs.map((m) => ({ from: m.from, subject: m.subject, date: m.date, body: (m.body || m.snippet || "").slice(0, 1200) })))}`;
+      const parsed = parseJSON(await callLLM({ system, user, json: true }));
+      const spoken = parsed?.spoken ? String(parsed.spoken) : `You have ${msgs.length} matching email${msgs.length > 1 ? "s" : ""}.`;
+      return res.status(200).json({ spoken, items: msgs.map((m) => ({ subject: m.subject, from: m.from, date: m.date })), from: msgs[0].from });
+    }
+
+    if (op === "doc" || op === "slides") {
+      const kind = op === "slides" ? "slides" : "doc";
+      const files = await searchDrive(token, String(body.query || "").slice(0, 120), kind, 5);
+      if (!files.length) return res.status(200).json({ spoken: `I couldn't find a ${op === "slides" ? "slides deck" : "doc"} about that in your Drive.`, link: "" });
+      const top = files[0];
+      let text = "";
+      try { text = await exportFileText(token, top.id); } catch { /* content may be empty/unreadable */ }
+      const system = `You are Donna, a concise British chief of staff answering a SPOKEN question about the principal's ${op === "slides" ? "slides deck" : "document"} titled "${top.name}". In 2-5 short sentences, summarise it or answer their question from the content. No markdown or lists — read aloud. Return JSON { "spoken": string }.`;
+      const user = `Question: ${question || "What's in this?"}
+Title: ${top.name}
+Content: ${(text || "(could not read the content)").slice(0, 6000)}`;
+      const parsed = parseJSON(await callLLM({ system, user, json: true }));
+      const spoken = parsed?.spoken ? String(parsed.spoken) : `I found ${top.name}.`;
+      return res.status(200).json({ spoken, title: top.name, link: top.link });
+    }
+
+    return res.status(400).json({ error: "Unknown google op" });
+  } catch (err) {
+    console.error("google route error:", err);
+    return res.status(200).json({ spoken: "Something went wrong reading your Google account — it may need reconnecting.", items: [], link: "" });
+  }
 }
 
 // ---- route: push-subscribe (store this browser's Web Push subscription) ----
