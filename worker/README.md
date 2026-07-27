@@ -155,3 +155,25 @@ npm install playwright && npx playwright install chromium
 
 Then fill in the `uh` block in your config (login/grades URLs + the CSS selectors
 for your portal's markup).
+
+### WCJC Pioneer Portal → Brightspace
+
+Brightspace (D2L) keeps grades on a **separate page per course**, so use
+`gradesUrls` (an array), not a single `gradesUrl`:
+
+1. Log into the **Pioneer Portal** and open **Brightspace**. For each class, open
+   its **Grades** page and copy the URL — it looks like
+   `https://wcjc.brightspace.com/d2l/lms/grades/my_grades/main.d2l?ou=XXXXXX`
+   (the `ou=` number is that course's id). Put one URL per class in `gradesUrls`.
+2. `loginUrl` is the Pioneer Portal sign-in page. After the worker submits your
+   login, it follows the SSO redirect and then visits each grades URL with the
+   authenticated session.
+3. Selectors are a **starting point** in `config.example.json` — Brightspace markup
+   changes, so if a run returns nothing, open a grades page, inspect the grade
+   table, and adjust `selectors.row` / `selectors.assignment` / `selectors.score`
+   (and `selectors.pageCourse` for the course title). `selectors.course` can stay
+   empty; the page's course title is used as a fallback for every row.
+4. On-demand instead of scheduled? Skip all of this and use **Claude in Chrome** —
+   it reads Brightspace in your already-logged-in browser and POSTs to
+   `/api/ingest`, so no password is ever stored. The worker path is only for
+   fully-unattended runs.

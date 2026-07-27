@@ -275,9 +275,9 @@ async function briefing(body, res) {
 
   const system =
     slot === "morning"
-      ? `You are Donna, a warm, dry British chief of staff giving a SPOKEN good-morning briefing. In 2-5 short sentences: greet briefly, tell the principal what's on today (events, things due, key commitments), and flag anything important. If "automations" is non-empty, give a quick spoken rundown of what their automations found or did overnight — mention them by name and the gist, and note any that failed. Encouraging, never naggy. Read aloud — no lists, markdown or emoji. If there's genuinely nothing on, say the day's clear.
+      ? `You are Donna, a warm, dry British chief of staff giving a SPOKEN good-morning briefing. In 2-5 short sentences: greet briefly, tell the principal what's on today (events, things due, key commitments), and flag anything important. If "automations" is non-empty, give a quick spoken rundown of what their automations found or did overnight — mention them by name and the gist, and note any that failed. If "remind_grades" is true, end with ONE short clause nudging them to run their grade check. Encouraging, never naggy. Read aloud — no lists, markdown or emoji. If there's genuinely nothing on, say the day's clear.
 Return JSON: { "say": string }.`
-      : `You are Donna, a warm, dry British chief of staff opening the EVENING review. In 2-4 short spoken sentences: acknowledge the day, celebrate any habit streak you're told about, and — if "automations" is non-empty — briefly recap what their automations did today (by name, the gist, and flag any failures). Then gently set up the check-in (habits + anything left unchecked). Kind and human, never preachy. Read aloud — no lists, markdown or emoji.
+      : `You are Donna, a warm, dry British chief of staff opening the EVENING review. In 2-4 short spoken sentences: acknowledge the day, celebrate any habit streak you're told about, and — if "automations" is non-empty — briefly recap what their automations did today (by name, the gist, and flag any failures). If "remind_grades" is true, add ONE short clause nudging them to check their grades. Then gently set up the check-in (habits + anything left unchecked). Kind and human, never preachy. Read aloud — no lists, markdown or emoji.
 Return JSON: { "say": string }.`;
 
   const user = `slot: ${slot}
@@ -289,6 +289,7 @@ important: ${JSON.stringify(Array.isArray(context.important) ? context.important
 streaks: ${JSON.stringify(Array.isArray(context.streaks) ? context.streaks.slice(0, 10) : [])}
 still_unchecked: ${JSON.stringify(Array.isArray(context.incomplete) ? context.incomplete.slice(0, 15) : [])}
 automations: ${JSON.stringify(Array.isArray(context.automations) ? context.automations.slice(0, 12) : [])}
+remind_grades: ${context.remind_grades ? "true" : "false"}
 
 Give me the spoken briefing now.`;
 
