@@ -10,6 +10,7 @@ import {
   Sparkles, Link2, Target, Globe, CheckCircle2,
 } from "lucide-react";
 import { getChicagoParts, slotKeyOf, setStoredCheckinKey, unwrap } from "./checkinUtils";
+import { loadPrefs, personaPrefsForServer, questionsForSlot } from "./settings";
 
 // ---------- payback presentation ----------
 const PAYBACK_META = {
@@ -205,10 +206,13 @@ function CheckInBody({ slot, dateKey, onCompleted, onClose }) {
     setLoadingQuestions(true);
     setQuestionsError(null);
     try {
+      const prefs = loadPrefs();
       const res = await base44.functions.invoke("donna", {
         route: "checkin",
         action: "questions",
         slot,
+        prefs: personaPrefsForServer(prefs),
+        customQuestions: questionsForSlot(prefs, slot),
         context: {
           commitments: context.commitments,
           today: context.today,

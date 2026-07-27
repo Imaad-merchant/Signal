@@ -20,6 +20,20 @@ function summarize(value, max = 25) {
   return value;
 }
 
+// Build a persona directive from the user's "Customize Donna" prefs (body.prefs),
+// prepended to Donna's spoken prompts so her name/tone/verbosity/accent are honoured.
+function personaLine(prefs) {
+  const p = (prefs && prefs.persona) || {};
+  const name = String(p.name || "Donna").slice(0, 40);
+  const tone = ["warm", "blunt", "playful", "formal"].includes(p.tone) ? p.tone : "warm";
+  const verbosity = ["brief", "balanced", "detailed"].includes(p.verbosity) ? p.verbosity : "balanced";
+  const address = p.address ? ` Address the principal as "${String(p.address).slice(0, 40)}".` : "";
+  const toneWord = { warm: "warm and encouraging", blunt: "blunt and direct — no fluff or flattery", playful: "playful, dry and witty", formal: "formal and professional" }[tone];
+  const lenWord = { brief: "Keep spoken replies very short — one sentence where you can.", balanced: "Keep spoken replies concise.", detailed: "You may add a little more useful detail." }[verbosity];
+  const brit = p.british === false ? "Use natural neutral English." : "Use British English.";
+  return `PERSONA (obey over any conflicting style below): You are ${name}.${address} Be ${toneWord}. ${lenWord} ${brit}`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
@@ -64,6 +78,15 @@ async function checkin(body, res) {
   const context = body.context && typeof body.context === "object" ? body.context : {};
 
   if (action === "questions") {
+    // User-authored questions (from "Customize Donna") come first, verbatim.
+    const custom = (Array.isArray(body.customQuestions) ? body.customQuestions : [])
+      .filter((q) => q && q.text)
+      .slice(0, 4)
+      .map((q, i) => ({ id: String(q.id || `cq${i + 1}`), text: String(q.text).slice(0, 200), kind: "custom" }));
+    const target = 3;
+    const remaining = Math.max(0, target - custom.length);
+    if (remaining === 0) return res.status(200).json({ questions: custom.slice(0, 4) });
+
     const commitments = summarize(context.commitments);
     const today = summarize(context.today ?? context.tasks);
     const memory = summarize(context.memory, 15);
@@ -74,13 +97,15 @@ async function checkin(body, res) {
         ? "This is the EVENING check-in. Reflect on how the day went relative to the morning intentions and commitments. Ask about follow-through, blockers, and what to carry into tomorrow."
         : "This is the MORNING check-in. Draw on open commitments, today's tasks, and recent memory to help the user set intention for the day.";
 
-    const system = `You are Donna, running the daily check-in. Generate at most 3 short, specific, answerable questions.
+    const system = `${personaLine(body.prefs)}
+You are running the daily check-in. Generate at most ${remaining} short, specific, answerable questions. Do NOT repeat any of the user's already_asked questions.
 ${slotGuidance}
 Each question object: { "id": string (short slug), "text": string, "kind": "reflection"|"planning"|"commitment"|"followup" }.
-Never return more than 3 questions. Keep each question to one sentence.
+Never return more than ${remaining} questions. Keep each question to one sentence.
 Return JSON: { "questions": [ ... ] }.`;
 
     const user = `CONTEXT (JSON):
+already_asked: ${JSON.stringify(custom.map((q) => q.text))}
 open_commitments: ${JSON.stringify(commitments)}
 today_tasks: ${JSON.stringify(today)}
 recent_memory: ${JSON.stringify(memory)}
@@ -90,15 +115,14 @@ Generate the questions now.`;
 
     const raw = await callLLM({ system, user, json: true });
     const parsed = parseJSON(raw);
-    let questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
-    questions = questions
+    const ai = (Array.isArray(parsed?.questions) ? parsed.questions : [])
       .filter((q) => q && (q.text || typeof q === "string"))
-      .slice(0, 3)
+      .slice(0, remaining)
       .map((q, i) => {
         if (typeof q === "string") return { id: `q${i + 1}`, text: q, kind: "reflection" };
         return { id: String(q.id || `q${i + 1}`), text: String(q.text || ""), kind: String(q.kind || "reflection") };
       });
-    return res.status(200).json({ questions });
+    return res.status(200).json({ questions: [...custom, ...ai].slice(0, 4) });
   }
 
   if (action === "payback") {
@@ -161,7 +185,8 @@ async function intent(body, res) {
   const context = body.context && typeof body.context === "object" ? body.context : {};
   const today = context.today || new Date().toISOString().slice(0, 10);
 
-  const system = `You are Donna — a sharp, warm, unflappable British chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
+  const system = `${personaLine(body.prefs)}
+You are a sharp, unflappable chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
 
 Return JSON only (no markdown):
 {
@@ -253,7 +278,8 @@ async function nudge(body, res) {
   const context = body.context && typeof body.context === "object" ? body.context : {};
   const today = context.today || new Date().toISOString().slice(0, 10);
 
-  const system = `You are Donna, a British chief of staff. Based on the principal's OPEN items, produce ONE short spoken check-in — a single friendly question or prompt to nudge them on something that's open or stale. Pick the most useful thing to ask about (an open list item, an aging commitment, something due). Warm, dry, British, ONE sentence, read aloud (no markdown/emoji/lists).
+  const system = `${personaLine(body.prefs)}
+Based on the principal's OPEN items, produce ONE short spoken check-in — a single question or prompt to nudge them on something open or stale. Pick the most useful thing (an open list item, an aging commitment, something due). ONE sentence, read aloud (no markdown/emoji/lists).
 Return JSON: { "say": string, "about": string }  // "about" = short tag of what it concerns.`;
 
   const user = `today: ${today}
@@ -278,9 +304,11 @@ async function briefing(body, res) {
 
   const system =
     slot === "morning"
-      ? `You are Donna, a warm, dry British chief of staff giving a SPOKEN good-morning briefing. In 2-5 short sentences: greet briefly, tell the principal what's on today (events, things due, key commitments), and flag anything important. If "automations" is non-empty, give a quick spoken rundown of what their automations found or did overnight — mention them by name and the gist, and note any that failed. If "remind_grades" is true, end with ONE short clause nudging them to run their grade check. Encouraging, never naggy. Read aloud — no lists, markdown or emoji. If there's genuinely nothing on, say the day's clear.
+      ? `${personaLine(body.prefs)}
+You are giving a SPOKEN good-morning briefing. In 2-5 short sentences: greet briefly, tell the principal what's on today (events, things due, key commitments), and flag anything important. If "automations" is non-empty, give a quick spoken rundown of what their automations found or did overnight — mention them by name and the gist, and note any that failed. If "remind_grades" is true, end with ONE short clause nudging them to run their grade check. Read aloud — no lists, markdown or emoji. If there's genuinely nothing on, say the day's clear.
 Return JSON: { "say": string }.`
-      : `You are Donna, a warm, dry British chief of staff opening the EVENING review. In 2-4 short spoken sentences: acknowledge the day, celebrate any habit streak you're told about, and — if "automations" is non-empty — briefly recap what their automations did today (by name, the gist, and flag any failures). If "remind_grades" is true, add ONE short clause nudging them to check their grades. Then gently set up the check-in (habits + anything left unchecked). Kind and human, never preachy. Read aloud — no lists, markdown or emoji.
+      : `${personaLine(body.prefs)}
+You are opening the EVENING review. In 2-4 short spoken sentences: acknowledge the day, celebrate any habit streak you're told about, and — if "automations" is non-empty — briefly recap what their automations did today (by name, the gist, and flag any failures). If "remind_grades" is true, add ONE short clause nudging them to check their grades. Then gently set up the check-in (habits + anything left unchecked). Read aloud — no lists, markdown or emoji.
 Return JSON: { "say": string }.`;
 
   const user = `slot: ${slot}

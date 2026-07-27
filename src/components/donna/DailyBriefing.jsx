@@ -4,6 +4,7 @@ import { base44 } from "@/api/base44Client";
 import { getChicagoParts, getBriefingParts, briefingSlotKey } from "./checkinUtils";
 import { enablePush, pushSupported } from "./push";
 import ContributionStrip from "./ContributionStrip";
+import { loadPrefs, personaPrefsForServer } from "./settings";
 
 // Morning look-ahead + evening habit review, surfaced on /cowork.
 // A top alert appears once per slot. Tapping it runs a SPOKEN flow: Donna reads
@@ -119,7 +120,7 @@ export default function DailyBriefing({ onSpeak, onActive }) {
 
   async function fetchBriefing(s, context) {
     try {
-      const res = await base44.functions.invoke("donna", { route: "briefing", slot: s, context });
+      const res = await base44.functions.invoke("donna", { route: "briefing", slot: s, prefs: personaPrefsForServer(loadPrefs()), context });
       const data = res && res.data ? res.data : res || {};
       return data.say ? String(data.say) : "";
     } catch { return ""; }
@@ -273,7 +274,7 @@ export default function DailyBriefing({ onSpeak, onActive }) {
         setLoading(false);
 
         const streaks = hydrated.filter((h) => h.streak > 0).map((h) => ({ name: h.name, days: h.streak }));
-        const remindGrades = (() => { try { return localStorage.getItem("donna_grade_nudge") !== "0"; } catch { return true; } })();
+        const remindGrades = loadPrefs().nudges.gradeNudge !== false;
         const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks, automations, remind_grades: remindGrades });
         markReportsAnnounced(freshReports);
         await runHabitFlow(intro, hydrated, "That's you logged — nicely done.");
@@ -291,7 +292,7 @@ export default function DailyBriefing({ onSpeak, onActive }) {
           commitments: commits.map((c) => c.text).filter(Boolean).slice(0, 10),
           important: important.map((s) => s.title).filter(Boolean),
           automations,
-          remind_grades: (() => { try { return localStorage.getItem("donna_grade_nudge") !== "0"; } catch { return true; } })(),
+          remind_grades: loadPrefs().nudges.gradeNudge !== false,
         });
         markReportsAnnounced(freshReports);
         await say(morningSay || "Here's what's on today.");
@@ -358,7 +359,7 @@ export default function DailyBriefing({ onSpeak, onActive }) {
     <>
       {/* One clean prompt: Donna offers the briefing; tap to hear it. No stray icon
           button — this pill (styled like the proactive nudge) is the single trigger. */}
-      {!open && !dismissed && (
+      {!open && !dismissed && loadPrefs().nudges.briefing !== false && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5">
           <button
             type="button"

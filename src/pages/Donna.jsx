@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -10,7 +10,13 @@ import DailyBriefing from "@/components/donna/DailyBriefing";
 import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
+import CustomizeDonnaPanel from "@/components/donna/CustomizeDonnaPanel";
 import { resolveTileKey, setTileHidden, ALL_TILES } from "@/components/donna/dashboardConfig";
+import {
+  loadPrefs, onPrefsChange, patchPrefs, personaPrefsForServer,
+  parseOpenSettings, parseAddQuestion, parseRemoveQuestion, parseAddHabit, parseRemoveHabit,
+  parsePersonaTweak, parseNudgeTweak, addCheckinQuestion, removeCheckinQuestionByText,
+} from "@/components/donna/settings";
 import { useVoice } from "@/components/donna/useVoice";
 import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
@@ -36,12 +42,17 @@ function briefingPending() {
 const todayKey = () =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
-function pickBritishVoice(voices) {
-  const gb = voices.filter((v) => /en[-_]GB/i.test(v.lang));
-  const female =
-    gb.find((v) => /female|serena|kate|sonia|martha|libby|hazel|stephanie|amelie/i.test(v.name)) ||
-    gb.find((v) => /google uk english female/i.test(v.name));
-  return female || gb[0] || voices.find((v) => /^en/i.test(v.lang)) || null;
+const FEMALE_RE = /female|serena|kate|sonia|martha|libby|hazel|stephanie|amelie|samantha|karen|moira|tessa|fiona/i;
+const MALE_RE = /male|daniel|arthur|oliver|james|george|fred|gordon|rishi|alex/i;
+// Pick a TTS voice honouring the user's prefs: accent (British vs any English) and
+// preferred voice gender. Falls back gracefully to any English voice.
+function pickVoice(voices, prefer = "female", british = true) {
+  const pool = british ? voices.filter((v) => /en[-_]GB/i.test(v.lang)) : voices.filter((v) => /^en/i.test(v.lang));
+  const base = pool.length ? pool : voices.filter((v) => /^en/i.test(v.lang));
+  let hit = null;
+  if (prefer === "female") hit = base.find((v) => FEMALE_RE.test(v.name) && !MALE_RE.test(v.name));
+  else if (prefer === "male") hit = base.find((v) => MALE_RE.test(v.name));
+  return hit || base[0] || voices.find((v) => /^en/i.test(v.lang)) || null;
 }
 
 // Best-effort match of a spoken item ("the logo") to an existing open task,
@@ -119,7 +130,12 @@ export default function Donna() {
   const [orbAlert, setOrbAlert] = useState(false); // orb-delivery glow
   const [reminderToast, setReminderToast] = useState(""); // on-screen reminder banner
   const [showRoutines, setShowRoutines] = useState(false); // routines editor panel
-  const [showCustomize, setShowCustomize] = useState(false); // dashboard customize panel
+  const [showCustomize, setShowCustomize] = useState(false); // customize overlay (tabbed)
+  const [customizeTab, setCustomizeTab] = useState("donna"); // "donna" | "dashboard"
+  const [prefs, setPrefs] = useState(loadPrefs);
+  const prefsRef = useRef(prefs);
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+  useEffect(() => onPrefsChange(setPrefs), []);
   const [briefingActive, setBriefingActive] = useState(false); // daily review owns the mic
   const [pendingLog, setPendingLogState] = useState(null); // awaiting "which log?" answer
   const pendingLogRef = useRef(null);
@@ -317,11 +333,86 @@ export default function Donna() {
       return;
     }
 
+    // ---- Customize Donna by voice (persona / voice / questions / habits / nudges) ----
+    if (parseOpenSettings(t)) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      setCustomizeTab("donna"); setShowCustomize(true);
+      const say = "Here's where you can shape me — my tone, voice, questions, habits, and nudges.";
+      setReply(say); pushTurn("signal", say); speak(say);
+      return;
+    }
+    {
+      const persona = parsePersonaTweak(t);
+      const nudge = !persona ? parseNudgeTweak(t) : null;
+      if (persona || nudge) {
+        const { section, patch } = persona || nudge;
+        setPrefs(patchPrefs(section, patch));
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        const key = Object.keys(patch)[0], val = patch[key];
+        const say = key === "name" ? `I'm ${val} now.`
+          : key === "address" ? `Right — I'll call you ${val}.`
+          : key === "tone" ? `Noted — I'll be more ${val}.`
+          : key === "verbosity" ? `I'll keep it ${val}.`
+          : key === "british" ? (val ? "Keeping it British." : "Dropping the British accent.")
+          : key === "rate" ? `Adjusting my pace.`
+          : key === "prefer" ? `Switching to a ${val} voice.`
+          : key === "pauseMs" ? `I'll wait ${val >= (prefsRef.current.nudges?.pauseMs || 1500) ? "a bit longer" : "less"} before I answer.`
+          : key === "gradeNudge" ? (val ? "I'll nudge you about grades." : "I'll stop nudging you about grades.")
+          : key === "briefing" ? (val ? "Briefings back on." : "Briefings off.")
+          : key === "proactive" ? `I'll be ${val === "often" ? "more" : "less"} proactive.`
+          : "Done.";
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+    }
+    {
+      const addQ = parseAddQuestion(t);
+      if (addQ) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        setPrefs(addCheckinQuestion(addQ.text, addQ.slot));
+        const say = `Added — I'll ask "${addQ.text}"${addQ.slot !== "any" ? ` every ${addQ.slot}` : ""}.`;
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+      const rmQ = parseRemoveQuestion(t);
+      if (rmQ) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        const removed = removeCheckinQuestionByText(rmQ.text);
+        setPrefs(loadPrefs());
+        const say = removed ? `I'll stop asking "${removed.text}".` : "I couldn't find a question like that.";
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+    }
+    {
+      const addH = parseAddHabit(t);
+      if (addH) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        try { await base44.entities.Habit.create({ name: addH.name, question: `${addH.name} today?`, active: true, sort_order: 99 }); } catch { /* ignore */ }
+        const say = `Now tracking "${addH.name}".`;
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+      const rmH = parseRemoveHabit(t);
+      if (rmH) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        let say = "I couldn't find that habit.";
+        try {
+          const list = await base44.entities.Habit.list("-created_date", 50).catch(() => []);
+          const q = rmH.name.toLowerCase();
+          const hit = (Array.isArray(list) ? list : []).find((h) => (h.name || "").toLowerCase().includes(q) || q.includes((h.name || "").toLowerCase()));
+          if (hit) { await base44.entities.Habit.update(hit.id, { active: false }); say = `Stopped tracking "${hit.name}".`; }
+        } catch { /* ignore */ }
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+    }
+
     // ---- Dashboard customisation by voice ----
     // "customize/edit my dashboard" opens the panel; "hide/show the X tile" toggles one.
     if (/\b(customi[sz]e|edit|change|set\s*up)\s+(my\s+|the\s+)?dashboard\b/i.test(t)) {
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
-      setShowCustomize(true);
+      setCustomizeTab("dashboard"); setShowCustomize(true);
       const say = "Here's your dashboard — hide, show, or reorder any tile.";
       setReply(say); pushTurn("signal", say); speak(say);
       return;
@@ -597,6 +688,7 @@ export default function Donna() {
       const res = await base44.functions.invoke("donna", {
         route: "intent",
         transcript: t,
+        prefs: personaPrefsForServer(prefsRef.current),
         context: {
           today,
           commitments: (Array.isArray(commitments) ? commitments : []).map((c) => ({ text: c.text, due_on: c.due_on })),
@@ -666,6 +758,7 @@ export default function Donna() {
     active: mode === "listening" || mode === "processing" || briefingActive,
     onCommand: handleTranscript,
     echoText: spoken.text,   // ignore her own audio echoing back through the mic
+    pauseMs: prefs.nudges?.pauseMs || 1500,
   });
 
   // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
@@ -764,6 +857,7 @@ export default function Donna() {
       const lists = Object.entries(listMap).map(([name, items]) => ({ name, items: items.slice(0, 20) })).slice(0, 12);
       const res = await base44.functions.invoke("donna", {
         route: "nudge",
+        prefs: personaPrefsForServer(prefsRef.current),
         context: {
           today,
           commitments: (Array.isArray(commits) ? commits : []).map((c) => ({ text: c.text, due_on: c.due_on })),
@@ -861,8 +955,9 @@ export default function Donna() {
         const synth = window.speechSynthesis;
         try { synth.cancel(); } catch { /* clear any stuck utterance */ }
         const u = new SpeechSynthesisUtterance(text);
-        u.rate = 1.02; u.pitch = 1; u.volume = 1;
-        const v = pickBritishVoice(synth.getVoices() || []);
+        const vp = prefsRef.current.voice || {};
+        u.rate = Number(vp.rate) || 1.02; u.pitch = 1; u.volume = 1;
+        const v = pickVoice(synth.getVoices() || [], vp.prefer || "female", prefsRef.current.persona?.british !== false);
         if (v) u.voice = v;
 
         setSpoken({ text, idx: 0 });
@@ -1073,15 +1168,15 @@ export default function Donna() {
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Donna</h1>
 
-      {/* Customize dashboard. */}
+      {/* Customize (Donna + dashboard). */}
       <button
         type="button"
-        onClick={() => setShowCustomize(true)}
+        onClick={() => { setCustomizeTab("donna"); setShowCustomize(true); }}
         className="absolute top-4 left-[6.5rem] z-20 rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-cyan-300"
-        title="Customize dashboard"
-        aria-label="Customize dashboard"
+        title="Customize Donna"
+        aria-label="Customize Donna"
       >
-        <LayoutGrid className="h-5 w-5" />
+        <Settings2 className="h-5 w-5" />
       </button>
 
       {/* Routines opener (shows a count when reminders exist). */}
@@ -1121,11 +1216,15 @@ export default function Donna() {
         </div>
       )}
 
-      {/* Customize-dashboard overlay. */}
+      {/* Customize overlay — tabbed: Donna (persona/voice/questions/habits/nudges) + Dashboard tiles. */}
       {showCustomize && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
-          <div onClick={(e) => e.stopPropagation()}>
-            <CustomizePanel />
+        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-16 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-2">
+            <div className="flex gap-1 rounded-full border border-white/10 bg-white/5 p-1 text-xs">
+              <button type="button" onClick={() => setCustomizeTab("donna")} className={`rounded-full px-3 py-1 ${customizeTab === "donna" ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400"}`}>Donna</button>
+              <button type="button" onClick={() => setCustomizeTab("dashboard")} className={`rounded-full px-3 py-1 ${customizeTab === "dashboard" ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400"}`}>Dashboard</button>
+            </div>
+            {customizeTab === "donna" ? <CustomizeDonnaPanel /> : <CustomizePanel />}
           </div>
         </div>
       )}
