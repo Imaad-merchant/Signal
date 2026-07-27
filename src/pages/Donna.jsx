@@ -848,7 +848,11 @@ export default function Donna() {
   };
 
   const statusLabel = {
-    idle: voice.supported ? "Tap the orb and speak" : "Type a command below",
+    idle: !voice.supported
+      ? "Voice needs Chrome — type below"
+      : muted
+      ? "Muted — tap the mic to talk"
+      : "Listening — just talk, no need to say “Donna”",
     listening: "Listening…",
     processing: "On it…",
     speaking: "Speaking",

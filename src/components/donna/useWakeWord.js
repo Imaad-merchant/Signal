@@ -26,6 +26,7 @@ function isEcho(said, spoken) {
 export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
   const armedRef = useRef(false);
   const stoppedRef = useRef(true);
+  const runningRef = useRef(false);
   const echoRef = useRef(echoText);
   useEffect(() => { echoRef.current = echoText; }, [echoText]);
 
@@ -55,20 +56,34 @@ export function useWakeWord({ enabled, active, onCommand, echoText = "" }) {
       onCommand && onCommand(cmd);
     };
 
+    const startRec = () => {
+      if (stoppedRef.current || runningRef.current) return;
+      try { rec.start(); runningRef.current = true; } catch { /* already running / transient */ }
+    };
+
+    rec.onstart = () => { runningRef.current = true; };
     rec.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) handle(e.results[i][0].transcript);
       }
     };
-    rec.onerror = () => { /* onend handles restart */ };
+    rec.onerror = () => { runningRef.current = false; /* onend handles restart */ };
     rec.onend = () => {
-      if (!stoppedRef.current) { try { rec.start(); } catch { /* ignore */ } }
+      runningRef.current = false;
+      // Restart immediately so listening never lapses between utterances.
+      if (!stoppedRef.current) { try { rec.start(); runningRef.current = true; } catch { /* watchdog will retry */ } }
     };
 
-    try { rec.start(); } catch { /* ignore */ }
+    startRec();
+    // Watchdog: some browsers stop recognition (silence timeout, tab focus, audio
+    // ducking during TTS) without firing onend — poll and revive it so it's truly
+    // always-on until muted.
+    const watchdog = window.setInterval(() => { if (!stoppedRef.current && !runningRef.current) startRec(); }, 2000);
 
     return () => {
       stoppedRef.current = true;
+      runningRef.current = false;
+      window.clearInterval(watchdog);
       try { rec.onend = null; rec.stop(); } catch { /* ignore */ }
     };
   }, [enabled, active, onCommand]);
