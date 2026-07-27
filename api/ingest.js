@@ -146,21 +146,49 @@ async function workerPush(db, req, res) {
   }
 
   if (Array.isArray(body.grades) && body.grades.length) {
+    const slice = body.grades.slice(0, 200);
     const batch = db.batch();
-    for (const g of body.grades.slice(0, 200)) {
+    const drops = [];
+    for (const g of slice) {
       const ref = db.collection("grades").doc(safeId(`${uid}_${g.course || ""}_${g.assignment || ""}`));
+      const newScore = Number.isFinite(Number(g.score)) ? Number(g.score) : null;
+      // Detect a drop vs the previously stored score for this course/assignment.
+      if (newScore != null) {
+        const prev = await ref.get().catch(() => null);
+        const prevScore = prev && prev.exists ? prev.data().score : null;
+        if (Number.isFinite(prevScore) && newScore < prevScore - 0.5) {
+          drops.push({ course: g.course || "", assignment: g.assignment || null, from: prevScore, to: newScore });
+        }
+      }
       batch.set(ref, {
         userId: uid, source: "worker",
         course: String(g.course || "").slice(0, 120),
         assignment: g.assignment ? String(g.assignment).slice(0, 160) : null,
-        score: Number.isFinite(Number(g.score)) ? Number(g.score) : null,
+        score: newScore,
         max_score: Number.isFinite(Number(g.max ?? g.max_score)) ? Number(g.max ?? g.max_score) : null,
         graded_on: g.graded_on || now.slice(0, 10),
         created_date: now, updated_date: now,
       }, { merge: true });
     }
     await batch.commit();
-    result.grades = Math.min(body.grades.length, 200);
+    result.grades = slice.length;
+
+    // A grade drop → an (unannounced) report so the next briefing flags it out loud.
+    if (drops.length) {
+      const rb = db.batch();
+      for (let i = 0; i < drops.length; i++) {
+        const d = drops[i];
+        const where = d.assignment ? `${d.course} — ${d.assignment}` : d.course;
+        rb.set(db.collection("reports").doc(safeId(`${uid}_gradedrop_${now}_${i}`)), {
+          userId: uid, source: "Grades",
+          title: `Grade drop: ${d.course}`.slice(0, 200),
+          summary: `${where} dropped from ${d.from} to ${d.to}.`.slice(0, 1200),
+          ok: false, announced: false, occurred_at: now, created_date: now, updated_date: now,
+        }, { merge: true });
+      }
+      await rb.commit();
+      result.grade_drops = drops.length;
+    }
   }
 
   // Local knowledge notes (Obsidian vault / folders). Idempotent by file path;
