@@ -16,6 +16,19 @@ const COLLECTION_TO_ENTITY = {
 // "commitments/<id>". Returns { ok } or { ok:false, error }.
 export async function reverseAgentAction(rec) {
   if (!rec || rec.undone) return { ok: false, error: "Already undone" };
+
+  // Log-entry undo: restore the document's previous content (or delete a log this
+  // entry just created), rather than deleting the whole log.
+  if (rec.kind === "log") {
+    try {
+      if (rec.created) await base44.entities.Page.delete(rec.pageId);
+      else await base44.entities.Page.update(rec.pageId, { content: rec.prevContent || "" });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || "Undo failed" };
+    }
+  }
+
   const deadline = rec.undo_deadline ? new Date(rec.undo_deadline).getTime() : Infinity;
   if (Number.isFinite(deadline) && deadline < Date.now()) {
     return { ok: false, error: "Undo window has passed" };
