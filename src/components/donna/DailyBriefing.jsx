@@ -273,7 +273,8 @@ export default function DailyBriefing({ onSpeak, onActive }) {
         setLoading(false);
 
         const streaks = hydrated.filter((h) => h.streak > 0).map((h) => ({ name: h.name, days: h.streak }));
-        const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks, automations });
+        const remindGrades = (() => { try { return localStorage.getItem("donna_grade_nudge") !== "0"; } catch { return true; } })();
+        const intro = await fetchBriefing("evening", { today, incomplete: dueToday.map((t) => t.title), streaks, automations, remind_grades: remindGrades });
         markReportsAnnounced(freshReports);
         await runHabitFlow(intro, hydrated, "That's you logged — nicely done.");
       } else {
@@ -290,6 +291,7 @@ export default function DailyBriefing({ onSpeak, onActive }) {
           commitments: commits.map((c) => c.text).filter(Boolean).slice(0, 10),
           important: important.map((s) => s.title).filter(Boolean),
           automations,
+          remind_grades: (() => { try { return localStorage.getItem("donna_grade_nudge") !== "0"; } catch { return true; } })(),
         });
         markReportsAnnounced(freshReports);
         await say(morningSay || "Here's what's on today.");

@@ -33,20 +33,25 @@
     "timeoutSeconds": 120
   },
   "uh": {
+    "_comment": "OPT-IN, LOCAL-ONLY grade scraper (WCJC Pioneer Portal -> Brightspace). Runs on YOUR machine with YOUR login from this local config; nothing touches the cloud except the parsed grades. Automating a portal login likely violates the school's terms of service — your account, your risk. Requires: npm install playwright && npx playwright install chromium.",
     "enabled": false,
-    "loginUrl": "https://accessuh.uh.edu/...",
-    "gradesUrl": "https://.../grades",
-    "username": "your-uh-id",
-    "password": "your-uh-password",
+    "loginUrl": "https://pioneerportal.wcjc.edu/",
+    "gradesUrls": [
+      "https://wcjc.brightspace.com/d2l/lms/grades/my_grades/main.d2l?ou=COURSE_ID_1",
+      "https://wcjc.brightspace.com/d2l/lms/grades/my_grades/main.d2l?ou=COURSE_ID_2"
+    ],
+    "username": "your-pioneer-portal-id",
+    "password": "your-pioneer-portal-password",
     "selectors": {
-      "username": "#username",
-      "password": "#password",
-      "submit": "button[type=submit]",
-      "row": ".grade-row",
-      "course": ".course",
-      "assignment": ".assignment",
-      "score": ".score",
-      "max": ".max"
+      "username": "#userNameInput",
+      "password": "#passwordInput",
+      "submit": "#submitButton",
+      "pageCourse": "h1.d2l-page-title, .d2l-navigation-s-link",
+      "row": "table.d2l-table tbody tr",
+      "course": "",
+      "assignment": "th",
+      "score": "td.d_gn label, td.d_gn",
+      "max": ""
     }
   }
 }
