@@ -165,6 +165,11 @@ service cloud.firestore {
     match /google_tokens/{docId} {
       allow read, write: if false;
     }
+    // Plaid item access tokens — written ONLY by the server (Admin SDK). Never
+    // client-readable: bank access tokens must not reach the browser.
+    match /plaid_items/{docId} {
+      allow read, write: if false;
+    }
     // Web Push subscriptions — written by the server (Admin SDK) after the client
     // hands over its subscription via /api/donna; not client-readable.
     match /push_subscriptions/{docId} {
