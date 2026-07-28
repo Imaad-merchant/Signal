@@ -32,7 +32,7 @@ export function Avatar({ name, color = null }) {
   );
 }
 
-export function Card({ title, children, right }) {
+export function Card({ title, children, right = null }) {
   return (
     <section className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -96,7 +96,7 @@ export function MonthPager({ value, onChange, canGoNext = true }) {
 }
 
 // Labelled amount row used in the summary rails (Assets / Debts / Net Worth).
-export function StatRow({ icon: Icon, label, sub, value, tone = "default" }) {
+export function StatRow({ icon: Icon = null, label, sub = null, value, tone = "default" }) {
   const tones = { default: "text-gray-200", good: "text-emerald-300", bad: "text-rose-300", muted: "text-gray-400" };
   return (
     <div className="flex items-center gap-2.5 py-2">

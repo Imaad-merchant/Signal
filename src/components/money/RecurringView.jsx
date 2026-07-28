@@ -98,7 +98,7 @@ function Upcoming({ subs }) {
   );
 }
 
-function Row({ sub, due, right }) {
+function Row({ sub, due = null, right = null }) {
   return (
     <div className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2">
       <Avatar name={sub.merchant} />

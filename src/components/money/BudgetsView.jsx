@@ -31,8 +31,8 @@ export default function BudgetsView({ data, onChange = () => {} }) {
   const rows = budgets.map((b) => {
     const budgeted = Number(b.amount) || 0;
     const actual = actualFor(b.category);
-    const remaining = category0(b.category) ? actual - budgeted : budgeted - actual;
-    return { ...b, budgeted, actual, remaining, isEarnings: category0(b.category) };
+    const remaining = isEarningsCategory(b.category) ? actual - budgeted : budgeted - actual;
+    return { ...b, budgeted, actual, remaining, isEarnings: isEarningsCategory(b.category) };
   });
   const basics = rows.filter((r) => BASIC_CATEGORIES.includes(r.category));
   const categories = rows.filter((r) => !BASIC_CATEGORIES.includes(r.category));
@@ -106,10 +106,10 @@ export default function BudgetsView({ data, onChange = () => {} }) {
   );
 }
 
-const category0 = (c) => c === "Income";
+const isEarningsCategory = (c) => c === "Income";
 const budgetedSet = (budgets) => new Set(budgets.map((b) => b.category));
 
-function BudgetTable({ title, rows, empty, onChange, children }) {
+function BudgetTable({ title, rows, empty, onChange, children = null }) {
   const update = async (b, amt) => { await base44.entities.Budget.update(b.id, { amount: Number(amt) || 0 }).catch(() => {}); onChange(); };
   const del = async (b) => { await base44.entities.Budget.delete(b.id).catch(() => {}); onChange(); };
 
