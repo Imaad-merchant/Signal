@@ -192,6 +192,10 @@ export const base44 = {
     Command: createEntityHandler("commands"),
     // Automation reports posted to the ingest endpoint; read aloud in the briefing.
     Report: createEntityHandler("reports"),
+    // Money tab — accounts (balances), transactions (manual/CSV), subscriptions.
+    Account: createEntityHandler("accounts"),
+    Transaction: createEntityHandler("transactions"),
+    Subscription: createEntityHandler("subscriptions"),
   },
 
   functions: {
