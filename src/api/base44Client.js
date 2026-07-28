@@ -197,6 +197,12 @@ export const base44 = {
     Transaction: createEntityHandler("transactions"),
     Subscription: createEntityHandler("subscriptions"),
     Budget: createEntityHandler("budgets"),
+    // User-defined "always categorise merchant X as Y" rules, layered over the
+    // built-in regex rules in components/money/money.js.
+    CategoryRule: createEntityHandler("category_rules"),
+    // Daily assets/debts/net snapshot, written by the plaid-sync cron, read by
+    // the Net Worth trend chart.
+    NetWorthSnapshot: createEntityHandler("networth_snapshots"),
   },
 
   functions: {

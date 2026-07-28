@@ -6,13 +6,13 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Wallet, Landmark, RefreshCw, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import {
-  detectSubscriptions, monthlyCost, normMerchant, spendingByCategory,
-} from "@/components/money/money";
+import { detectSubscriptions, monthlyCost, normMerchant } from "@/components/money/money";
+import { monthKey, spendingWithDelta, totalsForMonth, shiftMonth } from "@/components/money/analytics";
 import { connectBank, syncBanks } from "@/components/money/plaidLink";
 import MoneyNav, { isView } from "@/components/money/MoneyNav";
 import Overview from "@/components/money/Overview";
-import { RecurringView, SpendingView, BudgetsView, NetWorthView, TransactionsView } from "@/components/money/views";
+import { RecurringView, SpendingView, BudgetsView, NetWorthView } from "@/components/money/views";
+import TransactionsView from "@/components/money/TransactionsView";
 
 const VIEW_KEY = "money_view";
 const monthPrefix = (d = new Date()) => d.toISOString().slice(0, 7);
@@ -47,6 +47,7 @@ export default function Money() {
   const txQ = useQuery({ queryKey: ["money", "transactions"], queryFn: () => base44.entities.Transaction.list("-date", 1000) });
   const subsQ = useQuery({ queryKey: ["money", "subscriptions"], queryFn: () => base44.entities.Subscription.list("-created_date", 200) });
   const budgetsQ = useQuery({ queryKey: ["money", "budgets"], queryFn: () => base44.entities.Budget.list("-created_date", 100).catch(() => []) });
+  const rulesQ = useQuery({ queryKey: ["money", "rules"], queryFn: () => base44.entities.CategoryRule.list("-created_date", 200).catch(() => []) });
 
   // Surface read failures (the usual cause is Firestore rules not published for
   // the money collections — server writes succeed via Admin, client reads deny).
@@ -56,6 +57,7 @@ export default function Money() {
   const accounts = useMemo(() => (Array.isArray(accountsQ.data) ? accountsQ.data : []), [accountsQ.data]);
   const transactions = useMemo(() => (Array.isArray(txQ.data) ? txQ.data : []), [txQ.data]);
   const budgets = useMemo(() => (Array.isArray(budgetsQ.data) ? budgetsQ.data : []), [budgetsQ.data]);
+  const rules = useMemo(() => (Array.isArray(rulesQ.data) ? rulesQ.data : []), [rulesQ.data]);
   const manualSubs = useMemo(
     () => (Array.isArray(subsQ.data) ? subsQ.data : []).filter((s) => s.active !== false),
     [subsQ.data],
@@ -70,22 +72,20 @@ export default function Money() {
   }, [manualSubs, detected]);
 
   const data = useMemo(() => {
+    const key = monthKey();
     const netWorth = accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0);
-    const mPrefix = monthPrefix();
-    const monthTx = transactions.filter((t) => (t.date || "").startsWith(mPrefix));
-    const monthSpend = monthTx.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
-    const monthIncome = monthTx.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const lastSpend = transactions
-      .filter((t) => (t.date || "").startsWith(lastMonthPrefix()) && Number(t.amount) < 0)
-      .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
+    const { spend: monthSpend, income: monthIncome } = totalsForMonth(transactions, key);
+    const lastSpend = totalsForMonth(transactions, shiftMonth(key, -1)).spend;
+    // Ignored/excluded rows are already filtered out by the analytics helpers.
+    const byCat = spendingWithDelta(transactions, key)
+      .map((c) => ({ category: c.category, total: c.amount, pct: c.pct, delta: c.delta }));
     return {
-      accounts, transactions, budgets, subs,
-      netWorth, monthSpend, monthIncome,
+      accounts, transactions, budgets, subs, rules,
+      netWorth, monthSpend, monthIncome, byCat,
       subsMonthly: subs.reduce((s, x) => s + monthlyCost(x), 0),
-      byCat: spendingByCategory(transactions, mPrefix),
       spendDelta: lastSpend > 0 ? ((monthSpend - lastSpend) / lastSpend) * 100 : null,
     };
-  }, [accounts, transactions, budgets, subs]);
+  }, [accounts, transactions, budgets, subs, rules]);
 
   const [banking, setBanking] = useState("");
   const [bankMsg, setBankMsg] = useState("");

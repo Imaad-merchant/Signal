@@ -165,6 +165,18 @@ service cloud.firestore {
       allow update: if canUpdate();
       allow create: if isCreatingOwner();
     }
+    // User-defined merchant -> category rules for the Money section.
+    match /category_rules/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    // Daily net-worth snapshots. Written server-side by the plaid-sync cron via
+    // the Admin SDK (which bypasses rules); the client only ever reads them.
+    match /networth_snapshots/{docId} {
+      allow read: if isOwner();
+      allow create, update, delete: if false;
+    }
     // Google OAuth refresh tokens — written ONLY by the server (Admin SDK). No
     // client access at all: tokens must never be readable from the browser.
     match /google_tokens/{docId} {
