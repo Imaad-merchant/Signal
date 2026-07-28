@@ -117,6 +117,29 @@ export function monthlyCost(sub) {
   const a = Number(sub.amount) || 0;
   return sub.cadence === "yearly" ? a / 12 : sub.cadence === "weekly" ? a * 4.33 : a;
 }
+// Yearly-equivalent cost (Rocket Money shows "$X/yearly").
+export function yearlyCost(sub) {
+  const a = Number(sub.amount) || 0;
+  return sub.cadence === "yearly" ? a : sub.cadence === "weekly" ? a * 52 : a * 12;
+}
+// Estimate the next charge date from the last charge + cadence.
+export function nextDue(sub) {
+  if (!sub.last_charged) return null;
+  const d = new Date(sub.last_charged);
+  if (Number.isNaN(d.getTime())) return null;
+  const add = sub.cadence === "weekly" ? 7 : sub.cadence === "yearly" ? 365 : 30;
+  const now = new Date();
+  // roll forward until it's in the future
+  while (d < now) d.setDate(d.getDate() + add);
+  return d;
+}
+export function relDue(date) {
+  if (!date) return "";
+  const days = Math.round((date - new Date()) / 86400000);
+  if (days === 0) return "due today";
+  if (days > 0) return `in ${days} day${days > 1 ? "s" : ""}`;
+  return `${-days} day${-days > 1 ? "s" : ""} ago`;
+}
 
 // Spending by category for a given YYYY-MM prefix → [{ category, total }] (spends only, positive totals).
 export function spendingByCategory(transactions, monthPrefix) {

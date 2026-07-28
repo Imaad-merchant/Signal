@@ -1,17 +1,19 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
-  Wallet, Plus, Trash2, Upload, Repeat, TrendingUp, X, Landmark, RefreshCw, Loader2,
-  ShoppingBag, Utensils, Car, Home, Film, HeartPulse, Plane, Receipt, DollarSign, Package,
+  Wallet, Plus, Trash2, Upload, Repeat, TrendingUp, TrendingDown, X, Landmark, RefreshCw, Loader2,
+  ShoppingBag, Utensils, Car, Home, Film, HeartPulse, Plane, DollarSign, Package,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import {
-  CATEGORIES, categorize, fmtMoney, detectSubscriptions, monthlyCost, normMerchant,
-  spendingByCategory, parseTransactionsCsv, initials, avatarColor, groupAccounts,
+  CATEGORIES, categorize, fmtMoney, detectSubscriptions, monthlyCost, yearlyCost, normMerchant,
+  spendingByCategory, parseTransactionsCsv, initials, avatarColor, nextDue, relDue,
 } from "@/components/money/money";
 import { connectBank, syncBanks } from "@/components/money/plaidLink";
 
-const monthPrefix = () => new Date().toISOString().slice(0, 7);
+const monthPrefix = (d = new Date()) => d.toISOString().slice(0, 7);
+const lastMonthPrefix = () => { const d = new Date(); d.setMonth(d.getMonth() - 1); return monthPrefix(d); };
 const today = () => new Date().toISOString().slice(0, 10);
 const monthName = () => new Date().toLocaleString(undefined, { month: "long" });
 
@@ -61,8 +63,9 @@ export default function Money() {
   const monthTx = transactions.filter((t) => (t.date || "").startsWith(mPrefix));
   const monthSpend = monthTx.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
   const monthIncome = monthTx.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  const lastSpend = transactions.filter((t) => (t.date || "").startsWith(lastMonthPrefix()) && Number(t.amount) < 0).reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
+  const spendDelta = lastSpend > 0 ? ((monthSpend - lastSpend) / lastSpend) * 100 : null;
   const byCat = spendingByCategory(transactions, mPrefix);
-  const maxCat = byCat.length ? byCat[0].total : 1;
 
   const detected = useMemo(() => detectSubscriptions(transactions), [transactions]);
   const subs = useMemo(() => {
@@ -128,7 +131,7 @@ export default function Money() {
         </div>
 
         <Accounts accounts={accounts} netWorth={netWorth} onChange={invalidate} />
-        <Spending byCat={byCat} maxCat={maxCat} total={monthSpend} />
+        <Spending byCat={byCat} total={monthSpend} delta={spendDelta} />
         <Subscriptions subs={subs} monthly={subsMonthly} onChange={invalidate} />
         <Transactions transactions={transactions} accounts={accounts} onChange={invalidate} />
       </div>
@@ -148,47 +151,66 @@ function Card({ title, children, right }) {
   );
 }
 
+function AccountRow({ a, onChange }) {
+  const update = async (bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(() => {}); onChange(); };
+  const del = async () => { await base44.entities.Account.delete(a.id).catch(() => {}); onChange(); };
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
+      <Avatar name={a.name} />
+      <span className="min-w-0 flex-1 truncate text-sm">{a.name}
+        {a.source === "plaid" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">linked</span>}
+        <span className="block text-[10px] text-gray-500">{a.type}</span>
+      </span>
+      {a.source === "plaid"
+        ? <span className={`text-sm ${Number(a.balance) < 0 ? "text-rose-300" : "text-gray-200"}`}>{fmtMoney(a.balance)}</span>
+        : <input defaultValue={a.balance} onBlur={(e) => update(e.target.value)} type="number" className="w-24 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-right text-sm outline-none focus:border-white/25" />}
+      {a.source !== "plaid" && <button onClick={del} className="p-1 text-gray-500 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>}
+    </div>
+  );
+}
+
 function Accounts({ accounts, netWorth, onChange }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState("Checking");
   const [balance, setBalance] = useState("");
-  const groups = groupAccounts(accounts);
+  const assets = accounts.filter((a) => (Number(a.balance) || 0) >= 0);
+  const debts = accounts.filter((a) => (Number(a.balance) || 0) < 0);
+  const assetTotal = assets.reduce((s, a) => s + (Number(a.balance) || 0), 0);
+  const debtTotal = debts.reduce((s, a) => s + Math.abs(Number(a.balance) || 0), 0);
   const add = async () => {
     if (!name.trim()) return;
     await base44.entities.Account.create({ name: name.trim(), type, balance: Number(balance) || 0 }).catch(() => {});
     setName(""); setBalance(""); setOpen(false); onChange();
   };
-  const update = async (a, bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(() => {}); onChange(); };
-  const del = async (a) => { await base44.entities.Account.delete(a.id).catch(() => {}); onChange(); };
 
   return (
-    <Card title="Accounts" right={<span className="text-[11px] font-semibold text-gray-300">{fmtMoney(netWorth)}</span>}>
+    <Card title="Net worth" right={<span className="text-[11px] font-semibold text-gray-300">{fmtMoney(netWorth)}</span>}>
       <div className="flex flex-col gap-3">
         {accounts.length === 0 && <p className="text-[11px] text-gray-500">Connect a bank or add accounts to see your net worth.</p>}
-        {Object.entries(groups).map(([label, list]) => list.length === 0 ? null : (
-          <div key={label}>
+
+        {assets.length > 0 && (
+          <div>
             <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-gray-500">
-              <span>{label}</span>
-              <span>{fmtMoney(list.reduce((s, a) => s + (Number(a.balance) || 0), 0))}</span>
+              <span className="text-emerald-400/80">Assets</span><span>{fmtMoney(assetTotal)}</span>
             </div>
-            <div className="flex flex-col gap-1">
-              {list.map((a) => (
-                <div key={a.id} className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
-                  <Avatar name={a.name} />
-                  <span className="min-w-0 flex-1 truncate text-sm">{a.name}
-                    {a.source === "plaid" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">linked</span>}
-                    <span className="block text-[10px] text-gray-500">{a.type}</span>
-                  </span>
-                  {a.source === "plaid"
-                    ? <span className={`text-sm ${Number(a.balance) < 0 ? "text-rose-300" : "text-gray-200"}`}>{fmtMoney(a.balance)}</span>
-                    : <input defaultValue={a.balance} onBlur={(e) => update(a, e.target.value)} type="number" className="w-24 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-right text-sm outline-none focus:border-white/25" />}
-                  {a.source !== "plaid" && <button onClick={() => del(a)} className="p-1 text-gray-500 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>}
-                </div>
-              ))}
-            </div>
+            <div className="flex flex-col gap-1">{assets.map((a) => <AccountRow key={a.id} a={a} onChange={onChange} />)}</div>
           </div>
-        ))}
+        )}
+        {debts.length > 0 && (
+          <div>
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-gray-500">
+              <span className="text-rose-400/80">Debt</span><span className="text-rose-300">{fmtMoney(debtTotal)}</span>
+            </div>
+            <div className="flex flex-col gap-1">{debts.map((a) => <AccountRow key={a.id} a={a} onChange={onChange} />)}</div>
+          </div>
+        )}
+        {(assets.length > 0 || debts.length > 0) && (
+          <div className="flex items-center justify-between border-t border-white/10 pt-2 text-xs">
+            <span className="text-gray-400">Assets − Debt</span>
+            <span className="font-semibold text-white">{fmtMoney(netWorth)}</span>
+          </div>
+        )}
 
         {open ? (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -207,28 +229,49 @@ function Accounts({ accounts, netWorth, onChange }) {
   );
 }
 
-function Spending({ byCat, maxCat, total }) {
+function Spending({ byCat, total, delta }) {
+  const data = byCat.map((c) => ({ name: c.category, value: c.total, color: catMeta(c.category).c }));
+  const up = delta != null && delta > 0;
   return (
-    <Card title={`Spending this month`} right={<span className="text-[11px] font-semibold text-rose-300">{fmtMoney(total)}</span>}>
-      {byCat.length === 0 && <p className="text-[11px] text-gray-500">No spending yet this month — add or import transactions below.</p>}
-      <div className="flex flex-col gap-2.5">
-        {byCat.map((c) => {
-          const m = catMeta(c.category);
-          return (
-            <div key={c.category} className="flex items-center gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
-                <m.Icon className="h-4 w-4" style={{ color: m.c }} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="mb-0.5 flex items-center justify-between text-xs"><span className="text-gray-300">{c.category}</span><span className="text-gray-400">{fmtMoney(c.total)}</span></div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-                  <div className="h-full rounded-full" style={{ width: `${Math.max(4, (c.total / maxCat) * 100)}%`, background: m.c }} />
-                </div>
-              </div>
+    <Card title="Spending this month" right={delta != null && (
+      <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${up ? "text-rose-300" : "text-emerald-300"}`}>
+        {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}{Math.abs(delta).toFixed(0)}% vs last mo
+      </span>
+    )}>
+      {byCat.length === 0 ? (
+        <p className="text-[11px] text-gray-500">No spending yet this month — add or import transactions below.</p>
+      ) : (
+        <div className="flex items-center gap-4">
+          <div className="relative h-36 w-36 shrink-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={68} paddingAngle={2} stroke="none">
+                  {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-[9px] uppercase tracking-wide text-gray-500">Total spend</span>
+              <span className="text-base font-bold text-white">{fmtMoney(total)}</span>
             </div>
-          );
-        })}
-      </div>
+          </div>
+          <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+            {byCat.slice(0, 6).map((c) => {
+              const m = catMeta(c.category);
+              const pct = total > 0 ? Math.round((c.total / total) * 100) : 0;
+              return (
+                <div key={c.category} className="flex items-center gap-2 text-xs">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: m.c }} />
+                  <m.Icon className="h-3.5 w-3.5 shrink-0" style={{ color: m.c }} />
+                  <span className="min-w-0 flex-1 truncate text-gray-300">{c.category}</span>
+                  <span className="shrink-0 text-gray-500">{pct}%</span>
+                  <span className="w-16 shrink-0 text-right text-gray-300">{fmtMoney(c.total)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -245,22 +288,31 @@ function Subscriptions({ subs, monthly, onChange }) {
   };
   const track = async (d) => { await base44.entities.Subscription.create({ merchant: d.merchant, amount: d.amount, cadence: d.cadence, active: true }).catch(() => {}); onChange(); };
   const cancel = async (s) => { if (s.id) { await base44.entities.Subscription.update(s.id, { active: false }).catch(() => {}); onChange(); } };
+  const yearly = subs.reduce((s, x) => s + yearlyCost(x), 0);
   return (
-    <Card title="Recurring & subscriptions" right={<span className="text-[11px] font-semibold text-violet-300">{fmtMoney(monthly)}/mo</span>}>
+    <Card title="Recurring & subscriptions" right={
+      <span className="text-right text-[11px] leading-tight">
+        <span className="block font-semibold text-violet-300">{fmtMoney(monthly)}/mo</span>
+        <span className="block text-gray-500">{subs.length} · {fmtMoney(yearly)}/yr</span>
+      </span>
+    }>
       <div className="flex flex-col gap-1.5">
-        {subs.map((s, i) => (
+        {subs.map((s, i) => {
+          const due = nextDue(s);
+          return (
           <div key={s.id || `auto-${i}`} className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2">
             <Avatar name={s.merchant} />
             <span className="min-w-0 flex-1 truncate text-sm capitalize">{s.merchant}
               {s.source === "auto" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">auto</span>}
-              <span className="block text-[10px] text-gray-500">{s.cadence} · {fmtMoney(monthlyCost(s))}/mo</span>
+              <span className="block text-[10px] text-gray-500 capitalize">{s.cadence}{due ? ` · ${relDue(due)}` : ""}</span>
             </span>
             <span className="shrink-0 text-sm text-gray-200">{fmtMoney(s.amount)}</span>
             {s.source === "manual"
               ? <button onClick={() => cancel(s)} title="Cancel/hide" className="p-1 text-gray-500 hover:text-red-300"><X className="h-4 w-4" /></button>
               : <button onClick={() => track(s)} title="Track this" className="p-1 text-gray-500 hover:text-cyan-300"><Plus className="h-4 w-4" /></button>}
           </div>
-        ))}
+          );
+        })}
         {subs.length === 0 && <p className="text-[11px] text-gray-500">None yet. Import or link transactions and recurring charges show up automatically, or add one.</p>}
         {open ? (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
