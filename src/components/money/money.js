@@ -87,6 +87,31 @@ export function detectSubscriptions(transactions) {
   return out.sort((a, b) => b.amount - a.amount);
 }
 
+// --- Presentation helpers (Rocket-Money-style avatars + grouping) ---
+export function initials(name) {
+  const w = String(name || "?").trim().split(/\s+/);
+  return (((w[0]?.[0] || "") + (w[1]?.[0] || "")).toUpperCase()) || "?";
+}
+const AVATARS = ["#0ea5e9", "#8b5cf6", "#ec4899", "#f97316", "#10b981", "#eab308", "#ef4444", "#14b8a6", "#6366f1", "#f43f5e"];
+export function avatarColor(name) {
+  const s = String(name || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATARS[h % AVATARS.length];
+}
+// Group accounts into Rocket-Money-style sections with signed subtotals.
+export function groupAccounts(accounts) {
+  const g = { Cash: [], Credit: [], Investments: [], Other: [] };
+  for (const a of accounts || []) {
+    const t = String(a.type || "").toLowerCase();
+    if (/credit|loan/.test(t)) g.Credit.push(a);
+    else if (/invest|brokerage|retire|401|ira|hsa/.test(t)) g.Investments.push(a);
+    else if (/check|saving|cash|depository|money market/.test(t)) g.Cash.push(a);
+    else g.Other.push(a);
+  }
+  return g;
+}
+
 // Monthly-equivalent cost of a subscription.
 export function monthlyCost(sub) {
   const a = Number(sub.amount) || 0;

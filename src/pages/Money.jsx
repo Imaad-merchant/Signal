@@ -1,25 +1,56 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wallet, Plus, Trash2, Upload, Repeat, PiggyBank, TrendingUp, X, CreditCard, Landmark, RefreshCw, Loader2 } from "lucide-react";
+import {
+  Wallet, Plus, Trash2, Upload, Repeat, TrendingUp, X, Landmark, RefreshCw, Loader2,
+  ShoppingBag, Utensils, Car, Home, Film, HeartPulse, Plane, Receipt, DollarSign, Package,
+} from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import {
   CATEGORIES, categorize, fmtMoney, detectSubscriptions, monthlyCost, normMerchant,
-  spendingByCategory, parseTransactionsCsv,
+  spendingByCategory, parseTransactionsCsv, initials, avatarColor, groupAccounts,
 } from "@/components/money/money";
 import { connectBank, syncBanks } from "@/components/money/plaidLink";
 
 const monthPrefix = () => new Date().toISOString().slice(0, 7);
 const today = () => new Date().toISOString().slice(0, 10);
+const monthName = () => new Date().toLocaleString(undefined, { month: "long" });
 
-const CAT_COLORS = ["#22d3ee", "#60a5fa", "#a78bfa", "#f472b6", "#fb923c", "#34d399", "#facc15", "#f87171", "#94a3b8"];
+const CAT_META = {
+  Income: { c: "#10b981", Icon: DollarSign },
+  Groceries: { c: "#22c55e", Icon: ShoppingBag },
+  Food: { c: "#f97316", Icon: Utensils },
+  Transport: { c: "#38bdf8", Icon: Car },
+  Shopping: { c: "#a78bfa", Icon: ShoppingBag },
+  "Bills & Utilities": { c: "#f43f5e", Icon: Home },
+  Subscriptions: { c: "#8b5cf6", Icon: Repeat },
+  Entertainment: { c: "#ec4899", Icon: Film },
+  Health: { c: "#14b8a6", Icon: HeartPulse },
+  Travel: { c: "#eab308", Icon: Plane },
+  Other: { c: "#94a3b8", Icon: Package },
+};
+const catMeta = (c) => CAT_META[c] || CAT_META.Other;
+
+function Avatar({ name, color }) {
+  const bg = color || avatarColor(name);
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: bg }}>
+      {initials(name)}
+    </div>
+  );
+}
 
 export default function Money() {
   const qc = useQueryClient();
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["money"] }); };
 
-  const accountsQ = useQuery({ queryKey: ["money", "accounts"], queryFn: () => base44.entities.Account.list("-created_date", 100).catch(() => []) });
-  const txQ = useQuery({ queryKey: ["money", "transactions"], queryFn: () => base44.entities.Transaction.list("-date", 1000).catch(() => []) });
-  const subsQ = useQuery({ queryKey: ["money", "subscriptions"], queryFn: () => base44.entities.Subscription.list("-created_date", 200).catch(() => []) });
+  const accountsQ = useQuery({ queryKey: ["money", "accounts"], queryFn: () => base44.entities.Account.list("-created_date", 100) });
+  const txQ = useQuery({ queryKey: ["money", "transactions"], queryFn: () => base44.entities.Transaction.list("-date", 1000) });
+  const subsQ = useQuery({ queryKey: ["money", "subscriptions"], queryFn: () => base44.entities.Subscription.list("-created_date", 200) });
+
+  // Surface read failures (the usual cause is Firestore rules not published for
+  // the money collections — server writes succeed via Admin, client reads deny).
+  const loadError = accountsQ.error || txQ.error || subsQ.error;
+  const permDenied = loadError && /permission|insufficient|PERMISSION_DENIED/i.test(String(loadError?.message || loadError));
 
   const accounts = Array.isArray(accountsQ.data) ? accountsQ.data : [];
   const transactions = Array.isArray(txQ.data) ? txQ.data : [];
@@ -33,7 +64,6 @@ export default function Money() {
   const byCat = spendingByCategory(transactions, mPrefix);
   const maxCat = byCat.length ? byCat[0].total : 1;
 
-  // Subscriptions = manual + auto-detected (deduped by normalized merchant).
   const detected = useMemo(() => detectSubscriptions(transactions), [transactions]);
   const subs = useMemo(() => {
     const seen = new Set(manualSubs.map((s) => normMerchant(s.merchant)));
@@ -63,7 +93,7 @@ export default function Money() {
 
   return (
     <div className="h-full overflow-y-auto bg-[#0b0d11] pb-[calc(5rem+env(safe-area-inset-bottom))] text-gray-100">
-      <div className="mx-auto max-w-3xl px-4 py-6">
+      <div className="mx-auto max-w-2xl px-4 py-6">
         <div className="mb-4 flex items-center justify-between gap-2">
           <h1 className="flex items-center gap-2 text-xl font-semibold"><Wallet className="h-5 w-5 text-cyan-300" /> Money</h1>
           <div className="flex items-center gap-1.5">
@@ -78,37 +108,39 @@ export default function Money() {
           </div>
         </div>
         {bankMsg && <p className="mb-3 text-[11px] text-cyan-300">{bankMsg}</p>}
+        {loadError && (
+          <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
+            {permDenied
+              ? "Can't read your money data — your Firestore rules don't allow the accounts/transactions/subscriptions collections yet. Publish the updated rules and refresh; any linked data will appear."
+              : `Couldn't load money data: ${String(loadError?.message || loadError)}`}
+          </div>
+        )}
 
-        {/* Top cards */}
-        <div className="grid grid-cols-3 gap-2">
-          <Stat icon={PiggyBank} label="Net worth" value={fmtMoney(netWorth)} tone="text-emerald-300" />
-          <Stat icon={TrendingUp} label="Spent this month" value={fmtMoney(monthSpend)} tone="text-rose-300" />
-          <Stat icon={Repeat} label="Subscriptions / mo" value={fmtMoney(subsMonthly)} tone="text-violet-300" />
+        {/* Net worth hero */}
+        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-cyan-500/10 to-violet-500/15 p-5">
+          <div className="text-[11px] uppercase tracking-wide text-gray-400">Net worth</div>
+          <div className="mt-1 text-3xl font-bold text-white">{fmtMoney(netWorth)}</div>
+          <div className="mt-3 flex gap-5 text-xs">
+            <div><span className="text-gray-400">Spent in {monthName()}</span><div className="text-sm font-semibold text-rose-300">{fmtMoney(monthSpend)}</div></div>
+            <div><span className="text-gray-400">Income</span><div className="text-sm font-semibold text-emerald-300">{fmtMoney(monthIncome)}</div></div>
+            <div><span className="text-gray-400">Subscriptions</span><div className="text-sm font-semibold text-violet-300">{fmtMoney(subsMonthly)}/mo</div></div>
+          </div>
         </div>
 
-        <Accounts accounts={accounts} onChange={invalidate} />
-        <Spending byCat={byCat} maxCat={maxCat} income={monthIncome} />
-        <Subscriptions subs={subs} onChange={invalidate} />
+        <Accounts accounts={accounts} netWorth={netWorth} onChange={invalidate} />
+        <Spending byCat={byCat} maxCat={maxCat} total={monthSpend} />
+        <Subscriptions subs={subs} monthly={subsMonthly} onChange={invalidate} />
         <Transactions transactions={transactions} accounts={accounts} onChange={invalidate} />
       </div>
     </div>
   );
 }
 
-function Stat({ icon: Icon, label, value, tone }) {
-  return (
-    <div className="rounded-xl border border-white/[0.07] bg-white/[0.03] p-3">
-      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-gray-500"><Icon className="h-3 w-3" /> {label}</div>
-      <div className={`mt-1 text-lg font-semibold ${tone}`}>{value}</div>
-    </div>
-  );
-}
-
-function Card({ title, icon: Icon, children, right }) {
+function Card({ title, children, right }) {
   return (
     <section className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-200"><Icon className="h-4 w-4 text-gray-400" /> {title}</h2>
+        <h2 className="text-sm font-semibold text-gray-200">{title}</h2>
         {right}
       </div>
       {children}
@@ -116,95 +148,132 @@ function Card({ title, icon: Icon, children, right }) {
   );
 }
 
-function Accounts({ accounts, onChange }) {
+function Accounts({ accounts, netWorth, onChange }) {
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [type, setType] = useState("Checking");
   const [balance, setBalance] = useState("");
+  const groups = groupAccounts(accounts);
   const add = async () => {
     if (!name.trim()) return;
     await base44.entities.Account.create({ name: name.trim(), type, balance: Number(balance) || 0 }).catch(() => {});
-    setName(""); setBalance(""); onChange();
+    setName(""); setBalance(""); setOpen(false); onChange();
   };
   const update = async (a, bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(() => {}); onChange(); };
   const del = async (a) => { await base44.entities.Account.delete(a.id).catch(() => {}); onChange(); };
-  return (
-    <Card title="Accounts" icon={CreditCard}>
-      <div className="flex flex-col gap-2">
-        {accounts.map((a) => (
-          <div key={a.id} className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
-            <span className="min-w-0 flex-1 truncate text-sm">{a.name} <span className="text-[11px] text-gray-500">· {a.type}</span></span>
-            <input defaultValue={a.balance} onBlur={(e) => update(a, e.target.value)} type="number"
-              className="w-24 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-right text-sm outline-none focus:border-white/25" />
-            <button onClick={() => del(a)} className="p-1 text-gray-500 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>
-          </div>
-        ))}
-        {accounts.length === 0 && <p className="text-[11px] text-gray-500">Add your accounts to see net worth.</p>}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Account name" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
-          <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
-            {["Checking", "Savings", "Credit Card", "Investment", "Cash"].map((x) => <option key={x} className="bg-[#0e1015]">{x}</option>)}
-          </select>
-          <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
-          <button onClick={add} disabled={!name.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
-        </div>
-      </div>
-    </Card>
-  );
-}
 
-function Spending({ byCat, maxCat, income }) {
   return (
-    <Card title="Spending this month" icon={TrendingUp} right={income > 0 ? <span className="text-[11px] text-emerald-300">+{fmtMoney(income)} income</span> : null}>
-      {byCat.length === 0 && <p className="text-[11px] text-gray-500">No spending yet this month — add or import transactions below.</p>}
-      <div className="flex flex-col gap-2">
-        {byCat.map((c, i) => (
-          <div key={c.category}>
-            <div className="mb-0.5 flex items-center justify-between text-xs"><span className="text-gray-300">{c.category}</span><span className="text-gray-400">{fmtMoney(c.total)}</span></div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/5">
-              <div className="h-full rounded-full" style={{ width: `${Math.max(4, (c.total / maxCat) * 100)}%`, background: CAT_COLORS[i % CAT_COLORS.length] }} />
+    <Card title="Accounts" right={<span className="text-[11px] font-semibold text-gray-300">{fmtMoney(netWorth)}</span>}>
+      <div className="flex flex-col gap-3">
+        {accounts.length === 0 && <p className="text-[11px] text-gray-500">Connect a bank or add accounts to see your net worth.</p>}
+        {Object.entries(groups).map(([label, list]) => list.length === 0 ? null : (
+          <div key={label}>
+            <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-gray-500">
+              <span>{label}</span>
+              <span>{fmtMoney(list.reduce((s, a) => s + (Number(a.balance) || 0), 0))}</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              {list.map((a) => (
+                <div key={a.id} className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
+                  <Avatar name={a.name} />
+                  <span className="min-w-0 flex-1 truncate text-sm">{a.name}
+                    {a.source === "plaid" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">linked</span>}
+                    <span className="block text-[10px] text-gray-500">{a.type}</span>
+                  </span>
+                  {a.source === "plaid"
+                    ? <span className={`text-sm ${Number(a.balance) < 0 ? "text-rose-300" : "text-gray-200"}`}>{fmtMoney(a.balance)}</span>
+                    : <input defaultValue={a.balance} onBlur={(e) => update(a, e.target.value)} type="number" className="w-24 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-right text-sm outline-none focus:border-white/25" />}
+                  {a.source !== "plaid" && <button onClick={() => del(a)} className="p-1 text-gray-500 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>}
+                </div>
+              ))}
             </div>
           </div>
         ))}
+
+        {open ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Account name" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
+            <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
+              {["Checking", "Savings", "Credit Card", "Investment", "Cash"].map((x) => <option key={x} className="bg-[#0e1015]">{x}</option>)}
+            </select>
+            <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
+            <button onClick={add} disabled={!name.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
+          </div>
+        ) : (
+          <button onClick={() => setOpen(true)} className="inline-flex w-fit items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200"><Plus className="h-3 w-3" /> Add manual account</button>
+        )}
       </div>
     </Card>
   );
 }
 
-function Subscriptions({ subs, onChange }) {
+function Spending({ byCat, maxCat, total }) {
+  return (
+    <Card title={`Spending this month`} right={<span className="text-[11px] font-semibold text-rose-300">{fmtMoney(total)}</span>}>
+      {byCat.length === 0 && <p className="text-[11px] text-gray-500">No spending yet this month — add or import transactions below.</p>}
+      <div className="flex flex-col gap-2.5">
+        {byCat.map((c) => {
+          const m = catMeta(c.category);
+          return (
+            <div key={c.category} className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
+                <m.Icon className="h-4 w-4" style={{ color: m.c }} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="mb-0.5 flex items-center justify-between text-xs"><span className="text-gray-300">{c.category}</span><span className="text-gray-400">{fmtMoney(c.total)}</span></div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+                  <div className="h-full rounded-full" style={{ width: `${Math.max(4, (c.total / maxCat) * 100)}%`, background: m.c }} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function Subscriptions({ subs, monthly, onChange }) {
+  const [open, setOpen] = useState(false);
   const [merchant, setMerchant] = useState("");
   const [amount, setAmount] = useState("");
   const [cadence, setCadence] = useState("monthly");
   const add = async () => {
     if (!merchant.trim() || !amount) return;
     await base44.entities.Subscription.create({ merchant: merchant.trim(), amount: Number(amount) || 0, cadence, active: true }).catch(() => {});
-    setMerchant(""); setAmount(""); onChange();
+    setMerchant(""); setAmount(""); setOpen(false); onChange();
   };
   const track = async (d) => { await base44.entities.Subscription.create({ merchant: d.merchant, amount: d.amount, cadence: d.cadence, active: true }).catch(() => {}); onChange(); };
   const cancel = async (s) => { if (s.id) { await base44.entities.Subscription.update(s.id, { active: false }).catch(() => {}); onChange(); } };
   return (
-    <Card title="Subscriptions" icon={Repeat} right={<span className="text-[11px] text-violet-300">{fmtMoney(subs.reduce((s, x) => s + monthlyCost(x), 0))}/mo</span>}>
-      <div className="flex flex-col gap-2">
+    <Card title="Recurring & subscriptions" right={<span className="text-[11px] font-semibold text-violet-300">{fmtMoney(monthly)}/mo</span>}>
+      <div className="flex flex-col gap-1.5">
         {subs.map((s, i) => (
-          <div key={s.id || `auto-${i}`} className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
+          <div key={s.id || `auto-${i}`} className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2">
+            <Avatar name={s.merchant} />
             <span className="min-w-0 flex-1 truncate text-sm capitalize">{s.merchant}
               {s.source === "auto" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">auto</span>}
+              <span className="block text-[10px] text-gray-500">{s.cadence} · {fmtMoney(monthlyCost(s))}/mo</span>
             </span>
-            <span className="shrink-0 text-[11px] text-gray-500">{s.cadence}</span>
-            <span className="shrink-0 text-sm text-gray-300">{fmtMoney(s.amount)}</span>
+            <span className="shrink-0 text-sm text-gray-200">{fmtMoney(s.amount)}</span>
             {s.source === "manual"
               ? <button onClick={() => cancel(s)} title="Cancel/hide" className="p-1 text-gray-500 hover:text-red-300"><X className="h-4 w-4" /></button>
               : <button onClick={() => track(s)} title="Track this" className="p-1 text-gray-500 hover:text-cyan-300"><Plus className="h-4 w-4" /></button>}
           </div>
         ))}
-        {subs.length === 0 && <p className="text-[11px] text-gray-500">None found. Import transactions and recurring charges show up automatically, or add one below.</p>}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Netflix" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="15.99" type="number" className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
-          <select value={cadence} onChange={(e) => setCadence(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
-            {["monthly", "yearly", "weekly"].map((x) => <option key={x} className="bg-[#0e1015]">{x}</option>)}
-          </select>
-          <button onClick={add} disabled={!merchant.trim() || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
-        </div>
+        {subs.length === 0 && <p className="text-[11px] text-gray-500">None yet. Import or link transactions and recurring charges show up automatically, or add one.</p>}
+        {open ? (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Netflix" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="15.99" type="number" className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
+            <select value={cadence} onChange={(e) => setCadence(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
+              {["monthly", "yearly", "weekly"].map((x) => <option key={x} className="bg-[#0e1015]">{x}</option>)}
+            </select>
+            <button onClick={add} disabled={!merchant.trim() || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
+          </div>
+        ) : (
+          <button onClick={() => setOpen(true)} className="mt-1 inline-flex w-fit items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200"><Plus className="h-3 w-3" /> Add subscription</button>
+        )}
       </div>
     </Card>
   );
@@ -218,6 +287,7 @@ function Transactions({ transactions, accounts, onChange }) {
   const [csv, setCsv] = useState("");
   const [importing, setImporting] = useState(false);
   const [msg, setMsg] = useState("");
+  const [adding, setAdding] = useState(false);
   const fileRef = useRef(null);
 
   const addTx = async () => {
@@ -226,7 +296,7 @@ function Transactions({ transactions, accounts, onChange }) {
     await base44.entities.Transaction.create({
       date, merchant: merchant.trim(), amount: amt, category: cat || categorize(merchant, amt), account_id: accounts[0]?.id || null,
     }).catch(() => {});
-    setMerchant(""); setAmount(""); setCat(""); onChange();
+    setMerchant(""); setAmount(""); setCat(""); setAdding(false); onChange();
   };
   const del = async (t) => { await base44.entities.Transaction.delete(t.id).catch(() => {}); onChange(); };
 
@@ -250,25 +320,39 @@ function Transactions({ transactions, accounts, onChange }) {
     reader.readAsText(f);
   };
 
+  // Group recent transactions by date.
+  const recent = transactions.slice(0, 60);
+  const groups = [];
+  const byDate = {};
+  for (const t of recent) { const d = t.date || "—"; if (!byDate[d]) { byDate[d] = []; groups.push(d); } byDate[d].push(t); }
+  const dateLabel = (d) => {
+    if (d === today()) return "Today";
+    const dt = new Date(d);
+    return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  };
+
   return (
-    <Card title="Transactions" icon={Wallet} right={
+    <Card title="Transactions" right={
       <label className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-gray-300 hover:border-cyan-400/40">
         <Upload className="h-3 w-3" /> Import CSV
         <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} className="hidden" />
       </label>
     }>
-      <div className="mb-3 flex flex-wrap items-center gap-1.5">
-        <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none" />
-        <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Merchant" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="-12.50" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
-        <select value={cat} onChange={(e) => setCat(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
-          <option value="" className="bg-[#0e1015]">Auto</option>
-          {CATEGORIES.map((c) => <option key={c} className="bg-[#0e1015]">{c}</option>)}
-        </select>
-        <button onClick={addTx} disabled={!merchant.trim() || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
-      </div>
+      {adding ? (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <input value={date} onChange={(e) => setDate(e.target.value)} type="date" className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none" />
+          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Merchant" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
+          <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="-12.50" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
+          <select value={cat} onChange={(e) => setCat(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
+            <option value="" className="bg-[#0e1015]">Auto</option>
+            {CATEGORIES.map((c) => <option key={c} className="bg-[#0e1015]">{c}</option>)}
+          </select>
+          <button onClick={addTx} disabled={!merchant.trim() || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)} className="mb-3 inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200"><Plus className="h-3 w-3" /> Add transaction</button>
+      )}
 
-      {/* Paste-CSV fallback */}
       <details className="mb-3">
         <summary className="cursor-pointer text-[11px] text-gray-500">…or paste CSV text</summary>
         <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={3} placeholder="Date,Description,Amount&#10;2026-07-01,Netflix,-15.99" className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-gray-100 outline-none focus:border-white/25" />
@@ -276,17 +360,29 @@ function Transactions({ transactions, accounts, onChange }) {
       </details>
       {msg && <p className="mb-2 text-[11px] text-cyan-300">{msg}</p>}
 
-      <div className="flex flex-col gap-1">
-        {transactions.slice(0, 40).map((t) => (
-          <div key={t.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/[0.03]">
-            <span className="w-16 shrink-0 text-[11px] text-gray-500">{(t.date || "").slice(5)}</span>
-            <span className="min-w-0 flex-1 truncate text-sm">{t.merchant}</span>
-            <span className="shrink-0 text-[10px] text-gray-500">{t.category || categorize(t.merchant, t.amount)}</span>
-            <span className={`w-24 shrink-0 text-right text-sm ${Number(t.amount) < 0 ? "text-gray-200" : "text-emerald-300"}`}>{fmtMoney(t.amount)}</span>
-            <button onClick={() => del(t)} className="p-1 text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>
+      <div className="flex flex-col gap-3">
+        {groups.map((d) => (
+          <div key={d}>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">{dateLabel(d)}</div>
+            <div className="flex flex-col gap-0.5">
+              {byDate[d].map((t) => {
+                const c = t.category || categorize(t.merchant, t.amount);
+                const m = catMeta(c);
+                return (
+                  <div key={t.id} className="group flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-white/[0.03]">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: `${m.c}22` }}>
+                      <m.Icon className="h-4 w-4" style={{ color: m.c }} />
+                    </div>
+                    <span className="min-w-0 flex-1 truncate text-sm">{t.merchant}<span className="block text-[10px] text-gray-500">{c}{t.pending ? " · pending" : ""}</span></span>
+                    <span className={`shrink-0 text-sm ${Number(t.amount) < 0 ? "text-gray-200" : "text-emerald-300"}`}>{fmtMoney(t.amount)}</span>
+                    {t.source !== "plaid" && <button onClick={() => del(t)} className="p-1 text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         ))}
-        {transactions.length === 0 && <p className="text-[11px] text-gray-500">No transactions yet — add one above or import a CSV from your bank.</p>}
+        {transactions.length === 0 && <p className="text-[11px] text-gray-500">No transactions yet — connect a bank, add one, or import a CSV.</p>}
       </div>
     </Card>
   );
