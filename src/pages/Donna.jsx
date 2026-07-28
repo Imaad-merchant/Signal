@@ -853,10 +853,17 @@ export default function Donna() {
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
 
+    // Resume pump — Chrome's synth silently wedges (pauses) after idle/long text;
+    // nudging resume() when it's mid-speech but paused keeps audio flowing.
+    const pump = window.setInterval(() => {
+      try { const s = window.speechSynthesis; if (s && s.speaking && s.paused) s.resume(); } catch { /* ignore */ }
+    }, 3000);
+
     return () => {
       window.speechSynthesis.removeEventListener?.("voiceschanged", onVoices);
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
+      window.clearInterval(pump);
       try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
     };
   }, []);
@@ -1154,24 +1161,28 @@ export default function Donna() {
   }
 
   // Gesture-driven voice check that reports WHY it failed — click it if you can't
-  // hear Donna and the note tells us exactly what's wrong.
+  // hear Donna and the note tells us exactly what's wrong. Uses the same delayed
+  // fire as speak() so it doesn't hit Chrome's cancel()->speak() same-tick drop.
   function testVoice() {
     if (!("speechSynthesis" in window)) { setNote("This browser has no speech synthesis at all."); return; }
     const synth = window.speechSynthesis;
     const voices = synth.getVoices() || [];
-    if (!voices.length) { setNote("No TTS voices are installed in this browser yet — try again in a second, or add a voice in your OS settings."); return; }
-    try { synth.cancel(); } catch { /* ignore */ }
+    if (!voices.length) { setNote("No TTS voices are installed in this browser yet — try again in a second."); return; }
     const v = pickVoice(voices, prefsRef.current.voice?.prefer || "female", prefsRef.current.persona?.british !== false);
-    const u = new SpeechSynthesisUtterance("Voice test. If you can hear this, I'm working.");
-    u.volume = 1; u.rate = Number(prefsRef.current.voice?.rate) || 1.02;
-    if (v) u.voice = v;
+    setNote(`Testing voice "${v ? v.name : "default"}"…`);
+    try { synth.cancel(); } catch { /* ignore */ }
     let started = false;
-    setNote(`Testing voice${v ? ` "${v.name}"` : ""}…`);
-    u.onstart = () => { started = true; setNote(`Speaking with "${v ? v.name : "default"}". If you hear nothing, check system volume / output device.`); };
-    u.onend = () => { if (started) setNote("Voice test finished."); };
-    u.onerror = (e) => setNote(`Speech engine error: ${e?.error || "unknown"}. Try a different voice in Customize.`);
-    try { synth.resume(); synth.speak(u); } catch { setNote("The speech engine refused to start."); }
-    window.setTimeout(() => { if (!started) setNote("Chrome accepted the request but never started speaking — this is usually the network-based Google voice failing. I've switched to preferring a local voice; hard-refresh and retry."); }, 2500);
+    // Defer the speak() a tick after cancel() — the Chrome race that drops utterances.
+    window.setTimeout(() => {
+      const u = new SpeechSynthesisUtterance("Voice test. If you can hear this, I'm working.");
+      u.volume = 1; u.rate = Number(prefsRef.current.voice?.rate) || 1.02;
+      if (v) u.voice = v;
+      u.onstart = () => { started = true; setNote(`Speaking with "${v ? v.name : "default"}". If you still hear nothing, the browser tab is muted or the OS output volume is down.`); };
+      u.onend = () => { if (started) setNote("Voice test finished — did you hear it?"); };
+      u.onerror = (e) => setNote(`Speech engine error: ${e?.error || "unknown"}. Pick another voice in Customize.`);
+      try { synth.resume(); synth.speak(u); } catch { setNote("The speech engine refused to start."); }
+      window.setTimeout(() => { if (!started) setNote("The speech engine accepted the request but never started — try clicking Test once more; if it persists your Chrome speech engine is wedged and a full quit/reopen of Chrome clears it."); }, 3000);
+    }, 90);
   }
 
   // Tap a question in the "To answer" box → answer it by voice (or the type box);
