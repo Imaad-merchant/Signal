@@ -2,14 +2,10 @@
 // section navigates end to end; phases 2–6 replace these bodies in place with
 // the fuller Rocket-Money-shaped screens (filters, sub-tabs, month pagers).
 import React from "react";
-import { Accounts, BudgetsCard } from "@/components/money/sections";
+import { Accounts } from "@/components/money/sections";
 
 
 
-export function BudgetsView({ data, onChange }) {
-  const { budgets, byCat } = data;
-  return <BudgetsCard budgets={budgets} byCat={byCat} onChange={onChange} />;
-}
 
 export function NetWorthView({ data, onChange }) {
   const { accounts, netWorth } = data;
