@@ -777,12 +777,15 @@ export default function Donna() {
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
-  // Always listening (unless muted) — no wake word: anything you say is a command,
-  // including while Donna is speaking (barge-in). Pause only while a command is
-  // being captured/handled so we don't re-trigger mid-thought.
+  // Always listening (unless muted) — no wake word: anything you say is a command.
+  // The mic pauses whenever Donna isn't idle: while a command is being captured or
+  // handled (so we don't re-trigger mid-thought) AND while she's speaking. Pausing
+  // during speech is essential on phones — an open mic holds the audio session and
+  // her reply comes out inaudible, and it also stops the recognizer from mishearing
+  // her own voice and cutting her off. To interrupt her, tap the orb.
   useWakeWord({
     enabled: !muted,
-    active: mode === "listening" || mode === "processing" || briefingActive,
+    active: mode !== "idle" || briefingActive,
     onCommand: handleTranscript,
     echoText: spoken.text,   // ignore her own audio echoing back through the mic
     pauseMs: prefs.nudges?.pauseMs || 1500,
@@ -826,8 +829,27 @@ export default function Donna() {
     window.speechSynthesis.getVoices();
     const onVoices = () => window.speechSynthesis.getVoices();
     window.speechSynthesis.addEventListener?.("voiceschanged", onVoices);
+
+    // Mobile browsers block speech until a user gesture has unlocked audio. Prime it
+    // once on the first tap/keypress anywhere so replies (which fire asynchronously,
+    // outside a gesture) are audible from then on.
+    const unlock = () => {
+      try {
+        window.speechSynthesis.resume();
+        const u = new SpeechSynthesisUtterance(" ");
+        u.volume = 0;
+        window.speechSynthesis.speak(u);
+      } catch { /* ignore */ }
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+
     return () => {
       window.speechSynthesis.removeEventListener?.("voiceschanged", onVoices);
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
       try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
     };
   }, []);
@@ -1005,9 +1027,14 @@ export default function Donna() {
         };
         const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
         const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
+        // Chrome pauses the synth mid-utterance after ~15s; nudge it to keep talking.
+        let keepAlive = window.setInterval(() => {
+          try { if (synth.speaking && !synth.paused) synth.resume(); } catch { /* ignore */ }
+        }, 4000);
+        const stopKeepAlive = () => { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } };
         const finish = () => {
           if (done) return; done = true;
-          clearWatchdog(); stopTimer();
+          clearWatchdog(); stopTimer(); stopKeepAlive();
           setMode("idle"); voice.amplitudeRef.current = 0;
           resolve();
         };
