@@ -34,7 +34,7 @@ export default function RecurringView({ data, onChange = () => {} }) {
             key={t.key}
             onClick={() => setTab(t.key)}
             className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${
-              tab === t.key ? "bg-white/10 text-gray-100" : "text-gray-500 hover:text-gray-300"
+              tab === t.key ? "bg-[#16191d] text-white" : "text-[#8b929c] hover:text-[#454b54]"
             }`}
           >
             {t.label}
@@ -58,25 +58,25 @@ function Upcoming({ subs }) {
 
   return (
     <>
-      <Card title="Next 14 days" right={dueSoon.length > 0 && <span className="text-[11px] text-gray-400">{fmtMoney(soonTotal)}</span>}>
+      <Card title="Next 14 days" right={dueSoon.length > 0 && <span className="text-[11px] text-[#6b727e]">{fmtMoney(soonTotal)}</span>}>
         <div className="mb-3 grid grid-cols-7 gap-1">
           {week.map((d, i) => (
-            <div key={i} className={`rounded-lg border p-1.5 text-center ${i === 0 ? "border-cyan-400/30 bg-cyan-400/5" : "border-white/[0.06]"}`}>
-              <div className={`text-[9px] uppercase ${i === 0 ? "text-cyan-300" : "text-gray-500"}`}>
+            <div key={i} className={`rounded-lg border p-1.5 text-center ${i === 0 ? "border-[#d81b48]/35 bg-[#d81b48]/5" : "border-[#e6e8ec]"}`}>
+              <div className={`text-[9px] uppercase ${i === 0 ? "text-[#d81b48]" : "text-[#8b929c]"}`}>
                 {d.date.toLocaleDateString(undefined, { weekday: "narrow" })}
               </div>
-              <div className="text-xs text-gray-300">{d.date.getDate()}</div>
+              <div className="text-xs text-[#454b54]">{d.date.getDate()}</div>
               <div className="mt-0.5 flex min-h-[6px] justify-center gap-0.5">
-                {d.items.slice(0, 3).map((s, j) => <span key={j} className="h-1.5 w-1.5 rounded-full bg-violet-400" title={s.merchant} />)}
+                {d.items.slice(0, 3).map((s, j) => <span key={j} className="h-1.5 w-1.5 rounded-full bg-[#7b8ff7]" title={s.merchant} />)}
               </div>
             </div>
           ))}
         </div>
 
         {dueSoon.length === 0 ? (
-          <div className="rounded-xl border border-white/[0.06] py-8 text-center">
-            <div className="text-sm font-medium text-gray-300">Nothing due soon</div>
-            <div className="mt-0.5 text-[11px] text-gray-500">You can relax — nothing is due in the next 14 days.</div>
+          <div className="rounded-xl border border-[#e6e8ec] py-8 text-center">
+            <div className="text-sm font-medium text-[#454b54]">Nothing due soon</div>
+            <div className="mt-0.5 text-[11px] text-[#8b929c]">You can relax — nothing is due in the next 14 days.</div>
           </div>
         ) : (
           <div className="flex flex-col gap-1">
@@ -87,7 +87,7 @@ function Upcoming({ subs }) {
         )}
       </Card>
 
-      <Card title="Coming later" right={later.length > 0 && <span className="text-[11px] text-gray-500">{later.length} charges for {fmtMoney(laterTotal)}</span>}>
+      <Card title="Coming later" right={later.length > 0 && <span className="text-[11px] text-[#8b929c]">{later.length} charges for {fmtMoney(laterTotal)}</span>}>
         {later.length === 0 ? <Empty>Nothing else scheduled.</Empty> : (
           <div className="flex flex-col gap-1">
             {later.map((x, i) => <Row key={i} sub={x.sub} due={x.due} />)}
@@ -100,16 +100,16 @@ function Upcoming({ subs }) {
 
 function Row({ sub, due = null, right = null }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-lg bg-white/[0.03] px-3 py-2">
+    <div className="flex items-center gap-2.5 rounded-lg bg-[#f7f8fa] px-3 py-2">
       <Avatar name={sub.merchant} />
       <span className="min-w-0 flex-1 truncate text-sm capitalize">
         {sub.merchant}
-        {sub.source === "auto" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">auto</span>}
-        <span className="block text-[10px] capitalize text-gray-500">
+        {sub.source === "auto" && <span className="ml-1.5 rounded bg-white px-1 text-[9px] uppercase text-[#8b929c]">auto</span>}
+        <span className="block text-[10px] capitalize text-[#8b929c]">
           {sub.cadence}{due ? ` · ${relDue(due)}` : ""}
         </span>
       </span>
-      <span className="shrink-0 text-sm text-gray-200">{fmtMoney(sub.amount)}</span>
+      <span className="shrink-0 text-sm text-[#16191d]">{fmtMoney(sub.amount)}</span>
       {right}
     </div>
   );
@@ -164,8 +164,8 @@ function AllRecurring({ subs, monthly, onChange }) {
       title={`${subs.length} recurring`}
       right={
         <span className="text-right text-[11px] leading-tight">
-          <span className="block font-semibold text-violet-300">{fmtMoney(monthly)}/mo</span>
-          <span className="block text-gray-500">You spend {fmtMoney(yearlyTotal)}/yearly</span>
+          <span className="block font-semibold text-[#6941c6]">{fmtMoney(monthly)}/mo</span>
+          <span className="block text-[#8b929c]">You spend {fmtMoney(yearlyTotal)}/yearly</span>
         </span>
       }
     >
@@ -173,8 +173,8 @@ function AllRecurring({ subs, monthly, onChange }) {
         {groups.map((g) => (
           <div key={g.label}>
             <div className="mb-1 flex items-baseline justify-between">
-              <span className="text-[10px] uppercase tracking-wide text-gray-500">{g.items.length} {g.label}</span>
-              <span className="text-[10px] text-gray-500">You spend {fmtMoney(g.yearly)}/yearly</span>
+              <span className="text-[10px] uppercase tracking-wide text-[#8b929c]">{g.items.length} {g.label}</span>
+              <span className="text-[10px] text-[#8b929c]">You spend {fmtMoney(g.yearly)}/yearly</span>
             </div>
             <div className="flex flex-col gap-1">
               {g.items.map((s, i) => (
@@ -183,8 +183,8 @@ function AllRecurring({ subs, monthly, onChange }) {
                   sub={s}
                   due={nextDue(s)}
                   right={s.source === "manual"
-                    ? <button onClick={() => cancel(s)} title="Mark inactive" className="p-1 text-gray-500 hover:text-red-300"><X className="h-4 w-4" /></button>
-                    : <button onClick={() => track(s)} title="Track this" className="p-1 text-gray-500 hover:text-cyan-300"><Plus className="h-4 w-4" /></button>}
+                    ? <button onClick={() => cancel(s)} title="Mark inactive" className="p-1 text-[#8b929c] hover:text-[#c01530]"><X className="h-4 w-4" /></button>
+                    : <button onClick={() => track(s)} title="Track this" className="p-1 text-[#8b929c] hover:text-[#d81b48]"><Plus className="h-4 w-4" /></button>}
                 />
               ))}
             </div>
@@ -194,17 +194,17 @@ function AllRecurring({ subs, monthly, onChange }) {
 
         {open ? (
           <div className="flex flex-wrap items-center gap-1.5">
-            <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Netflix" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
-            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="15.99" type="number" className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
-            <select value={cadence} onChange={(e) => setCadence(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
-              {["monthly", "yearly", "weekly"].map((x) => <option key={x} className="bg-[#0e1015]">{x}</option>)}
+            <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Netflix" className="min-w-0 flex-1 rounded-lg border border-[#dcdfe4] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#16191d]" />
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="15.99" type="number" className="w-20 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-right text-sm outline-none focus:border-[#16191d]" />
+            <select value={cadence} onChange={(e) => setCadence(e.target.value)} className="rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-xs text-[#454b54] outline-none">
+              {["monthly", "yearly", "weekly"].map((x) => <option key={x} className="bg-white">{x}</option>)}
             </select>
-            <button onClick={add} disabled={!merchant.trim() || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
+            <button onClick={add} disabled={!merchant.trim() || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#16191d] text-white disabled:opacity-40 hover:bg-[#2b3038]"><Plus className="h-4 w-4" /></button>
           </div>
         ) : (
           <div className="flex items-center gap-3">
-            <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200"><Plus className="h-3 w-3" /> Add subscription</button>
-            <button onClick={toggleInactive} className="text-[11px] text-gray-500 hover:text-gray-300">
+            <button onClick={() => setOpen(true)} className="inline-flex items-center gap-1 text-[11px] text-[#d81b48] hover:text-[#a81438]"><Plus className="h-3 w-3" /> Add subscription</button>
+            <button onClick={toggleInactive} className="text-[11px] text-[#8b929c] hover:text-[#454b54]">
               {showInactive ? "Hide inactive" : "Show inactive"}
             </button>
           </div>
@@ -212,14 +212,14 @@ function AllRecurring({ subs, monthly, onChange }) {
 
         {showInactive && (
           <div>
-            <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">{inactive.length} inactive</div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-[#8b929c]">{inactive.length} inactive</div>
             {inactive.length === 0 ? <Empty>Nothing inactive.</Empty> : (
               <div className="flex flex-col gap-1">
                 {inactive.map((s) => (
                   <Row
                     key={s.id}
                     sub={s}
-                    right={<button onClick={() => reactivate(s)} title="Reactivate" className="p-1 text-gray-500 hover:text-emerald-300"><Plus className="h-4 w-4" /></button>}
+                    right={<button onClick={() => reactivate(s)} title="Reactivate" className="p-1 text-[#8b929c] hover:text-[#0f7b53]"><Plus className="h-4 w-4" /></button>}
                   />
                 ))}
               </div>
@@ -275,13 +275,13 @@ function CalendarTab({ subs }) {
       title={monthLabel(key)}
       right={
         <span className="flex items-center gap-1.5">
-          <span className="mr-1 text-[11px] text-gray-500">{fmtMoney(monthTotal)}</span>
-          <button onClick={() => setKey(shiftMonth(key, -1))} className="rounded-lg border border-white/10 p-1 text-gray-400 hover:border-cyan-400/40"><ChevronLeft className="h-3 w-3" /></button>
-          <button onClick={() => setKey(shiftMonth(key, 1))} className="rounded-lg border border-white/10 p-1 text-gray-400 hover:border-cyan-400/40"><ChevronRight className="h-3 w-3" /></button>
+          <span className="mr-1 text-[11px] text-[#8b929c]">{fmtMoney(monthTotal)}</span>
+          <button onClick={() => setKey(shiftMonth(key, -1))} className="rounded-lg border border-[#dcdfe4] p-1 text-[#6b727e] hover:border-[#d81b48]/45"><ChevronLeft className="h-3 w-3" /></button>
+          <button onClick={() => setKey(shiftMonth(key, 1))} className="rounded-lg border border-[#dcdfe4] p-1 text-[#6b727e] hover:border-[#d81b48]/45"><ChevronRight className="h-3 w-3" /></button>
         </span>
       }
     >
-      <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[9px] uppercase text-gray-600">
+      <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[9px] uppercase text-[#a8aeb8]">
         {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}
       </div>
       <div className="grid grid-cols-7 gap-1">
@@ -290,19 +290,19 @@ function CalendarTab({ subs }) {
             key={i}
             className={`min-h-[46px] rounded-lg border p-1 ${
               !c ? "border-transparent"
-                : isThisMonth && c.day === todayDate ? "border-cyan-400/30 bg-cyan-400/5"
-                : "border-white/[0.06]"
+                : isThisMonth && c.day === todayDate ? "border-[#d81b48]/35 bg-[#d81b48]/5"
+                : "border-[#e6e8ec]"
             }`}
           >
             {c && (
               <>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-[10px] text-gray-400">{c.day}</span>
-                  {c.total > 0 && <span className="text-[8px] text-gray-500">${Math.round(c.total)}</span>}
+                  <span className="text-[10px] text-[#6b727e]">{c.day}</span>
+                  {c.total > 0 && <span className="text-[8px] text-[#8b929c]">${Math.round(c.total)}</span>}
                 </div>
                 <div className="mt-0.5 flex flex-wrap gap-0.5">
                   {c.items.slice(0, 4).map((s, j) => (
-                    <span key={j} className="h-1.5 w-1.5 rounded-full bg-violet-400" title={`${s.merchant} · ${fmtMoney(s.amount)}`} />
+                    <span key={j} className="h-1.5 w-1.5 rounded-full bg-[#7b8ff7]" title={`${s.merchant} · ${fmtMoney(s.amount)}`} />
                   ))}
                 </div>
               </>

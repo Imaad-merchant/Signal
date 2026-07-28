@@ -1,7 +1,7 @@
 // Money — a section (like Donna) rather than a single page. One route, six views
 // switched from MoneyNav. The shell owns the shared queries and derived totals so
 // every view reads from one cached copy of accounts/transactions/subs/budgets.
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Wallet, Landmark, RefreshCw, Loader2 } from "lucide-react";
@@ -9,7 +9,7 @@ import { base44 } from "@/api/base44Client";
 import { detectSubscriptions, monthlyCost, normMerchant } from "@/components/money/money";
 import { monthKey, spendingWithDelta, totalsForMonth, shiftMonth } from "@/components/money/analytics";
 import { connectBank, syncBanks } from "@/components/money/plaidLink";
-import MoneyNav, { isView } from "@/components/money/MoneyNav";
+import MoneyNav, { isView, viewLabel } from "@/components/money/MoneyNav";
 import Overview from "@/components/money/Overview";
 import BudgetsView from "@/components/money/BudgetsView";
 import NetWorthView from "@/components/money/NetWorthView";
@@ -24,8 +24,26 @@ const VIEW_KEY = "money_view";
 function useMoneyView() {
   const [params, setParams] = useSearchParams();
   const fromUrl = params.get("view");
-  const stored = typeof localStorage !== "undefined" ? localStorage.getItem(VIEW_KEY) : null;
-  const view = isView(fromUrl) ? fromUrl : isView(stored) ? stored : "overview";
+  const view = isView(fromUrl) ? fromUrl : "overview";
+
+  // The remembered view is a landing default only. It is applied once, on
+  // mount, by rewriting the URL — after that the URL is authoritative, so
+  // navigating back to the Dashboard isn't immediately undone by the memory.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    if (fromUrl) return;
+    let stored = null;
+    try { stored = localStorage.getItem(VIEW_KEY); } catch { /* private mode */ }
+    if (isView(stored) && stored !== "overview") {
+      const p = new URLSearchParams(params);
+      p.set("view", stored);
+      setParams(p, { replace: true });
+    }
+    // `params`/`setParams` are stable enough here; this runs once by design.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem(VIEW_KEY, view); } catch { /* private mode */ }
@@ -107,39 +125,50 @@ export default function Money() {
   const hasPlaid = accounts.some((a) => a.source === "plaid");
 
   return (
-    <div className="h-full overflow-y-auto bg-[#0b0d11] pb-[calc(5rem+env(safe-area-inset-bottom))] text-gray-100">
-      <div className="mx-auto max-w-2xl px-4 py-6">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h1 className="flex items-center gap-2 text-xl font-semibold"><Wallet className="h-5 w-5 text-cyan-300" /> Money</h1>
+    // Full-bleed two-column app frame: fixed left rail, scrolling content — the
+    // Money section owns the whole viewport (registered in Layout's isFullHeight).
+    <div className="flex h-full w-full overflow-hidden bg-[#f5f6f8] text-[#16191d]">
+      <MoneyNav view={view} onChange={setView} />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Top bar */}
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e6e8ec] bg-white px-4 py-3 md:px-8">
+          <h1 className="flex items-center gap-2 text-[17px] font-semibold">
+            <Wallet className="h-4 w-4 text-[#d81b48] md:hidden" />
+            {viewLabel(view)}
+          </h1>
           <div className="flex items-center gap-1.5">
             {hasPlaid && (
-              <button onClick={doSync} disabled={!!banking} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-gray-300 hover:border-cyan-400/40 disabled:opacity-50">
-                {banking === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Sync
+              <button onClick={doSync} disabled={!!banking} className="inline-flex items-center gap-1 rounded-full border border-[#dcdfe4] px-3 py-1.5 text-xs text-[#454b54] hover:border-[#16191d] disabled:opacity-50">
+                {banking === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Sync now
               </button>
             )}
-            <button onClick={doConnect} disabled={!!banking} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
-              {banking === "connect" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Landmark className="h-3.5 w-3.5" />} Connect bank
+            <button onClick={doConnect} disabled={!!banking} className="inline-flex items-center gap-1.5 rounded-full bg-[#16191d] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#2b3038] disabled:opacity-50">
+              {banking === "connect" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Landmark className="h-3.5 w-3.5" />} Add Account
             </button>
           </div>
-        </div>
+        </header>
 
-        <MoneyNav view={view} onChange={setView} />
+        {/* Scrolling content */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:px-8 md:pb-8">
+          <div className="w-full py-4">
+            {bankMsg && <p className="mb-3 text-[11px] text-[#d81b48]">{bankMsg}</p>}
+            {loadError && (
+              <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[12px] text-amber-800">
+                {permDenied
+                  ? "Can't read your money data — your Firestore rules don't allow the accounts/transactions/subscriptions collections yet. Publish the updated rules and refresh; any linked data will appear."
+                  : `Couldn't load money data: ${String(loadError?.message || loadError)}`}
+              </div>
+            )}
 
-        {bankMsg && <p className="mb-3 text-[11px] text-cyan-300">{bankMsg}</p>}
-        {loadError && (
-          <div className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[12px] text-amber-200">
-            {permDenied
-              ? "Can't read your money data — your Firestore rules don't allow the accounts/transactions/subscriptions collections yet. Publish the updated rules and refresh; any linked data will appear."
-              : `Couldn't load money data: ${String(loadError?.message || loadError)}`}
+            {view === "overview" && <Overview data={data} onGoToView={setView} />}
+            {view === "recurring" && <RecurringView data={data} onChange={invalidate} />}
+            {view === "spending" && <SpendingView data={data} onChange={invalidate} />}
+            {view === "budgets" && <BudgetsView data={data} onChange={invalidate} />}
+            {view === "networth" && <NetWorthView data={data} onChange={invalidate} />}
+            {view === "transactions" && <TransactionsView data={data} onChange={invalidate} />}
           </div>
-        )}
-
-        {view === "overview" && <Overview data={data} onGoToView={setView} />}
-        {view === "recurring" && <RecurringView data={data} onChange={invalidate} />}
-        {view === "spending" && <SpendingView data={data} onChange={invalidate} />}
-        {view === "budgets" && <BudgetsView data={data} onChange={invalidate} />}
-        {view === "networth" && <NetWorthView data={data} onChange={invalidate} />}
-        {view === "transactions" && <TransactionsView data={data} onChange={invalidate} />}
+        </div>
       </div>
     </div>
   );

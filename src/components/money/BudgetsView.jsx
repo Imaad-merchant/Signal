@@ -55,18 +55,18 @@ export default function BudgetsView({ data, onChange = () => {} }) {
   return (
     <>
       <div className="mt-3 flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-gray-200">{monthLabel(key)} Budget</h2>
+        <h2 className="text-sm font-semibold text-[#16191d]">{monthLabel(key)} Budget</h2>
         <MonthPager value={key} onChange={setKey} canGoNext={key < thisKey} />
       </div>
 
       {/* Left to spend */}
-      <Card title="Left to spend" right={<span className="text-[10px] text-gray-500">of {fmtMoney(spendBudget)}</span>}>
+      <Card title="Left to spend" right={<span className="text-[10px] text-[#8b929c]">of {fmtMoney(spendBudget)}</span>}>
         {spendBudget === 0 ? <Empty>Set a budget below to track how you&apos;re pacing.</Empty> : (
           <div className="flex items-center gap-4">
             <Ring pct={(spendActual / spendBudget) * 100} over={leftToSpend < 0} size={72} stroke={7} />
             <div className="min-w-0 flex-1">
-              <div className={`text-2xl font-bold ${leftToSpend < 0 ? "text-orange-300" : "text-white"}`}>{fmtMoney(leftToSpend)}</div>
-              <div className="mt-0.5 text-[11px] text-gray-500">
+              <div className={`text-2xl font-bold ${leftToSpend < 0 ? "text-[#b54708]" : "text-[#16191d]"}`}>{fmtMoney(leftToSpend)}</div>
+              <div className="mt-0.5 text-[11px] text-[#8b929c]">
                 {leftToSpend < 0
                   ? `${fmtMoney(-leftToSpend)} over your ${fmtMoney(spendBudget)} budget`
                   : daysLeft != null
@@ -87,17 +87,17 @@ export default function BudgetsView({ data, onChange = () => {} }) {
 
       <BudgetTable title="Budget categories" rows={categories} empty="No category budgets yet." onChange={onChange}>
         {leftForSavings != null && (
-          <div className="flex items-center gap-2.5 border-t border-white/[0.06] pt-2">
-            <PiggyBank className="h-4 w-4 shrink-0 text-emerald-400/70" />
-            <span className="flex-1 text-xs text-gray-300">Left for savings</span>
-            <span className={`text-sm font-medium ${leftForSavings >= 0 ? "text-emerald-300" : "text-orange-300"}`}>{fmtMoney(leftForSavings)}</span>
+          <div className="flex items-center gap-2.5 border-t border-[#e6e8ec] pt-2">
+            <PiggyBank className="h-4 w-4 shrink-0 text-[#0f7b53]" />
+            <span className="flex-1 text-xs text-[#454b54]">Left for savings</span>
+            <span className={`text-sm font-medium ${leftForSavings >= 0 ? "text-[#0f7b53]" : "text-[#b54708]"}`}>{fmtMoney(leftForSavings)}</span>
           </div>
         )}
 
         {adding ? (
           <AddBudget available={available} onDone={() => { setAdding(false); onChange(); }} onCancel={() => setAdding(false)} />
         ) : available.length > 0 && (
-          <button onClick={() => setAdding(true)} className="mt-2 w-full rounded-lg border border-white/10 py-2 text-[11px] text-gray-300 hover:border-cyan-400/40">
+          <button onClick={() => setAdding(true)} className="mt-2 w-full rounded-lg border border-[#dcdfe4] py-2 text-[11px] text-[#454b54] hover:border-[#d81b48]/45">
             <Plus className="mr-1 inline h-3 w-3" /> Add Budget
           </button>
         )}
@@ -115,7 +115,7 @@ function BudgetTable({ title, rows, empty, onChange, children = null }) {
 
   return (
     <Card title={title}>
-      <div className="mb-1 flex items-center gap-2 px-1 text-[9px] uppercase tracking-wide text-gray-600">
+      <div className="mb-1 flex items-center gap-2 px-1 text-[9px] uppercase tracking-wide text-[#a8aeb8]">
         <span className="flex-1">Name</span>
         <span className="w-16 text-right">Budgeted</span>
         <span className="w-16 text-right">Actual</span>
@@ -123,7 +123,7 @@ function BudgetTable({ title, rows, empty, onChange, children = null }) {
         <span className="w-11" />
       </div>
 
-      <div className="flex flex-col divide-y divide-white/[0.05]">
+      <div className="flex flex-col divide-y divide-[#eef0f3]">
         {rows.length === 0 && <Empty>{empty}</Empty>}
         {rows.map((b) => {
           const m = catMeta(b.category);
@@ -134,18 +134,18 @@ function BudgetTable({ title, rows, empty, onChange, children = null }) {
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
                 <m.Icon className="h-3.5 w-3.5" style={{ color: m.c }} />
               </span>
-              <span className="min-w-0 flex-1 truncate text-xs text-gray-200">{b.isEarnings ? "Earnings" : b.category}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-[#16191d]">{b.isEarnings ? "Earnings" : b.category}</span>
               <input
                 defaultValue={b.budgeted}
                 onBlur={(e) => update(b, e.target.value)}
                 type="number"
-                className="w-16 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-right text-xs text-gray-300 outline-none hover:border-white/10 focus:border-white/25"
+                className="w-16 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-right text-xs text-[#454b54] outline-none hover:border-[#dcdfe4] focus:border-[#16191d]"
               />
-              <span className="w-16 shrink-0 text-right text-xs text-gray-300">{fmtMoney(b.actual)}</span>
-              <span className={`w-20 shrink-0 text-right text-xs ${short ? "text-orange-300" : "text-emerald-300"}`}>{fmtMoney(b.remaining)}</span>
+              <span className="w-16 shrink-0 text-right text-xs text-[#454b54]">{fmtMoney(b.actual)}</span>
+              <span className={`w-20 shrink-0 text-right text-xs ${short ? "text-[#b54708]" : "text-[#0f7b53]"}`}>{fmtMoney(b.remaining)}</span>
               <span className="flex w-11 shrink-0 items-center justify-end gap-1">
                 <Ring pct={pct} over={short} color={m.c} />
-                <button onClick={() => del(b)} className="p-0.5 text-gray-600 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={() => del(b)} className="p-0.5 text-[#a8aeb8] hover:text-[#c01530]"><Trash2 className="h-3.5 w-3.5" /></button>
               </span>
             </div>
           );
@@ -166,12 +166,12 @@ function AddBudget({ available, onDone, onCancel }) {
   };
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      <select value={cat} onChange={(e) => setCat(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
-        {available.map((c) => <option key={c} value={c} className="bg-[#0e1015]">{c === "Income" ? "Earnings" : c}</option>)}
+      <select value={cat} onChange={(e) => setCat(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-xs text-[#454b54] outline-none">
+        {available.map((c) => <option key={c} value={c} className="bg-white">{c === "Income" ? "Earnings" : c}</option>)}
       </select>
-      <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="500" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
-      <button onClick={add} disabled={!cat || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
-      <button onClick={onCancel} className="text-[11px] text-gray-500 hover:text-gray-300">Cancel</button>
+      <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="500" type="number" className="w-24 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-right text-sm outline-none focus:border-[#16191d]" />
+      <button onClick={add} disabled={!cat || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#16191d] text-white disabled:opacity-40 hover:bg-[#2b3038]"><Plus className="h-4 w-4" /></button>
+      <button onClick={onCancel} className="text-[11px] text-[#8b929c] hover:text-[#454b54]">Cancel</button>
     </div>
   );
 }

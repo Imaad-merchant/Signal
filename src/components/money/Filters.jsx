@@ -72,7 +72,7 @@ export function applyFilters(transactions, f, categoryOf) {
 }
 
 const selectCls =
-  "rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1.5 text-[11px] text-gray-300 outline-none focus:border-cyan-400/40";
+  "rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-[11px] text-[#454b54] outline-none focus:border-[#d81b48]/45";
 
 export default function Filters({ filters, onChange, accounts = [] }) {
   const set = (patch) => onChange({ ...filters, ...patch });
@@ -80,18 +80,18 @@ export default function Filters({ filters, onChange, accounts = [] }) {
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-500" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#8b929c]" />
           <input
             value={filters.q}
             onChange={(e) => set({ q: e.target.value })}
             placeholder="Search transactions…"
-            className="w-full rounded-lg border border-white/10 bg-white/[0.04] py-1.5 pl-8 pr-2 text-xs text-gray-100 outline-none focus:border-cyan-400/40"
+            className="w-full rounded-lg border border-[#dcdfe4] bg-white py-1.5 pl-8 pr-2 text-xs text-[#16191d] outline-none focus:border-[#d81b48]/45"
           />
         </div>
         <div className="relative">
-          <ArrowUpDown className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-gray-500" />
+          <ArrowUpDown className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#8b929c]" />
           <select value={filters.sort} onChange={(e) => set({ sort: e.target.value })} className={`${selectCls} pl-6`}>
-            {SORTS.map((s) => <option key={s.key} value={s.key} className="bg-[#0e1015]">{s.label}</option>)}
+            {SORTS.map((s) => <option key={s.key} value={s.key} className="bg-white">{s.label}</option>)}
           </select>
         </div>
       </div>
@@ -99,18 +99,18 @@ export default function Filters({ filters, onChange, accounts = [] }) {
       <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="flex w-max gap-1.5 sm:w-auto sm:flex-wrap">
           <select value={filters.range} onChange={(e) => set({ range: e.target.value })} className={selectCls}>
-            {DATE_RANGES.map((r) => <option key={r.key} value={r.key} className="bg-[#0e1015]">{r.label}</option>)}
+            {DATE_RANGES.map((r) => <option key={r.key} value={r.key} className="bg-white">{r.label}</option>)}
           </select>
           <select value={filters.category} onChange={(e) => set({ category: e.target.value })} className={selectCls}>
-            <option value="all" className="bg-[#0e1015]">All categories</option>
-            {CATEGORIES.map((c) => <option key={c} value={c} className="bg-[#0e1015]">{c}</option>)}
+            <option value="all" className="bg-white">All categories</option>
+            {CATEGORIES.map((c) => <option key={c} value={c} className="bg-white">{c}</option>)}
           </select>
           <select value={filters.account} onChange={(e) => set({ account: e.target.value })} className={selectCls}>
-            <option value="all" className="bg-[#0e1015]">All accounts</option>
-            {accounts.map((a) => <option key={a.id} value={a.id} className="bg-[#0e1015]">{a.name}</option>)}
+            <option value="all" className="bg-white">All accounts</option>
+            {accounts.map((a) => <option key={a.id} value={a.id} className="bg-white">{a.name}</option>)}
           </select>
           <select value={filters.amount} onChange={(e) => set({ amount: e.target.value })} className={selectCls}>
-            {AMOUNT_BANDS.map((b) => <option key={b.key} value={b.key} className="bg-[#0e1015]">{b.label}</option>)}
+            {AMOUNT_BANDS.map((b) => <option key={b.key} value={b.key} className="bg-white">{b.label}</option>)}
           </select>
         </div>
       </div>

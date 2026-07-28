@@ -48,13 +48,13 @@ export default function SpendingView({ data }) {
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <button
           onClick={() => setKey(shiftMonth(thisKey, -1))}
-          className={`rounded-lg px-2.5 py-1.5 text-[11px] ${key === shiftMonth(thisKey, -1) ? "bg-white/10 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
+          className={`rounded-lg px-2.5 py-1.5 text-[11px] ${key === shiftMonth(thisKey, -1) ? "bg-[#16191d] text-white" : "text-[#8b929c] hover:text-[#454b54]"}`}
         >
           Last Month
         </button>
         <button
           onClick={() => setKey(thisKey)}
-          className={`rounded-lg px-2.5 py-1.5 text-[11px] ${key === thisKey ? "bg-white/10 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
+          className={`rounded-lg px-2.5 py-1.5 text-[11px] ${key === thisKey ? "bg-[#16191d] text-white" : "text-[#8b929c] hover:text-[#454b54]"}`}
         >
           This Month
         </button>
@@ -63,24 +63,24 @@ export default function SpendingView({ data }) {
           value={key}
           max={thisKey}
           onChange={(e) => e.target.value && setKey(e.target.value)}
-          className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-gray-300 outline-none focus:border-cyan-400/40"
+          className="rounded-lg border border-[#dcdfe4] bg-white px-2 py-1 text-[11px] text-[#454b54] outline-none focus:border-[#d81b48]/45"
         />
       </div>
 
       {/* 6-month strip */}
-      <Card title="Last 6 months" right={<span className="text-[10px] text-gray-500">spend vs income</span>}>
+      <Card title="Last 6 months" right={<span className="text-[10px] text-[#8b929c]">spend vs income</span>}>
         <div className="h-28">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={bars} margin={{ top: 4, right: 0, bottom: 0, left: 0 }} barGap={2}>
-              <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="label" tick={{ fill: "#8b929c", fontSize: 10 }} axisLine={false} tickLine={false} />
               <Tooltip
-                cursor={{ fill: "rgba(255,255,255,0.04)" }}
-                contentStyle={{ background: "#0e1015", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                cursor={{ fill: "rgba(0,0,0,0.04)" }}
+                contentStyle={{ background: "#ffffff", border: "1px solid #e6e8ec", borderRadius: 8, fontSize: 11 }}
                 formatter={(v, n) => [fmtMoney(Number(v)), n === "spend" ? "Spend" : "Income"]}
               />
               <Bar dataKey="income" fill="#10b981" radius={[2, 2, 0, 0]} opacity={0.5} />
               <Bar dataKey="spend" radius={[2, 2, 0, 0]}>
-                {bars.map((b) => <Cell key={b.key} fill={b.key === key ? "#22d3ee" : "#3f4756"} />)}
+                {bars.map((b) => <Cell key={b.key} fill={b.key === key ? "#7b8ff7" : "#d7dbe1"} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -91,7 +91,7 @@ export default function SpendingView({ data }) {
       <Card
         title={`Spending — ${monthLabel(key)}`}
         right={delta != null && (
-          <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${down ? "text-emerald-300" : "text-rose-300"}`}>
+          <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${down ? "text-[#0f7b53]" : "text-[#c01530]"}`}>
             {down ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
             {Math.abs(delta).toFixed(0)}% vs prior
           </span>
@@ -106,18 +106,18 @@ export default function SpendingView({ data }) {
                     {donut.map((d, i) => <Cell key={i} fill={d.color} />)}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: "#0e1015", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid #e6e8ec", borderRadius: 8, fontSize: 11 }}
                     formatter={(v, n) => [fmtMoney(Number(v)), n]}
                   />
                 </PieChart>
               </ResponsiveContainer>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[9px] uppercase tracking-wide text-gray-500">Total spend</span>
-                <span className="text-lg font-bold text-white">{fmtMoney(totals.spend)}</span>
+                <span className="text-[9px] uppercase tracking-wide text-[#8b929c]">Total spend</span>
+                <span className="text-lg font-bold text-[#16191d]">{fmtMoney(totals.spend)}</span>
               </div>
             </div>
 
-            <div className="mt-3 flex flex-col divide-y divide-white/[0.05]">
+            <div className="mt-3 flex flex-col divide-y divide-[#eef0f3]">
               {cats.map((c) => {
                 const m = catMeta(c.category);
                 const up = c.delta != null && c.delta > 0;
@@ -127,16 +127,16 @@ export default function SpendingView({ data }) {
                       <m.Icon className="h-3.5 w-3.5" style={{ color: m.c }} />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs text-gray-200">{c.category}</span>
-                      <span className="block text-[10px] text-gray-500">{c.pct < 1 ? "< 1" : Math.round(c.pct)}% of spend</span>
+                      <span className="block truncate text-xs text-[#16191d]">{c.category}</span>
+                      <span className="block text-[10px] text-[#8b929c]">{c.pct < 1 ? "< 1" : Math.round(c.pct)}% of spend</span>
                     </span>
                     {c.delta != null && (
-                      <span className={`inline-flex shrink-0 items-center gap-0.5 text-[10px] ${up ? "text-rose-300" : "text-emerald-300"}`}>
+                      <span className={`inline-flex shrink-0 items-center gap-0.5 text-[10px] ${up ? "text-[#c01530]" : "text-[#0f7b53]"}`}>
                         {up ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                         {Math.abs(Math.round(c.delta))}%
                       </span>
                     )}
-                    <span className="w-20 shrink-0 text-right text-sm text-gray-200">{fmtMoney(c.amount)}</span>
+                    <span className="w-20 shrink-0 text-right text-sm text-[#16191d]">{fmtMoney(c.amount)}</span>
                   </div>
                 );
               })}
@@ -146,8 +146,8 @@ export default function SpendingView({ data }) {
       </Card>
 
       {/* Summary */}
-      <Card title="Summary" right={<span className="text-[10px] text-gray-500">{monthLabel(key)}</span>}>
-        <div className="flex flex-col divide-y divide-white/[0.05]">
+      <Card title="Summary" right={<span className="text-[10px] text-[#8b929c]">{monthLabel(key)}</span>}>
+        <div className="flex flex-col divide-y divide-[#eef0f3]">
           <StatRow icon={Plus} label="Income" sub={`${totals.count} transactions`} value={totals.income} tone="good" />
           <StatRow
             icon={Minus}
@@ -170,11 +170,11 @@ export default function SpendingView({ data }) {
 
       {/* Non-spending + frequent */}
       <Card title="Non-spending">
-        <div className="flex flex-col divide-y divide-white/[0.05]">
+        <div className="flex flex-col divide-y divide-[#eef0f3]">
           {buckets.map((b) => (
             <div key={b.label} className="flex items-center justify-between py-2 text-xs">
-              <span className="text-gray-400">{b.label}</span>
-              <span className="text-gray-300">{b.count ? b.value : fmtMoney(b.value)}</span>
+              <span className="text-[#6b727e]">{b.label}</span>
+              <span className="text-[#454b54]">{b.count ? b.value : fmtMoney(b.value)}</span>
             </div>
           ))}
         </div>
@@ -185,10 +185,10 @@ export default function SpendingView({ data }) {
           <div className="flex flex-col gap-1.5">
             {frequent.map((f, i) => (
               <div key={i} className="flex items-center justify-between text-xs">
-                <span className="min-w-0 flex-1 truncate text-gray-300">
-                  You&apos;ve spent at <span className="text-gray-100">{f.merchant}</span> {f.count} times
+                <span className="min-w-0 flex-1 truncate text-[#454b54]">
+                  You&apos;ve spent at <span className="text-[#16191d]">{f.merchant}</span> {f.count} times
                 </span>
-                <span className="shrink-0 text-gray-300">{fmtMoney(f.total)}</span>
+                <span className="shrink-0 text-[#454b54]">{fmtMoney(f.total)}</span>
               </div>
             ))}
           </div>

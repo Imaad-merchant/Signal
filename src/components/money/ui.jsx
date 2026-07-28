@@ -26,7 +26,7 @@ export const catMeta = (c) => CAT_META[c] || CAT_META.Other;
 export function Avatar({ name, color = null }) {
   const bg = color || avatarColor(name);
   return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: bg }}>
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-[#16191d]" style={{ background: bg }}>
       {initials(name)}
     </div>
   );
@@ -34,9 +34,9 @@ export function Avatar({ name, color = null }) {
 
 export function Card({ title, children, right = null }) {
   return (
-    <section className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+    <section className="mt-4 rounded-2xl border border-[#e6e8ec] bg-white p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-200">{title}</h2>
+        <h2 className="text-sm font-semibold text-[#16191d]">{title}</h2>
         {right}
       </div>
       {children}
@@ -45,13 +45,13 @@ export function Card({ title, children, right = null }) {
 }
 
 // Small SVG progress ring — Rocket Money puts one of these on every budget row.
-export function Ring({ pct = 0, size = 18, stroke = 3, color = "#22d3ee", over = false }) {
+export function Ring({ pct = 0, size = 18, stroke = 3, color = "#7b8ff7", over = false }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const clamped = Math.max(0, Math.min(100, pct));
   return (
     <svg width={size} height={size} className="shrink-0 -rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e6e8ec" strokeWidth={stroke} />
       <circle
         cx={size / 2} cy={size / 2} r={r} fill="none"
         stroke={over ? "#fb923c" : color} strokeWidth={stroke} strokeLinecap="round"
@@ -85,10 +85,10 @@ export function MonthPager({ value, onChange, canGoNext = true }) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <button onClick={() => shift(-1)} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-gray-300 hover:border-cyan-400/40">
+      <button onClick={() => shift(-1)} className="inline-flex items-center gap-1 rounded-lg border border-[#dcdfe4] px-2 py-1 text-[11px] text-[#454b54] hover:border-[#d81b48]/45">
         <ChevronLeft className="h-3 w-3" /> {label(prevValue)}
       </button>
-      <button onClick={() => canGoNext && shift(1)} disabled={!canGoNext} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2 py-1 text-[11px] text-gray-300 hover:border-cyan-400/40 disabled:opacity-35 disabled:hover:border-white/10">
+      <button onClick={() => canGoNext && shift(1)} disabled={!canGoNext} className="inline-flex items-center gap-1 rounded-lg border border-[#dcdfe4] px-2 py-1 text-[11px] text-[#454b54] hover:border-[#d81b48]/45 disabled:opacity-35 disabled:hover:border-[#dcdfe4]">
         {label(nextValue)} <ChevronRight className="h-3 w-3" />
       </button>
     </div>
@@ -97,13 +97,13 @@ export function MonthPager({ value, onChange, canGoNext = true }) {
 
 // Labelled amount row used in the summary rails (Assets / Debts / Net Worth).
 export function StatRow({ icon: Icon = null, label, sub = null, value, tone = "default" }) {
-  const tones = { default: "text-gray-200", good: "text-emerald-300", bad: "text-rose-300", muted: "text-gray-400" };
+  const tones = { default: "text-[#16191d]", good: "text-[#0f7b53]", bad: "text-[#c01530]", muted: "text-[#6b727e]" };
   return (
     <div className="flex items-center gap-2.5 py-2">
-      {Icon && <Icon className="h-4 w-4 shrink-0 text-gray-500" />}
+      {Icon && <Icon className="h-4 w-4 shrink-0 text-[#8b929c]" />}
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs text-gray-300">{label}</span>
-        {sub && <span className="block truncate text-[10px] text-gray-500">{sub}</span>}
+        <span className="block truncate text-xs text-[#454b54]">{label}</span>
+        {sub && <span className="block truncate text-[10px] text-[#8b929c]">{sub}</span>}
       </span>
       <span className={`shrink-0 text-sm font-medium ${tones[tone] || tones.default}`}>
         {typeof value === "number" ? fmtMoney(value) : value}
@@ -113,5 +113,5 @@ export function StatRow({ icon: Icon = null, label, sub = null, value, tone = "d
 }
 
 export function Empty({ children }) {
-  return <p className="text-[11px] text-gray-500">{children}</p>;
+  return <p className="text-[11px] text-[#8b929c]">{children}</p>;
 }

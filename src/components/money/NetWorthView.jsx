@@ -54,18 +54,18 @@ export default function NetWorthView({ data, onChange = () => {} }) {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${tab === t.key ? "bg-white/10 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
+            className={`rounded-lg px-2.5 py-1.5 text-[11px] transition-colors ${tab === t.key ? "bg-[#16191d] text-white" : "text-[#8b929c] hover:text-[#454b54]"}`}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      <section className="mt-4 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
-        <div className="text-[11px] uppercase tracking-wide text-gray-400">Total net worth</div>
-        <div className="mt-0.5 text-3xl font-bold text-white">{fmtMoney(nw.net)}</div>
+      <section className="mt-4 rounded-2xl border border-[#e6e8ec] bg-white p-4">
+        <div className="text-[11px] uppercase tracking-wide text-[#6b727e]">Total net worth</div>
+        <div className="mt-0.5 text-3xl font-bold text-[#16191d]">{fmtMoney(nw.net)}</div>
         {change != null && (
-          <div className={`mt-1 inline-flex items-center gap-1 text-[11px] ${change >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+          <div className={`mt-1 inline-flex items-center gap-1 text-[11px] ${change >= 0 ? "text-[#0f7b53]" : "text-[#c01530]"}`}>
             {change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
             {change >= 0 ? "Up" : "Down"} {fmtMoney(Math.abs(change))} over the last {range}
           </div>
@@ -89,10 +89,10 @@ export default function NetWorthView({ data, onChange = () => {} }) {
                     <stop offset="100%" stopColor="#818cf8" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={(d) => String(d).slice(5)} minTickGap={28} />
-                <YAxis width={46} tick={{ fill: "#6b7280", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
+                <XAxis dataKey="date" tick={{ fill: "#8b929c", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={(d) => String(d).slice(5)} minTickGap={28} />
+                <YAxis width={46} tick={{ fill: "#8b929c", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
                 <Tooltip
-                  contentStyle={{ background: "#0e1015", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, fontSize: 11 }}
+                  contentStyle={{ background: "#ffffff", border: "1px solid #e6e8ec", borderRadius: 8, fontSize: 11 }}
                   formatter={(v) => [fmtMoney(Number(v)), "Net worth"]}
                 />
                 <Area type="monotone" dataKey="net" stroke="#818cf8" strokeWidth={2} fill="url(#netWorthFill)" dot={false} />
@@ -106,7 +106,7 @@ export default function NetWorthView({ data, onChange = () => {} }) {
             <button
               key={r.key}
               onClick={() => setRange(r.key)}
-              className={`rounded-md px-2 py-0.5 text-[10px] ${range === r.key ? "bg-white/10 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
+              className={`rounded-md px-2 py-0.5 text-[10px] ${range === r.key ? "bg-[#16191d] text-white" : "text-[#8b929c] hover:text-[#454b54]"}`}
             >
               {r.key}
             </button>
@@ -136,8 +136,8 @@ export default function NetWorthView({ data, onChange = () => {} }) {
 
       {tab === "summary" && (
         <Card title="Summary">
-          <p className="mb-1 text-[11px] text-gray-500">This is how your net worth is calculated. Link every account for an accurate picture.</p>
-          <div className="flex flex-col divide-y divide-white/[0.05]">
+          <p className="mb-1 text-[11px] text-[#8b929c]">This is how your net worth is calculated. Link every account for an accurate picture.</p>
+          <div className="flex flex-col divide-y divide-[#eef0f3]">
             <StatRow label="Assets" sub={`${nw.assetCount} accounts`} value={nw.assetTotal} tone="good" />
             <StatRow label="Debts" sub={`${nw.debtCount} accounts`} value={nw.debtTotal} tone="bad" />
             <StatRow label="Net worth" sub="Assets − Debts" value={nw.net} />
@@ -161,35 +161,35 @@ function GroupList({ title, groups, total, tone = "good", onChange, empty }) {
   const del = async (a) => { await base44.entities.Account.delete(a.id).catch(() => {}); onChange(); };
 
   return (
-    <Card title={title} right={<span className={`text-[11px] font-semibold ${tone === "bad" ? "text-rose-300" : "text-gray-300"}`}>{fmtMoney(total)}</span>}>
+    <Card title={title} right={<span className={`text-[11px] font-semibold ${tone === "bad" ? "text-[#c01530]" : "text-[#454b54]"}`}>{fmtMoney(total)}</span>}>
       {groups.length === 0 ? <Empty>{empty}</Empty> : (
-        <div className="flex flex-col divide-y divide-white/[0.05]">
+        <div className="flex flex-col divide-y divide-[#eef0f3]">
           {groups.map((g) => {
             const isOpen = open.has(g.label);
             return (
               <div key={g.label}>
                 <button onClick={() => toggle(g.label)} className="flex w-full items-center gap-2 py-2 text-left">
-                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-gray-500" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-500" />}
+                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#8b929c]" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#8b929c]" />}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs text-gray-200">{g.label}</span>
-                    <span className="block text-[10px] text-gray-500">{g.pct < 1 ? "< 1" : Math.round(g.pct)}% of {title.toLowerCase()}</span>
+                    <span className="block truncate text-xs text-[#16191d]">{g.label}</span>
+                    <span className="block text-[10px] text-[#8b929c]">{g.pct < 1 ? "< 1" : Math.round(g.pct)}% of {title.toLowerCase()}</span>
                   </span>
-                  <span className={`shrink-0 text-sm ${tone === "bad" ? "text-rose-300" : "text-gray-200"}`}>{fmtMoney(g.total)}</span>
+                  <span className={`shrink-0 text-sm ${tone === "bad" ? "text-[#c01530]" : "text-[#16191d]"}`}>{fmtMoney(g.total)}</span>
                 </button>
                 {isOpen && (
                   <div className="mb-2 flex flex-col gap-1 pl-5">
                     {g.accounts.map((a) => (
-                      <div key={a.id} className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-2.5 py-1.5">
+                      <div key={a.id} className="flex items-center gap-2 rounded-lg bg-[#f7f8fa] px-2.5 py-1.5">
                         <Avatar name={a.name} />
                         <span className="min-w-0 flex-1 truncate text-xs">
                           {a.name}
-                          {a.source === "plaid" && <span className="ml-1.5 rounded bg-white/5 px-1 text-[9px] uppercase text-gray-500">linked</span>}
-                          <span className="block text-[10px] text-gray-500">{a.type}</span>
+                          {a.source === "plaid" && <span className="ml-1.5 rounded bg-white px-1 text-[9px] uppercase text-[#8b929c]">linked</span>}
+                          <span className="block text-[10px] text-[#8b929c]">{a.type}</span>
                         </span>
                         {a.source === "plaid"
-                          ? <span className={`text-xs ${Number(a.balance) < 0 ? "text-rose-300" : "text-gray-200"}`}>{fmtMoney(a.balance)}</span>
-                          : <input defaultValue={a.balance} onBlur={(e) => update(a, e.target.value)} type="number" className="w-20 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-right text-xs outline-none focus:border-white/25" />}
-                        {a.source !== "plaid" && <button onClick={() => del(a)} className="p-1 text-gray-600 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
+                          ? <span className={`text-xs ${Number(a.balance) < 0 ? "text-[#c01530]" : "text-[#16191d]"}`}>{fmtMoney(a.balance)}</span>
+                          : <input defaultValue={a.balance} onBlur={(e) => update(a, e.target.value)} type="number" className="w-20 rounded-md border border-[#dcdfe4] bg-white px-2 py-0.5 text-right text-xs outline-none focus:border-[#16191d]" />}
+                        {a.source !== "plaid" && <button onClick={() => del(a)} className="p-1 text-[#a8aeb8] hover:text-[#c01530]"><Trash2 className="h-3.5 w-3.5" /></button>}
                       </div>
                     ))}
                   </div>
@@ -215,19 +215,19 @@ function ManualAccount({ onChange }) {
   };
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="mt-3 inline-flex items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200">
+      <button onClick={() => setOpen(true)} className="mt-3 inline-flex items-center gap-1 text-[11px] text-[#d81b48] hover:text-[#a81438]">
         <Plus className="h-3 w-3" /> Add manual account
       </button>
     );
   }
   return (
     <div className="mt-3 flex flex-wrap items-center gap-1.5">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Account name" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-sm outline-none focus:border-white/25" />
-      <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
-        {["Checking", "Savings", "Credit Card", "Investment", "Cash"].map((x) => <option key={x} className="bg-[#0e1015]">{x}</option>)}
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Account name" className="min-w-0 flex-1 rounded-lg border border-[#dcdfe4] bg-white px-2.5 py-1.5 text-sm outline-none focus:border-[#16191d]" />
+      <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-xs text-[#454b54] outline-none">
+        {["Checking", "Savings", "Credit Card", "Investment", "Cash"].map((x) => <option key={x} className="bg-white">{x}</option>)}
       </select>
-      <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
-      <button onClick={add} disabled={!name.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
+      <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" type="number" className="w-24 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-right text-sm outline-none focus:border-[#16191d]" />
+      <button onClick={add} disabled={!name.trim()} className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#16191d] text-white disabled:opacity-40 hover:bg-[#2b3038]"><Plus className="h-4 w-4" /></button>
     </div>
   );
 }

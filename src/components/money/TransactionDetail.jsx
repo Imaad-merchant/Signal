@@ -8,7 +8,7 @@ import { CATEGORIES, fmtMoney } from "@/components/money/money";
 import { suggestRuleMatch, transactionsMatching } from "@/components/money/rules";
 import { catMeta } from "@/components/money/ui";
 
-const rowCls = "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-xs hover:bg-white/[0.04]";
+const rowCls = "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-xs hover:bg-white";
 
 export default function TransactionDetail({ tx, category, transactions = [], onClose, onChange }) {
   const [busy, setBusy] = useState("");
@@ -74,22 +74,22 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-white/10 bg-[#0e1015] p-4 sm:rounded-2xl"
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl border border-[#dcdfe4] bg-white p-4 sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-start justify-between gap-2">
-          <span className="rounded-lg border border-white/10 px-2 py-1 text-[11px] text-gray-400">
+          <span className="rounded-lg border border-[#dcdfe4] px-2 py-1 text-[11px] text-[#6b727e]">
             {tx.date}{tx.pending ? " · pending" : ""}
           </span>
-          <button onClick={onClose} className="rounded-lg p-1 text-gray-500 hover:bg-white/5 hover:text-gray-200"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} className="rounded-lg p-1 text-[#8b929c] hover:bg-[#f2f4f7] hover:text-[#16191d]"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <div className="truncate text-lg font-semibold text-white">{tx.merchant}</div>
-            <div className={`mt-0.5 text-2xl font-bold ${amt < 0 ? "text-gray-100" : "text-emerald-300"}`}>{fmtMoney(amt)}</div>
+            <div className="truncate text-lg font-semibold text-[#16191d]">{tx.merchant}</div>
+            <div className={`mt-0.5 text-2xl font-bold ${amt < 0 ? "text-[#16191d]" : "text-[#0f7b53]"}`}>{fmtMoney(amt)}</div>
 
-            <label className="mt-3 block text-[10px] uppercase tracking-wide text-gray-500">Category</label>
+            <label className="mt-3 block text-[10px] uppercase tracking-wide text-[#8b929c]">Category</label>
             <div className="mt-1 flex items-center gap-2">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: `${m.c}22` }}>
                 <m.Icon className="h-4 w-4" style={{ color: m.c }} />
@@ -97,62 +97,62 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
               <select
                 value={category}
                 onChange={(e) => patch({ category: e.target.value })}
-                className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-200 outline-none focus:border-cyan-400/40"
+                className="min-w-0 flex-1 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-xs text-[#16191d] outline-none focus:border-[#d81b48]/45"
               >
-                {CATEGORIES.map((c) => <option key={c} value={c} className="bg-[#0e1015]">{c}</option>)}
+                {CATEGORIES.map((c) => <option key={c} value={c} className="bg-white">{c}</option>)}
               </select>
             </div>
 
-            <label className="mt-3 block text-[10px] uppercase tracking-wide text-gray-500">Note</label>
+            <label className="mt-3 block text-[10px] uppercase tracking-wide text-[#8b929c]">Note</label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               onBlur={saveNote}
               rows={3}
               placeholder="Add a note…"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-2.5 py-2 text-xs text-gray-100 outline-none focus:border-cyan-400/40"
+              className="mt-1 w-full rounded-lg border border-[#dcdfe4] bg-white px-2.5 py-2 text-xs text-[#16191d] outline-none focus:border-[#d81b48]/45"
             />
           </div>
 
           <div>
-            <div className="mb-1 text-[10px] uppercase tracking-wide text-gray-500">Actions</div>
+            <div className="mb-1 text-[10px] uppercase tracking-wide text-[#8b929c]">Actions</div>
 
             <button onClick={() => patch({ tax_deductible: !tx.tax_deductible })} className={rowCls}>
-              <Receipt className="h-4 w-4 text-gray-500" />
-              <span className="flex-1 text-gray-300">Tax deductible</span>
-              <span className={`h-4 w-7 rounded-full p-0.5 transition-colors ${tx.tax_deductible ? "bg-emerald-500/70" : "bg-white/10"}`}>
+              <Receipt className="h-4 w-4 text-[#8b929c]" />
+              <span className="flex-1 text-[#454b54]">Tax deductible</span>
+              <span className={`h-4 w-7 rounded-full p-0.5 transition-colors ${tx.tax_deductible ? "bg-emerald-500/70" : "bg-[#dcdfe4]"}`}>
                 <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${tx.tax_deductible ? "translate-x-3" : ""}`} />
               </span>
             </button>
 
             <button onClick={() => patch({ ignored: !tx.ignored })} className={rowCls}>
-              <Ban className="h-4 w-4 text-gray-500" />
+              <Ban className="h-4 w-4 text-[#8b929c]" />
               <span className="flex-1">
-                <span className="block text-gray-300">Ignore</span>
-                <span className="block text-[10px] text-gray-500">{tx.ignored ? "Excluded from spending" : "Counted in spending"}</span>
+                <span className="block text-[#454b54]">Ignore</span>
+                <span className="block text-[10px] text-[#8b929c]">{tx.ignored ? "Excluded from spending" : "Counted in spending"}</span>
               </span>
-              <span className={`h-4 w-7 rounded-full p-0.5 transition-colors ${tx.ignored ? "bg-orange-500/70" : "bg-white/10"}`}>
+              <span className={`h-4 w-7 rounded-full p-0.5 transition-colors ${tx.ignored ? "bg-orange-500/70" : "bg-[#dcdfe4]"}`}>
                 <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${tx.ignored ? "translate-x-3" : ""}`} />
               </span>
             </button>
 
             <button onClick={() => setSplitOpen((v) => !v)} className={rowCls}>
-              <Split className="h-4 w-4 text-gray-500" />
-              <span className="flex-1 text-gray-300">Split</span>
+              <Split className="h-4 w-4 text-[#8b929c]" />
+              <span className="flex-1 text-[#454b54]">Split</span>
             </button>
             {splitOpen && (
               <div className="mb-1 flex flex-wrap items-center gap-1.5 px-2">
                 <input
                   value={splitAmount} onChange={(e) => setSplitAmount(e.target.value)} type="number" placeholder="Amount"
-                  className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-xs outline-none focus:border-cyan-400/40"
+                  className="w-24 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-right text-xs outline-none focus:border-[#d81b48]/45"
                 />
-                <select value={splitCategory} onChange={(e) => setSplitCategory(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-[11px] text-gray-300 outline-none">
-                  {CATEGORIES.map((c) => <option key={c} className="bg-[#0e1015]">{c}</option>)}
+                <select value={splitCategory} onChange={(e) => setSplitCategory(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dcdfe4] bg-white px-2 py-1.5 text-[11px] text-[#454b54] outline-none">
+                  {CATEGORIES.map((c) => <option key={c} className="bg-white">{c}</option>)}
                 </select>
                 <button
                   onClick={doSplit}
                   disabled={!splitAmount || busy === "split"}
-                  className="rounded-lg bg-white/10 px-2.5 py-1.5 text-[11px] text-gray-200 disabled:opacity-40 hover:bg-white/15"
+                  className="rounded-lg bg-[#16191d] px-2.5 py-1.5 text-[11px] text-white disabled:opacity-40 hover:bg-[#2b3038]"
                 >
                   {busy === "split" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Split"}
                 </button>
@@ -160,17 +160,17 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
             )}
 
             <button onClick={addRule} disabled={busy === "rule"} className={rowCls}>
-              <Wand2 className="h-4 w-4 text-gray-500" />
+              <Wand2 className="h-4 w-4 text-[#8b929c]" />
               <span className="flex-1">
-                <span className="block text-gray-300">Always categorise as {category}</span>
-                <span className="block text-[10px] text-gray-500">Creates a rule for “{suggestRuleMatch(tx.merchant)}”</span>
+                <span className="block text-[#454b54]">Always categorise as {category}</span>
+                <span className="block text-[10px] text-[#8b929c]">Creates a rule for “{suggestRuleMatch(tx.merchant)}”</span>
               </span>
-              {busy === "rule" && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-500" />}
+              {busy === "rule" && <Loader2 className="h-3.5 w-3.5 animate-spin text-[#8b929c]" />}
             </button>
-            {ruleMsg && <p className="px-2 text-[10px] text-cyan-300">{ruleMsg}</p>}
+            {ruleMsg && <p className="px-2 text-[10px] text-[#d81b48]">{ruleMsg}</p>}
 
             {tx.source !== "plaid" && (
-              <button onClick={del} disabled={busy === "del"} className={`${rowCls} text-rose-300`}>
+              <button onClick={del} disabled={busy === "del"} className={`${rowCls} text-[#c01530]`}>
                 <Trash2 className="h-4 w-4" />
                 <span className="flex-1">Delete transaction</span>
               </button>
@@ -179,7 +179,7 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
         </div>
 
         {(tx.raw_name || tx.merchant) && (
-          <div className="mt-4 border-t border-white/[0.06] pt-2 text-center text-[10px] uppercase tracking-wide text-gray-600">
+          <div className="mt-4 border-t border-[#e6e8ec] pt-2 text-center text-[10px] uppercase tracking-wide text-[#a8aeb8]">
             {tx.raw_name || tx.merchant}
           </div>
         )}
