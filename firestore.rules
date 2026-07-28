@@ -160,6 +160,11 @@ service cloud.firestore {
       allow update: if canUpdate();
       allow create: if isCreatingOwner();
     }
+    match /budgets/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
     // Google OAuth refresh tokens — written ONLY by the server (Admin SDK). No
     // client access at all: tokens must never be readable from the browser.
     match /google_tokens/{docId} {

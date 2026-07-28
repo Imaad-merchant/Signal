@@ -9,7 +9,7 @@ import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
 import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText } from "./google/_client.js";
-import { plaidConfigured, plaidFetch, mapPlaidCategory } from "./plaid/_client.js";
+import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_client.js";
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 
@@ -667,8 +667,6 @@ Content: ${(text || "(could not read the content)").slice(0, 6000)}`;
 
 // ---- Plaid: connect banks + sync accounts/transactions into the Money tab. ----
 // Access tokens live ONLY in the server-only `plaid_items` collection (Admin SDK).
-function plaidId(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 250); }
-
 async function plaidLinkToken(auth, res) {
   if (!plaidConfigured()) return res.status(503).json({ error: "Plaid isn't configured on the server (set PLAID_CLIENT_ID / PLAID_SECRET / PLAID_ENV)." });
   try {
@@ -725,66 +723,6 @@ async function plaidSync(auth, res) {
   }
 }
 
-// Pull one item's balances + transactions (incremental via /transactions/sync cursor).
-async function syncPlaidItem(db, uid, itemId, accessToken, cursor) {
-  const now = new Date().toISOString();
-
-  // Accounts / balances.
-  let accountsN = 0;
-  try {
-    const acc = await plaidFetch("/accounts/get", { access_token: accessToken });
-    const batch = db.batch();
-    for (const a of acc.accounts || []) {
-      const bal = a.balances || {};
-      // Credit balances are money owed → represent as negative net worth.
-      const current = Number(bal.current);
-      const signed = a.type === "credit" || a.type === "loan" ? -Math.abs(current || 0) : (Number.isFinite(current) ? current : 0);
-      batch.set(db.collection("accounts").doc(plaidId(`${uid}_plaid_${a.account_id}`)), {
-        userId: uid, source: "plaid", external_id: a.account_id, item_id: itemId,
-        name: `${a.name}${a.mask ? ` ••${a.mask}` : ""}`,
-        type: a.subtype || a.type || "account",
-        balance: signed, currency: bal.iso_currency_code || "USD", updated_date: now, created_date: now,
-      }, { merge: true });
-      accountsN++;
-    }
-    await batch.commit();
-  } catch (err) { console.warn("plaid accounts:", err.message); }
-
-  // Transactions (incremental).
-  let added = 0, removed = 0, cur = cursor;
-  try {
-    let hasMore = true;
-    while (hasMore) {
-      const t = await plaidFetch("/transactions/sync", { access_token: accessToken, cursor: cur || undefined, count: 500 });
-      const ups = [...(t.added || []), ...(t.modified || [])];
-      for (let i = 0; i < ups.length; i += 400) {
-        const batch = db.batch();
-        for (const tx of ups.slice(i, i + 400)) {
-          batch.set(db.collection("transactions").doc(plaidId(`${uid}_plaid_${tx.transaction_id}`)), {
-            userId: uid, source: "plaid", external_id: tx.transaction_id, account_id: tx.account_id,
-            date: tx.date, merchant: tx.merchant_name || tx.name || "(transaction)",
-            amount: -Number(tx.amount || 0), // Plaid: +outflow → our −spend
-            category: mapPlaidCategory(tx), pending: !!tx.pending,
-            updated_date: now, created_date: now,
-          }, { merge: true });
-        }
-        await batch.commit();
-        added += Math.min(ups.length - i, 400);
-      }
-      for (let i = 0; i < (t.removed || []).length; i += 400) {
-        const batch = db.batch();
-        for (const rm of (t.removed || []).slice(i, i + 400)) batch.delete(db.collection("transactions").doc(plaidId(`${uid}_plaid_${rm.transaction_id}`)));
-        await batch.commit();
-        removed += Math.min(t.removed.length - i, 400);
-      }
-      cur = t.next_cursor;
-      hasMore = t.has_more;
-    }
-    await db.collection("plaid_items").doc(plaidId(`${uid}_${itemId}`)).set({ cursor: cur, updated_date: now }, { merge: true });
-  } catch (err) { console.warn("plaid transactions:", err.message); }
-
-  return { accounts: accountsN, added, removed };
-}
 
 // ---- route: push-subscribe (store this browser's Web Push subscription) ----
 async function pushSubscribe(auth, body, res) {

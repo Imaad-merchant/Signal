@@ -196,6 +196,7 @@ export const base44 = {
     Account: createEntityHandler("accounts"),
     Transaction: createEntityHandler("transactions"),
     Subscription: createEntityHandler("subscriptions"),
+    Budget: createEntityHandler("budgets"),
   },
 
   functions: {

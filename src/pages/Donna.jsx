@@ -21,6 +21,7 @@ import { useVoice } from "@/components/donna/useVoice";
 import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
+import { parseMoneyQuery, answerMoneyQuery } from "@/components/money/voice";
 import {
   loadReminders, saveReminders, newId, parseReminderCreate, parseReminderCancel,
   parseDelivery, matchReminder, everyLabel, deliveryLabel,
@@ -343,6 +344,19 @@ export default function Donna() {
         const say = "Google isn't set up on the server yet."; setReply(say); pushTurn("signal", say); speak(say); return;
       } catch {
         const say = "I couldn't start the Google connection — try again."; setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+    }
+
+    // ---- Money Q&A (net worth, spending, subscriptions, budgets) ----
+    {
+      const moneyQ = parseMoneyQuery(t);
+      if (moneyQ) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply(""); setMode("processing");
+        let say;
+        try { say = await answerMoneyQuery(moneyQ); }
+        catch { say = "I couldn't read your money data just now."; }
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
       }
     }
 

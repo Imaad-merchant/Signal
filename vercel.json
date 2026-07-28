@@ -6,7 +6,8 @@
   },
   "crons": [
     { "path": "/api/ingest?job=morning", "schedule": "0 11 * * *" },
-    { "path": "/api/ingest?job=evening", "schedule": "0 23 * * *" }
+    { "path": "/api/ingest?job=evening", "schedule": "0 23 * * *" },
+    { "path": "/api/ingest?job=plaid-sync", "schedule": "0 8 * * *" }
   ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
