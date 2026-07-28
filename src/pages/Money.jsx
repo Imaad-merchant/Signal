@@ -1,11 +1,12 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wallet, Plus, Trash2, Upload, Repeat, PiggyBank, TrendingUp, X, CreditCard } from "lucide-react";
+import { Wallet, Plus, Trash2, Upload, Repeat, PiggyBank, TrendingUp, X, CreditCard, Landmark, RefreshCw, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import {
   CATEGORIES, categorize, fmtMoney, detectSubscriptions, monthlyCost, normMerchant,
   spendingByCategory, parseTransactionsCsv,
 } from "@/components/money/money";
+import { connectBank, syncBanks } from "@/components/money/plaidLink";
 
 const monthPrefix = () => new Date().toISOString().slice(0, 7);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -42,10 +43,41 @@ export default function Money() {
   }, [manualSubs, detected]);
   const subsMonthly = subs.reduce((s, x) => s + monthlyCost(x), 0);
 
+  const [banking, setBanking] = useState("");
+  const [bankMsg, setBankMsg] = useState("");
+  const doConnect = async () => {
+    setBanking("connect"); setBankMsg("");
+    try {
+      const r = await connectBank();
+      if (r && r.ok) { setBankMsg(`Linked — ${r.accounts || 0} accounts, ${r.added || 0} transactions.`); invalidate(); }
+    } catch (err) { setBankMsg(err?.message || "Couldn't connect — is Plaid set up on the server?"); }
+    setBanking("");
+  };
+  const doSync = async () => {
+    setBanking("sync"); setBankMsg("");
+    try { const r = await syncBanks(); if (r && r.error) setBankMsg(r.error); else { setBankMsg(`Synced ${r.added || 0} new, ${r.removed || 0} removed.`); invalidate(); } }
+    catch (err) { setBankMsg(err?.message || "Sync failed."); }
+    setBanking("");
+  };
+  const hasPlaid = accounts.some((a) => a.source === "plaid");
+
   return (
     <div className="h-full overflow-y-auto bg-[#0b0d11] pb-[calc(5rem+env(safe-area-inset-bottom))] text-gray-100">
       <div className="mx-auto max-w-3xl px-4 py-6">
-        <h1 className="mb-4 flex items-center gap-2 text-xl font-semibold"><Wallet className="h-5 w-5 text-cyan-300" /> Money</h1>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <h1 className="flex items-center gap-2 text-xl font-semibold"><Wallet className="h-5 w-5 text-cyan-300" /> Money</h1>
+          <div className="flex items-center gap-1.5">
+            {hasPlaid && (
+              <button onClick={doSync} disabled={!!banking} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-gray-300 hover:border-cyan-400/40 disabled:opacity-50">
+                {banking === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Sync
+              </button>
+            )}
+            <button onClick={doConnect} disabled={!!banking} className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
+              {banking === "connect" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Landmark className="h-3.5 w-3.5" />} Connect bank
+            </button>
+          </div>
+        </div>
+        {bankMsg && <p className="mb-3 text-[11px] text-cyan-300">{bankMsg}</p>}
 
         {/* Top cards */}
         <div className="grid grid-cols-3 gap-2">
