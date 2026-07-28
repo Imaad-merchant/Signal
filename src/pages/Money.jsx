@@ -11,7 +11,8 @@ import { monthKey, spendingWithDelta, totalsForMonth, shiftMonth } from "@/compo
 import { connectBank, syncBanks } from "@/components/money/plaidLink";
 import MoneyNav, { isView } from "@/components/money/MoneyNav";
 import Overview from "@/components/money/Overview";
-import { RecurringView, SpendingView, BudgetsView, NetWorthView } from "@/components/money/views";
+import { SpendingView, BudgetsView, NetWorthView } from "@/components/money/views";
+import RecurringView from "@/components/money/RecurringView";
 import TransactionsView from "@/components/money/TransactionsView";
 
 const VIEW_KEY = "money_view";

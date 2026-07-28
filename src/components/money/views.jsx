@@ -2,12 +2,8 @@
 // section navigates end to end; phases 2–6 replace these bodies in place with
 // the fuller Rocket-Money-shaped screens (filters, sub-tabs, month pagers).
 import React from "react";
-import { Accounts, SpendingCard, BudgetsCard, SubscriptionsCard } from "@/components/money/sections";
+import { Accounts, SpendingCard, BudgetsCard } from "@/components/money/sections";
 
-export function RecurringView({ data, onChange }) {
-  const { subs, subsMonthly } = data;
-  return <SubscriptionsCard subs={subs} monthly={subsMonthly} onChange={onChange} />;
-}
 
 export function SpendingView({ data }) {
   const { byCat, monthSpend, spendDelta } = data;
