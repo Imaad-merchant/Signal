@@ -48,6 +48,7 @@ export default function Money() {
   const accountsQ = useQuery({ queryKey: ["money", "accounts"], queryFn: () => base44.entities.Account.list("-created_date", 100) });
   const txQ = useQuery({ queryKey: ["money", "transactions"], queryFn: () => base44.entities.Transaction.list("-date", 1000) });
   const subsQ = useQuery({ queryKey: ["money", "subscriptions"], queryFn: () => base44.entities.Subscription.list("-created_date", 200) });
+  const budgetsQ = useQuery({ queryKey: ["money", "budgets"], queryFn: () => base44.entities.Budget.list("-created_date", 100).catch(() => []) });
 
   // Surface read failures (the usual cause is Firestore rules not published for
   // the money collections — server writes succeed via Admin, client reads deny).
@@ -132,6 +133,7 @@ export default function Money() {
 
         <Accounts accounts={accounts} netWorth={netWorth} onChange={invalidate} />
         <Spending byCat={byCat} total={monthSpend} delta={spendDelta} />
+        <Budgets budgets={Array.isArray(budgetsQ.data) ? budgetsQ.data : []} byCat={byCat} onChange={invalidate} />
         <Subscriptions subs={subs} monthly={subsMonthly} onChange={invalidate} />
         <Transactions transactions={transactions} accounts={accounts} onChange={invalidate} />
       </div>
@@ -272,6 +274,72 @@ function Spending({ byCat, total, delta }) {
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+function Budgets({ budgets, byCat, onChange }) {
+  const [open, setOpen] = useState(false);
+  const spentByCat = Object.fromEntries(byCat.map((c) => [c.category, c.total]));
+  const budgetCats = new Set(budgets.map((b) => b.category));
+  const available = CATEGORIES.filter((c) => c !== "Income" && !budgetCats.has(c));
+  const [cat, setCat] = useState(available[0] || "Food");
+  const [amount, setAmount] = useState("");
+  const totalBudget = budgets.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const totalSpent = budgets.reduce((s, b) => s + (spentByCat[b.category] || 0), 0);
+
+  const add = async () => {
+    if (!cat || !amount) return;
+    await base44.entities.Budget.create({ category: cat, amount: Number(amount) || 0 }).catch(() => {});
+    setAmount(""); setOpen(false); onChange();
+  };
+  const update = async (b, amt) => { await base44.entities.Budget.update(b.id, { amount: Number(amt) || 0 }).catch(() => {}); onChange(); };
+  const del = async (b) => { await base44.entities.Budget.delete(b.id).catch(() => {}); onChange(); };
+
+  return (
+    <Card title="Budgets" right={budgets.length > 0 && <span className="text-[11px] font-semibold text-gray-300">{fmtMoney(totalSpent)} / {fmtMoney(totalBudget)}</span>}>
+      <div className="flex flex-col gap-2.5">
+        {budgets.length === 0 && !open && <p className="text-[11px] text-gray-500">Set a monthly limit per category to track how you're pacing.</p>}
+        {budgets.slice().sort((a, b) => (spentByCat[b.category] || 0) / (b.amount || 1) - (spentByCat[a.category] || 0) / (a.amount || 1)).map((b) => {
+          const m = catMeta(b.category);
+          const spent = spentByCat[b.category] || 0;
+          const limit = Number(b.amount) || 0;
+          const pct = limit > 0 ? (spent / limit) * 100 : 0;
+          const over = spent > limit;
+          const remaining = limit - spent;
+          return (
+            <div key={b.id} className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
+                <m.Icon className="h-4 w-4" style={{ color: m.c }} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="mb-0.5 flex items-center justify-between text-xs">
+                  <span className="text-gray-300">{b.category}</span>
+                  <span className={over ? "text-orange-300" : "text-emerald-300"}>{over ? `${fmtMoney(spent - limit)} over` : `${fmtMoney(remaining)} left`}</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(3, pct))}%`, background: over ? "#fb923c" : m.c }} />
+                </div>
+                <div className="mt-0.5 text-[10px] text-gray-500">{fmtMoney(spent)} of {fmtMoney(limit)}</div>
+              </div>
+              <input defaultValue={b.amount} onBlur={(e) => update(b, e.target.value)} type="number" className="w-20 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-right text-xs outline-none focus:border-white/25" />
+              <button onClick={() => del(b)} className="p-1 text-gray-500 hover:text-red-300"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          );
+        })}
+
+        {open ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <select value={cat} onChange={(e) => setCat(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-300 outline-none">
+              {available.map((c) => <option key={c} className="bg-[#0e1015]">{c}</option>)}
+            </select>
+            <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="500" type="number" className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-right text-sm outline-none focus:border-white/25" />
+            <button onClick={add} disabled={!cat || !amount} className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 disabled:opacity-40 hover:bg-white/15"><Plus className="h-4 w-4" /></button>
+          </div>
+        ) : available.length > 0 && (
+          <button onClick={() => setOpen(true)} className="inline-flex w-fit items-center gap-1 text-[11px] text-cyan-300 hover:text-cyan-200"><Plus className="h-3 w-3" /> Add budget</button>
+        )}
+      </div>
     </Card>
   );
 }

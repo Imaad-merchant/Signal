@@ -10,6 +10,7 @@ import nodemailer from "nodemailer";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 import { callLLM, parseJSON } from "./_llm.js";
 import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents } from "./google/_client.js";
+import { syncPlaidItem } from "./plaid/_client.js";
 
 function matches(header, secret) {
   if (!secret) return false;
@@ -34,6 +35,11 @@ export default async function handler(req, res) {
     if (isCron) {
       // Two daily crons (see vercel.json): ?job=morning (poll Google + notify) and
       // ?job=evening (notify). No job → just poll Google (manual/legacy).
+      // Nightly Plaid refresh — sync every linked item across all users.
+      if (req.query && req.query.job === "plaid-sync") {
+        const out = await runPlaidSync(db);
+        return res.status(200).json({ ok: true, job: "plaid-sync", ...out, ran_at: new Date().toISOString() });
+      }
       const job = req.query && (req.query.job === "morning" || req.query.job === "evening") ? req.query.job : null;
       const out = { job: job || "poll" };
       if (!job || job === "morning") out.google = await runGooglePoll(db);
@@ -53,6 +59,21 @@ export default async function handler(req, res) {
     console.error("ingest error:", err);
     return res.status(500).json({ error: err.message || "Ingest failed" });
   }
+}
+
+// Nightly: refresh every linked Plaid item for every user (Admin, cursor-based).
+async function runPlaidSync(db) {
+  const snap = await db.collection("plaid_items").get();
+  let items = 0, accounts = 0, added = 0, removed = 0, failed = 0;
+  for (const doc of snap.docs) {
+    const it = doc.data();
+    if (!it.access_token) continue;
+    try {
+      const r = await syncPlaidItem(db, it.userId, it.item_id, it.access_token, it.cursor || null);
+      items++; accounts += r.accounts; added += r.added; removed += r.removed;
+    } catch (err) { failed++; console.warn("plaid nightly sync item failed:", err.message); }
+  }
+  return { items, accounts, added, removed, failed };
 }
 
 // Notification copy per slot.
