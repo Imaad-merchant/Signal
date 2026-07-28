@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2 } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2, Volume2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -48,12 +48,19 @@ const MALE_RE = /male|daniel|arthur|oliver|james|george|fred|gordon|rishi|alex/i
 // Pick a TTS voice honouring the user's prefs: accent (British vs any English) and
 // preferred voice gender. Falls back gracefully to any English voice.
 function pickVoice(voices, prefer = "female", british = true) {
-  const pool = british ? voices.filter((v) => /en[-_]GB/i.test(v.lang)) : voices.filter((v) => /^en/i.test(v.lang));
-  const base = pool.length ? pool : voices.filter((v) => /^en/i.test(v.lang));
-  let hit = null;
-  if (prefer === "female") hit = base.find((v) => FEMALE_RE.test(v.name) && !MALE_RE.test(v.name));
-  else if (prefer === "male") hit = base.find((v) => MALE_RE.test(v.name));
-  return hit || base[0] || voices.find((v) => /^en/i.test(v.lang)) || null;
+  const en = voices.filter((v) => /^en/i.test(v.lang));
+  const gb = en.filter((v) => /en[-_]GB/i.test(v.lang));
+  const pool = british && gb.length ? gb : en;
+  const rank = (list) => {
+    if (!list.length) return null;
+    let hit = null;
+    if (prefer === "female") hit = list.find((v) => FEMALE_RE.test(v.name) && !MALE_RE.test(v.name));
+    else if (prefer === "male") hit = list.find((v) => MALE_RE.test(v.name));
+    return hit || list[0] || null;
+  };
+  // Prefer a LOCAL voice — Chrome's remote "Google …" voices are network-backed and
+  // often produce no audio (esp. in a PWA), so a local voice is far more reliable.
+  return rank(pool.filter((v) => v.localService)) || rank(pool) || rank(en) || null;
 }
 
 // Best-effort match of a spoken item ("the logo") to an existing open task,
@@ -1146,6 +1153,27 @@ export default function Donna() {
     try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } catch { /* ignore */ }
   }
 
+  // Gesture-driven voice check that reports WHY it failed — click it if you can't
+  // hear Donna and the note tells us exactly what's wrong.
+  function testVoice() {
+    if (!("speechSynthesis" in window)) { setNote("This browser has no speech synthesis at all."); return; }
+    const synth = window.speechSynthesis;
+    const voices = synth.getVoices() || [];
+    if (!voices.length) { setNote("No TTS voices are installed in this browser yet — try again in a second, or add a voice in your OS settings."); return; }
+    try { synth.cancel(); } catch { /* ignore */ }
+    const v = pickVoice(voices, prefsRef.current.voice?.prefer || "female", prefsRef.current.persona?.british !== false);
+    const u = new SpeechSynthesisUtterance("Voice test. If you can hear this, I'm working.");
+    u.volume = 1; u.rate = Number(prefsRef.current.voice?.rate) || 1.02;
+    if (v) u.voice = v;
+    let started = false;
+    setNote(`Testing voice${v ? ` "${v.name}"` : ""}…`);
+    u.onstart = () => { started = true; setNote(`Speaking with "${v ? v.name : "default"}". If you hear nothing, check system volume / output device.`); };
+    u.onend = () => { if (started) setNote("Voice test finished."); };
+    u.onerror = (e) => setNote(`Speech engine error: ${e?.error || "unknown"}. Try a different voice in Customize.`);
+    try { synth.resume(); synth.speak(u); } catch { setNote("The speech engine refused to start."); }
+    window.setTimeout(() => { if (!started) setNote("Chrome accepted the request but never started speaking — this is usually the network-based Google voice failing. I've switched to preferring a local voice; hard-refresh and retry."); }, 2500);
+  }
+
   // Tap a question in the "To answer" box → answer it by voice (or the type box);
   // the next thing you say/type checks it off.
   const answerQuestion = (q) => {
@@ -1411,6 +1439,15 @@ export default function Donna() {
               {!muted && <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />}
             </button>
           )}
+          <button
+            type="button"
+            onClick={testVoice}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-gray-400 transition-colors hover:text-cyan-200 hover:border-cyan-400/40"
+            title="Test Donna's voice"
+            aria-label="Test voice"
+          >
+            <Volume2 className="h-5 w-5" />
+          </button>
           <input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
