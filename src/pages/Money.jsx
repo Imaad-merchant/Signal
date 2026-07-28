@@ -18,8 +18,6 @@ import RecurringView from "@/components/money/RecurringView";
 import TransactionsView from "@/components/money/TransactionsView";
 
 const VIEW_KEY = "money_view";
-const monthPrefix = (d = new Date()) => d.toISOString().slice(0, 7);
-const lastMonthPrefix = () => { const d = new Date(); d.setMonth(d.getMonth() - 1); return monthPrefix(d); };
 
 // View lives in the URL (?view=budgets) so back/forward and deep links work, and
 // is mirrored to localStorage so returning to /Money lands where you left off.
@@ -136,7 +134,7 @@ export default function Money() {
           </div>
         )}
 
-        {view === "overview" && <Overview data={data} onChange={invalidate} />}
+        {view === "overview" && <Overview data={data} onGoToView={setView} />}
         {view === "recurring" && <RecurringView data={data} onChange={invalidate} />}
         {view === "spending" && <SpendingView data={data} onChange={invalidate} />}
         {view === "budgets" && <BudgetsView data={data} onChange={invalidate} />}

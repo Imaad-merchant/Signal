@@ -8,10 +8,11 @@ import { fmtMoney } from "@/components/money/money";
 import {
   monthKey, cumulativeCompare, totalsForMonth, upcomingDays, netWorthBreakdown, lastSyncedLabel,
 } from "@/components/money/analytics";
+import { resolveCategory } from "@/components/money/rules";
 import { Card, catMeta, Empty, Ring } from "@/components/money/ui";
-import { TransactionsCard } from "@/components/money/sections";
 
 const weekday = (d) => d.toLocaleDateString(undefined, { weekday: "short" });
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
 function SpendTooltip({ active = false, payload = null, label = null }) {
   if (!active || !payload?.length) return null;
@@ -29,8 +30,8 @@ function SpendTooltip({ active = false, payload = null, label = null }) {
   );
 }
 
-export default function Overview({ data, onChange = () => {} }) {
-  const { accounts, transactions, budgets, subs, monthSpend, byCat } = data;
+export default function Overview({ data, onGoToView = () => {} }) {
+  const { accounts, transactions, budgets, subs, rules, monthSpend, byCat } = data;
   const key = monthKey();
 
   const series = useMemo(() => cumulativeCompare(transactions, key), [transactions, key]);
@@ -182,7 +183,69 @@ export default function Overview({ data, onChange = () => {} }) {
         )}
       </Card>
 
-      <TransactionsCard transactions={transactions} accounts={accounts} onChange={onChange} limit={12} />
+      <Card
+        title="Recent transactions"
+        right={
+          <button onClick={() => onGoToView("transactions")} className="text-[11px] text-cyan-300 hover:text-cyan-200">
+            See all
+          </button>
+        }
+      >
+        <RecentTransactions transactions={transactions} rules={rules} />
+      </Card>
     </>
+  );
+}
+
+// Read-only recent activity — editing lives in the Transactions view.
+function RecentTransactions({ transactions, rules }) {
+  const recent = transactions.slice(0, 12);
+  if (recent.length === 0) return <Empty>No transactions yet — connect a bank, or add one from the Transactions view.</Empty>;
+
+  const groups = [];
+  const byDate = {};
+  for (const t of recent) {
+    const d = t.date || "—";
+    if (!byDate[d]) { byDate[d] = []; groups.push(d); }
+    byDate[d].push(t);
+  }
+  const label = (d) => {
+    if (d === todayIso()) return "Today";
+    const dt = new Date(d);
+    return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {groups.map((d) => {
+        const dayTotal = byDate[d].reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        return (
+          <div key={d}>
+            <div className="mb-1 flex items-baseline justify-between text-[10px] uppercase tracking-wide text-gray-500">
+              <span>{label(d)}</span>
+              <span>{fmtMoney(dayTotal)}</span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {byDate[d].map((t) => {
+                const c = resolveCategory(t, rules);
+                const m = catMeta(c);
+                return (
+                  <div key={t.id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-white/[0.03]">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: `${m.c}22` }}>
+                      <m.Icon className="h-4 w-4" style={{ color: m.c }} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      <span className={t.ignored ? "text-gray-500 line-through" : ""}>{t.merchant}</span>
+                      <span className="block text-[10px] text-gray-500">{c}{t.pending ? " · pending" : ""}</span>
+                    </span>
+                    <span className={`shrink-0 text-sm ${Number(t.amount) < 0 ? "text-gray-200" : "text-emerald-300"}`}>{fmtMoney(t.amount)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
