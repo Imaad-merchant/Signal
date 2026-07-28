@@ -153,6 +153,7 @@ function useTileData() {
         sub: signalRows.length ? (signalRows[0].title || signalRows[0].summary || "New highlight") : "Connect Google",
         tone: signalRows.length ? "amber" : "muted",
         onClick: signalRows.length ? undefined : connectGoogle,
+        reconnect: connectGoogle, // always offer (re)connect in the expanded view
         items: signalRows.slice(0, 6).map((s) => s.title || s.summary || "(signal)"),
         emptyText: "Not connected — say “connect Google”.",
       },
@@ -260,6 +261,15 @@ function Card({ tile, compact, expanded, onToggle }) {
               className="mt-2 inline-flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-200"
             >
               Connect <ChevronRight className="h-3 w-3" />
+            </button>
+          )}
+          {tile.reconnect && !tile.onClick && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); tile.reconnect(); }}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] text-amber-300 hover:text-amber-200"
+            >
+              Reconnect Google <ChevronRight className="h-3 w-3" />
             </button>
           )}
         </div>

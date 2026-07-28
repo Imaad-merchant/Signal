@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Settings2, Plus, Trash2, Power, Sparkles, Volume2, MessageCircleQuestion, ListChecks, BellRing } from "lucide-react";
+import { Settings2, Plus, Trash2, Power, Sparkles, Volume2, MessageCircleQuestion, ListChecks, BellRing, Link2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import {
   loadPrefs, savePrefs, patchPrefs, TONES, VERBOSITIES, VOICE_PREFS, PROACTIVE,
@@ -59,6 +59,16 @@ export default function CustomizeDonnaPanel() {
   };
   const toggleHabit = async (h) => { try { await base44.entities.Habit.update(h.id, { active: !h.active }); } catch { /* ignore */ } loadHabits(); };
   const deleteHabit = async (h) => { try { await base44.entities.Habit.delete(h.id); } catch { /* ignore */ } loadHabits(); };
+  const [connecting, setConnecting] = useState(false);
+  const connectGoogle = async () => {
+    setConnecting(true);
+    try {
+      const res = await base44.functions.invoke("donna", { route: "google-connect" });
+      const url = (res && res.data && res.data.url) || res?.url;
+      if (url) { window.location.href = url; return; }
+    } catch { /* ignore */ }
+    setConnecting(false);
+  };
 
   return (
     <div className="max-h-[80vh] w-[min(92vw,22rem)] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e1015]/95 p-4 shadow-2xl backdrop-blur-md">
@@ -168,6 +178,19 @@ export default function CustomizeDonnaPanel() {
               onChange={(e) => setNudges({ pauseMs: Number(e.target.value) })} className="flex-1 accent-cyan-400" />
             <span className="w-10 text-right text-gray-500">{(prefs.nudges.pauseMs / 1000).toFixed(1)}s</span>
           </label>
+        </Section>
+
+        {/* Connections */}
+        <Section icon={Link2} title="Connections">
+          <button
+            type="button"
+            onClick={connectGoogle}
+            disabled={connecting}
+            className="flex items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-500/10 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+          >
+            <Link2 className="h-4 w-4" /> {connecting ? "Opening Google…" : "Connect / reconnect Google"}
+          </button>
+          <p className="text-[11px] text-gray-500">Reconnect to grant Docs & Slides reading (a wider permission than before).</p>
         </Section>
 
         <p className="text-center text-[11px] text-gray-500">Or just tell Donna: “be more blunt”, “call me boss”, “add a check-in question…”.</p>

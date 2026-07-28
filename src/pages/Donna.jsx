@@ -333,6 +333,19 @@ export default function Donna() {
       return;
     }
 
+    // ---- Connect / reconnect Google (works even when the inbox already has signals) ----
+    if (/\b(re-?)?(connect|link|sign\s*in\s*to|hook\s*up)\s+(my\s+|to\s+)?(google|gmail|drive|workspace)\b/i.test(t)) {
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      try {
+        const res = await base44.functions.invoke("donna", { route: "google-connect" });
+        const url = (res && res.data && res.data.url) || res?.url;
+        if (url) { const say = "Opening Google to connect — approve the permissions."; setReply(say); pushTurn("signal", say); speak(say); window.location.href = url; return; }
+        const say = "Google isn't set up on the server yet."; setReply(say); pushTurn("signal", say); speak(say); return;
+      } catch {
+        const say = "I couldn't start the Google connection — try again."; setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+    }
+
     // ---- Customize Donna by voice (persona / voice / questions / habits / nudges) ----
     if (parseOpenSettings(t)) {
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
