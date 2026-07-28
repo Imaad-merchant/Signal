@@ -1,32 +1,188 @@
-// Overview — the Money section's landing view (Rocket Money's "Dashboard").
-// Phase 0 composes the original cards; phase 1 replaces the hero with the
-// current-spend chart and adds the accounts / upcoming / budget rails.
-import React from "react";
+// Overview — Rocket Money's Dashboard, Signal-styled.
+// Current-spend hero with a this-month vs last-month cumulative curve, an
+// accounts rollup, the 7-day upcoming strip, budget pacing, and recent activity.
+import React, { useMemo } from "react";
+import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
+import { TrendingDown, TrendingUp, CalendarClock, RefreshCw } from "lucide-react";
 import { fmtMoney } from "@/components/money/money";
-import { Accounts, SpendingCard, BudgetsCard, SubscriptionsCard, TransactionsCard } from "@/components/money/sections";
+import {
+  monthKey, cumulativeCompare, totalsForMonth, upcomingDays, netWorthBreakdown, lastSyncedLabel,
+} from "@/components/money/analytics";
+import { Card, catMeta, Empty, Ring } from "@/components/money/ui";
+import { TransactionsCard } from "@/components/money/sections";
 
-const monthName = () => new Date().toLocaleString(undefined, { month: "long" });
+const weekday = (d) => d.toLocaleDateString(undefined, { weekday: "short" });
+
+function SpendTooltip({ active = false, payload = null, label = null }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#0e1015] px-2.5 py-1.5 text-[11px] shadow-lg">
+      <div className="mb-0.5 text-gray-500">Day {label}</div>
+      {payload.filter((p) => p.value != null).map((p) => (
+        <div key={p.dataKey} className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full" style={{ background: p.stroke }} />
+          <span className="text-gray-400">{p.dataKey === "thisMonth" ? "This month" : "Last month"}</span>
+          <span className="ml-auto text-gray-200">{fmtMoney(p.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Overview({ data, onChange = () => {} }) {
-  const { accounts, transactions, budgets, subs, netWorth, monthSpend, monthIncome, subsMonthly, byCat, spendDelta } = data;
+  const { accounts, transactions, budgets, subs, monthSpend, byCat } = data;
+  const key = monthKey();
+
+  const series = useMemo(() => cumulativeCompare(transactions, key), [transactions, key]);
+  const lastTotals = useMemo(() => {
+    const [y, m] = key.split("-").map(Number);
+    const prev = new Date(y, m - 2, 1);
+    return totalsForMonth(transactions, `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`);
+  }, [transactions, key]);
+  const upcoming = useMemo(() => upcomingDays(subs, 7), [subs]);
+  const nw = useMemo(() => netWorthBreakdown(accounts), [accounts]);
+  const synced = lastSyncedLabel(accounts);
+
+  const diff = monthSpend - lastTotals.spend;
+  const under = diff < 0;
+  const upcomingTotal = upcoming.reduce((s, d) => s + d.total, 0);
+  const upcomingCount = upcoming.reduce((s, d) => s + d.items.length, 0);
+
+  const spentByCat = Object.fromEntries(byCat.map((c) => [c.category, c.total]));
+  const paced = budgets
+    .map((b) => ({ ...b, spent: spentByCat[b.category] || 0, limit: Number(b.amount) || 0 }))
+    .sort((a, b) => (b.spent / (b.limit || 1)) - (a.spent / (a.limit || 1)))
+    .slice(0, 4);
 
   return (
     <>
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-cyan-500/10 to-violet-500/15 p-5">
-        <div className="text-[11px] uppercase tracking-wide text-gray-400">Net worth</div>
-        <div className="mt-1 text-3xl font-bold text-white">{fmtMoney(netWorth)}</div>
-        <div className="mt-3 flex gap-5 text-xs">
-          <div><span className="text-gray-400">Spent in {monthName()}</span><div className="text-sm font-semibold text-rose-300">{fmtMoney(monthSpend)}</div></div>
-          <div><span className="text-gray-400">Income</span><div className="text-sm font-semibold text-emerald-300">{fmtMoney(monthIncome)}</div></div>
-          <div><span className="text-gray-400">Subscriptions</span><div className="text-sm font-semibold text-violet-300">{fmtMoney(subsMonthly)}/mo</div></div>
+      {/* Current spend hero */}
+      <section className="mt-1 rounded-2xl border border-white/[0.07] bg-white/[0.02] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-gray-400">Current spend</div>
+            <div className="mt-0.5 text-3xl font-bold text-white">{fmtMoney(monthSpend)}</div>
+          </div>
+          {lastTotals.spend > 0 && (
+            <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium ${under ? "bg-emerald-500/10 text-emerald-300" : "bg-rose-500/10 text-rose-300"}`}>
+              {under ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
+              {fmtMoney(Math.abs(diff))} {under ? "less" : "more"} than last month
+            </span>
+          )}
         </div>
-      </div>
 
-      <Accounts accounts={accounts} netWorth={netWorth} onChange={onChange} />
-      <SpendingCard byCat={byCat} total={monthSpend} delta={spendDelta} />
-      <BudgetsCard budgets={budgets} byCat={byCat} onChange={onChange} />
-      <SubscriptionsCard subs={subs} monthly={subsMonthly} onChange={onChange} />
-      <TransactionsCard transactions={transactions} accounts={accounts} onChange={onChange} />
+        <div className="mt-3 h-36">
+          {series.length === 0 ? <Empty>No spending recorded yet this month.</Empty> : (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={series} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="moneySpendFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#22d3ee" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="day" tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} interval={6} />
+                <YAxis width={44} tick={{ fill: "#6b7280", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Math.round(v / 100) / 10}k`} />
+                <Tooltip content={<SpendTooltip />} cursor={{ stroke: "rgba(255,255,255,0.15)" }} />
+                <Area type="monotone" dataKey="lastMonth" stroke="#4b5563" strokeWidth={1.5} fill="none" dot={false} connectNulls />
+                <Area type="monotone" dataKey="thisMonth" stroke="#22d3ee" strokeWidth={2} fill="url(#moneySpendFill)" dot={false} connectNulls />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        <div className="mt-1 flex items-center gap-4 text-[10px] text-gray-500">
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded bg-cyan-400" /> This month</span>
+          <span className="inline-flex items-center gap-1"><span className="h-0.5 w-3 rounded bg-gray-600" /> Last month</span>
+        </div>
+      </section>
+
+      {/* Accounts rollup */}
+      <Card
+        title="Accounts"
+        right={synced && (
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+            <RefreshCw className="h-3 w-3" /> synced {synced}
+          </span>
+        )}
+      >
+        {accounts.length === 0 ? <Empty>Connect a bank to see your balances here.</Empty> : (
+          <div className="flex flex-col divide-y divide-white/[0.06]">
+            {nw.assetGroups.map((g) => (
+              <div key={g.label} className="flex items-center justify-between py-2 text-sm">
+                <span className="text-gray-300">{g.label}<span className="ml-1.5 text-[10px] text-gray-500">{g.accounts.length}</span></span>
+                <span className="text-gray-200">{fmtMoney(g.total)}</span>
+              </div>
+            ))}
+            {nw.debtGroups.map((g) => (
+              <div key={g.label} className="flex items-center justify-between py-2 text-sm">
+                <span className="text-gray-300">{g.label}<span className="ml-1.5 text-[10px] text-gray-500">{g.accounts.length}</span></span>
+                <span className="text-rose-300">{fmtMoney(g.total)}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between pt-2 text-sm">
+              <span className="font-medium text-gray-200">Net worth</span>
+              <span className="font-semibold text-white">{fmtMoney(nw.net)}</span>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Upcoming 7 days */}
+      <Card
+        title="Upcoming"
+        right={<span className="inline-flex items-center gap-1 text-[10px] text-gray-500"><CalendarClock className="h-3 w-3" /> next 7 days</span>}
+      >
+        <p className="mb-2 text-[11px] text-gray-400">
+          {upcomingCount === 0
+            ? "Nothing due in the next 7 days."
+            : `${upcomingCount} recurring charge${upcomingCount > 1 ? "s" : ""} due for ${fmtMoney(upcomingTotal)}.`}
+        </p>
+        <div className="grid grid-cols-7 gap-1">
+          {upcoming.map((d, i) => (
+            <div key={i} className={`rounded-lg border p-1.5 text-center ${i === 0 ? "border-cyan-400/30 bg-cyan-400/5" : "border-white/[0.06]"}`}>
+              <div className={`text-[9px] uppercase ${i === 0 ? "text-cyan-300" : "text-gray-500"}`}>{i === 0 ? "Today" : weekday(d.date)}</div>
+              <div className="text-xs font-medium text-gray-300">{d.date.getDate()}</div>
+              <div className="mt-1 flex min-h-[10px] flex-wrap justify-center gap-0.5">
+                {d.items.slice(0, 3).map((s, j) => (
+                  <span key={j} className="h-1.5 w-1.5 rounded-full bg-violet-400" title={s.merchant} />
+                ))}
+              </div>
+              <div className="mt-0.5 text-[9px] text-gray-500">{d.total > 0 ? `$${Math.round(d.total)}` : ""}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Budget pacing */}
+      <Card title="Budget" right={paced.length > 0 && <span className="text-[10px] text-gray-500">this month</span>}>
+        {paced.length === 0 ? <Empty>No budgets set — add one from the Budgets view.</Empty> : (
+          <div className="flex flex-col gap-2.5">
+            {paced.map((b) => {
+              const m = catMeta(b.category);
+              const pct = b.limit > 0 ? (b.spent / b.limit) * 100 : 0;
+              const over = b.spent > b.limit;
+              return (
+                <div key={b.id} className="flex items-center gap-2.5">
+                  <Ring pct={pct} over={over} color={m.c} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="truncate text-gray-300">{b.category}</span>
+                      <span className={over ? "text-orange-300" : "text-emerald-300"}>
+                        {over ? `${fmtMoney(b.spent - b.limit)} over` : `${fmtMoney(b.limit - b.spent)} left`}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/5">
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(3, pct))}%`, background: over ? "#fb923c" : m.c }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      <TransactionsCard transactions={transactions} accounts={accounts} onChange={onChange} limit={12} />
     </>
   );
 }
