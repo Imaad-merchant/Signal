@@ -68,6 +68,7 @@ export default async function handler(req, res) {
     if (route === "plaid-link-token") return await plaidLinkToken(auth, res);
     if (route === "plaid-exchange") return await plaidExchange(auth, body, res);
     if (route === "plaid-sync") return await plaidSync(auth, res);
+    if (route === "tts") return await ttsSpeak(auth, body, res);
     return res.status(400).json({ error: "Unknown route" });
   } catch (err) {
     console.error(`Jarvis route "${route}" error:`, err);
@@ -662,6 +663,29 @@ Content: ${(text || "(could not read the content)").slice(0, 6000)}`;
   } catch (err) {
     console.error("google route error:", err);
     return res.status(200).json({ spoken: "Something went wrong reading your Google account — it may need reconnecting.", items: [], link: "" });
+  }
+}
+
+// ---- Server-side TTS (OpenAI) — reliable audio the browser plays via <audio>,
+//      sidestepping the flaky Web Speech API. Returns base64 MP3. ----
+async function ttsSpeak(auth, body, res) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return res.status(503).json({ error: "TTS not configured (no OPENAI_API_KEY)" });
+  const text = String(body.text || "").trim().slice(0, 1200);
+  if (!text) return res.status(400).json({ error: "text required" });
+  // Map the user's voice prefs to an OpenAI voice. "fable" reads British-ish.
+  const voice = body.voice === "male" ? "onyx" : body.british ? "fable" : "nova";
+  try {
+    const r = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "tts-1", voice, input: text, response_format: "mp3" }),
+    });
+    if (!r.ok) { const t = await r.text(); return res.status(502).json({ error: `TTS ${r.status}: ${t.slice(0, 200)}` }); }
+    const buf = Buffer.from(await r.arrayBuffer());
+    return res.status(200).json({ audio: buf.toString("base64"), mime: "audio/mpeg" });
+  } catch (err) {
+    return res.status(502).json({ error: err.message || "TTS failed" });
   }
 }
 

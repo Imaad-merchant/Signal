@@ -124,6 +124,8 @@ export default function Donna() {
   const [sources, setSources] = useState([]); // web-research source links for the last answer
   const [answeredQ, setAnsweredQ] = useState(() => new Set()); // questions answered in the right-side box
   const answeringRef = useRef(null); // the question currently being answered
+  const ttsAudioRef = useRef(null); // shared <audio> for reliable server-side TTS
+  const serverTtsOkRef = useRef(true); // false once server TTS proves unavailable
   const [spoken, setSpoken] = useState({ text: "", idx: 0 }); // caption text + karaoke cursor
   const turnId = useRef(0);
   const transcriptRef = useRef(null);
@@ -847,6 +849,12 @@ export default function Donna() {
         u.volume = 0;
         window.speechSynthesis.speak(u);
       } catch { /* ignore */ }
+      // Prime the <audio> element so server-TTS replies can autoplay later.
+      try {
+        const a = ttsAudioRef.current || (ttsAudioRef.current = new Audio());
+        a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAIA+AAABAAgAZGF0YQAAAAA=";
+        a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+      } catch { /* ignore */ }
       window.removeEventListener("pointerdown", unlock);
       window.removeEventListener("keydown", unlock);
     };
@@ -1009,9 +1017,66 @@ export default function Donna() {
     return { count: n, records };
   }
 
-  // ---- British TTS reply. Returns a Promise that resolves when speech ends, so
-  //      callers (e.g. the evening review) can speak lines in sequence. ----
+  // ---- Speak a reply. Prefers reliable server-side TTS (OpenAI → <audio>), which
+  //      sidesteps the flaky Web Speech API; falls back to the browser engine only
+  //      if the server route is unavailable. Returns a Promise that resolves when
+  //      speech ends, so callers (e.g. the evening review) can sequence lines. ----
   function speak(text) {
+    if (!text) { setMode("idle"); return Promise.resolve(); }
+    if (!serverTtsOkRef.current) return browserSpeak(text);
+    return serverSpeak(text).then((played) => (played ? undefined : browserSpeak(text)));
+  }
+
+  // Fetch MP3 from the server and play it through a shared <audio> element. Resolves
+  // true if it actually played, false to fall back to the browser engine.
+  async function serverSpeak(text) {
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt browser TTS */ }
+    let data;
+    try {
+      const res = await base44.functions.invoke("donna", {
+        route: "tts", text,
+        voice: prefsRef.current.voice?.prefer || "female",
+        british: prefsRef.current.persona?.british !== false,
+      });
+      data = (res && res.data) ? res.data : res || {};
+    } catch { serverTtsOkRef.current = false; return false; }
+    if (!data || !data.audio) { if (data && data.error) serverTtsOkRef.current = false; return false; }
+
+    const audio = ttsAudioRef.current || (ttsAudioRef.current = new Audio());
+    audio.src = `data:${data.mime || "audio/mpeg"};base64,${data.audio}`;
+    audio.volume = 1;
+
+    setSpoken({ text, idx: 0 });
+    setMode("speaking"); voice.amplitudeRef.current = 1;
+    const startTs = Date.now();
+    const rate = Number(prefsRef.current.voice?.rate) || 1;
+    const timer = window.setInterval(() => {
+      const est = Math.min(text.length, (Date.now() - startTs) * 0.016 * rate * 60 / 60);
+      setSpoken((s) => (s.text === text ? { ...s, idx: Math.max(s.idx, est) } : s));
+    }, 80);
+
+    let played = true;
+    await new Promise((res) => {
+      let settled = false;
+      const done = () => { if (settled) return; settled = true; res(); };
+      audio.onended = done;
+      audio.onerror = () => { played = false; done(); };
+      audio.play().then(() => {}).catch(() => { played = false; done(); });
+      // Safety timeout in case events never fire.
+      window.setTimeout(() => { if (!settled) { played = audio.currentTime > 0; done(); } }, Math.max(4000, text.length * 90));
+    });
+
+    window.clearInterval(timer);
+    if (played) {
+      setSpoken((s) => (s.text === text ? { ...s, idx: text.length } : s));
+      window.setTimeout(() => setSpoken((s) => (s.text === text ? { text: "", idx: 0 } : s)), 800);
+    }
+    setMode("idle"); voice.amplitudeRef.current = 0;
+    return played;
+  }
+
+  // ---- Browser Web Speech fallback. Returns a Promise that resolves when speech ends. ----
+  function browserSpeak(text) {
     return new Promise((resolve) => {
       if (!ttsSupported || !text) { setMode("idle"); resolve(); return; }
       try {
@@ -1160,29 +1225,14 @@ export default function Donna() {
     try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } catch { /* ignore */ }
   }
 
-  // Gesture-driven voice check that reports WHY it failed — click it if you can't
-  // hear Donna and the note tells us exactly what's wrong. Uses the same delayed
-  // fire as speak() so it doesn't hit Chrome's cancel()->speak() same-tick drop.
+  // Gesture-driven voice check — exercises the real speak() path (server audio first,
+  // browser engine fallback) so the test matches actual replies.
   function testVoice() {
-    if (!("speechSynthesis" in window)) { setNote("This browser has no speech synthesis at all."); return; }
-    const synth = window.speechSynthesis;
-    const voices = synth.getVoices() || [];
-    if (!voices.length) { setNote("No TTS voices are installed in this browser yet — try again in a second."); return; }
-    const v = pickVoice(voices, prefsRef.current.voice?.prefer || "female", prefsRef.current.persona?.british !== false);
-    setNote(`Testing voice "${v ? v.name : "default"}"…`);
-    try { synth.cancel(); } catch { /* ignore */ }
-    let started = false;
-    // Defer the speak() a tick after cancel() — the Chrome race that drops utterances.
-    window.setTimeout(() => {
-      const u = new SpeechSynthesisUtterance("Voice test. If you can hear this, I'm working.");
-      u.volume = 1; u.rate = Number(prefsRef.current.voice?.rate) || 1.02;
-      if (v) u.voice = v;
-      u.onstart = () => { started = true; setNote(`Speaking with "${v ? v.name : "default"}". If you still hear nothing, the browser tab is muted or the OS output volume is down.`); };
-      u.onend = () => { if (started) setNote("Voice test finished — did you hear it?"); };
-      u.onerror = (e) => setNote(`Speech engine error: ${e?.error || "unknown"}. Pick another voice in Customize.`);
-      try { synth.resume(); synth.speak(u); } catch { setNote("The speech engine refused to start."); }
-      window.setTimeout(() => { if (!started) setNote("The speech engine accepted the request but never started — try clicking Test once more; if it persists your Chrome speech engine is wedged and a full quit/reopen of Chrome clears it."); }, 3000);
-    }, 90);
+    serverTtsOkRef.current = true; // give server TTS another shot on an explicit test
+    setNote("Testing voice…");
+    speak("Voice test. If you can hear this, I'm working.").then(() => {
+      setNote("Voice test done. If you heard nothing, make sure the browser tab isn't muted (right-click the tab → Unmute site) and the system volume/output device is up.");
+    });
   }
 
   // Tap a question in the "To answer" box → answer it by voice (or the type box);
