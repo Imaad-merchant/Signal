@@ -119,6 +119,13 @@ export default function Donna() {
     try { return localStorage.getItem("donna_muted") === "1"; } catch { return false; }
   });
   const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
+  // Chat mode: a plain typed chat with all of Donna's powers (logging, memory,
+  // tasks, Google, money, research) but none of the proactive behaviour — no
+  // briefings, nudges, always-on mic, or auto-speaking. Flip back to full Donna
+  // anytime. Persisted so it stays where you left it.
+  const [chatMode, setChatMode] = useState(() => { try { return localStorage.getItem("assistant_mode") === "chat"; } catch { return false; } });
+  const chatModeRef = useRef(chatMode);
+  const chatScrollRef = useRef(null);
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
   const [sources, setSources] = useState([]); // web-research source links for the last answer
@@ -216,10 +223,23 @@ export default function Donna() {
   }, []);
 
   // Append a caption turn ("you" or "signal") to the running transcript.
+  // Persist chat/Donna mode; switching stops the mic + any speech so the two modes
+  // never fight over audio.
+  useEffect(() => {
+    chatModeRef.current = chatMode;
+    try { localStorage.setItem("assistant_mode", chatMode ? "chat" : "donna"); } catch { /* ignore */ }
+    if (chatMode) {
+      try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+      try { if (ttsAudioRef.current) { ttsAudioRef.current.pause(); } } catch { /* ignore */ }
+      try { voice.stop(); } catch { /* ignore */ }
+      setMode("idle"); setNudgeReady(false);
+    }
+  }, [chatMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const pushTurn = useCallback((who, text) => {
     const v = (text || "").trim();
     if (!v) return;
-    setTurns((prev) => [...prev.slice(-19), { id: ++turnId.current, who, text: v }]);
+    setTurns((prev) => [...prev.slice(-49), { id: ++turnId.current, who, text: v }]);
   }, []);
 
   // Handle a finished transcript (from voice or the type box).
@@ -793,7 +813,7 @@ export default function Donna() {
   // her reply comes out inaudible, and it also stops the recognizer from mishearing
   // her own voice and cutting her off. To interrupt her, tap the orb.
   useWakeWord({
-    enabled: !muted,
+    enabled: !muted && !chatMode,
     active: mode !== "idle" || briefingActive,
     onCommand: handleTranscript,
     echoText: spoken.text,   // ignore her own audio echoing back through the mic
@@ -876,12 +896,20 @@ export default function Donna() {
     };
   }, []);
 
+  // Keep the chat transcript pinned to the newest message.
+  useEffect(() => {
+    if (!chatMode) return;
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, chatMode, mode]);
+
   // Decide (once, on load) whether Signal has something worth asking about — i.e.
   // there are open commitments or open list items — and it hasn't nudged recently.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        if (chatModeRef.current) return; // chat mode is never proactive
         const until = Number(localStorage.getItem("jarvis_nudge_until") || 0);
         if (Date.now() < until) return;
         if (briefingPending()) return; // let the daily briefing own the alert first
@@ -1023,6 +1051,8 @@ export default function Donna() {
   //      speech ends, so callers (e.g. the evening review) can sequence lines. ----
   function speak(text) {
     if (!text) { setMode("idle"); return Promise.resolve(); }
+    // Chat mode is text-only — the reply is already shown in the transcript.
+    if (chatModeRef.current) { setMode("idle"); return Promise.resolve(); }
     if (!serverTtsOkRef.current) return browserSpeak(text);
     return serverSpeak(text).then((played) => (played ? undefined : browserSpeak(text)));
   }
@@ -1309,7 +1339,27 @@ export default function Donna() {
       <Link to="/Dashboard" className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors" title="Back" aria-label="Back">
         <ArrowLeft className="h-5 w-5" />
       </Link>
-      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Donna</h1>
+      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">{chatMode ? "Chat" : "Donna"}</h1>
+
+      {/* Mode switcher — full assistant (Donna) vs plain typed chat with the same powers. */}
+      <div className="absolute top-3.5 right-4 z-30 flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 text-[11px] backdrop-blur-sm">
+        <button
+          type="button"
+          onClick={() => setChatMode(false)}
+          className={`rounded-full px-3 py-1 font-medium transition-colors ${!chatMode ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400 hover:text-gray-200"}`}
+          title="Full assistant — voice, briefings, always listening"
+        >
+          Donna
+        </button>
+        <button
+          type="button"
+          onClick={() => setChatMode(true)}
+          className={`rounded-full px-3 py-1 font-medium transition-colors ${chatMode ? "bg-blue-500/25 text-blue-200" : "text-gray-400 hover:text-gray-200"}`}
+          title="Plain typed chat — same powers, no briefings or auto-talking"
+        >
+          Chat
+        </button>
+      </div>
 
       {/* Customize (Donna + dashboard). */}
       <button
@@ -1372,8 +1422,8 @@ export default function Donna() {
         </div>
       )}
 
-      {/* Proactive nudge: Donna asks permission to speak; tap to hear it. */}
-      {nudgeReady && mode === "idle" && (
+      {/* Proactive nudge: Donna asks permission to speak; tap to hear it. Donna mode only. */}
+      {nudgeReady && mode === "idle" && !chatMode && (
         <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
           <button
             type="button"
@@ -1398,8 +1448,8 @@ export default function Donna() {
       {/* Recent orb actions still inside their 24h undo window. */}
       <RecentActions />
 
-      {/* Morning look-ahead / evening habit review (speaks via the orb). */}
-      <DailyBriefing onSpeak={speak} onActive={setBriefingActive} />
+      {/* Morning look-ahead / evening habit review (speaks via the orb). Donna mode only. */}
+      {!chatMode && <DailyBriefing onSpeak={speak} onActive={setBriefingActive} />}
 
       {/* Donna's captions ABOVE the orb; your words small BELOW it. */}
       <div className="relative z-[6] flex flex-col items-center gap-2 px-4">
@@ -1520,6 +1570,62 @@ export default function Donna() {
           </button>
         </form>
       </div>
+
+      {/* ---- Chat mode: a plain ChatGPT-style typed conversation over the same
+             pipeline (all of Donna's powers), covering the orb UI. ---- */}
+      {chatMode && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-[#0b0d11]">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 pr-28">
+            <Link to="/Dashboard" className="rounded-full p-1.5 text-gray-400 hover:bg-white/5 hover:text-gray-100" title="Back" aria-label="Back">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <span className="text-xs font-semibold uppercase tracking-[0.3em] text-gray-500">Chat</span>
+            <span className="w-8" />
+          </div>
+
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+            {turns.length === 0 ? (
+              <div className="mx-auto mt-10 max-w-md text-center text-sm text-gray-500">
+                <p className="mb-2 text-gray-300">Chat with all of Donna's powers — quietly.</p>
+                <p>Log things, manage tasks, ask about your money, search the web, read your inbox. No briefings, no nudges, no talking back — just type. Switch to <span className="text-cyan-300">Donna</span> anytime for the full assistant.</p>
+              </div>
+            ) : (
+              <div className="mx-auto flex max-w-2xl flex-col gap-3">
+                {turns.map((tn) => (
+                  <div key={tn.id} className={`flex ${tn.who === "you" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${
+                      tn.who === "you" ? "bg-blue-600 text-white" : "bg-white/[0.06] text-gray-100"
+                    }`}>
+                      {tn.text}
+                    </div>
+                  </div>
+                ))}
+                {mode === "processing" && (
+                  <div className="flex justify-start">
+                    <div className="inline-flex items-center gap-2 rounded-2xl bg-white/[0.06] px-3.5 py-2 text-sm text-gray-400">
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-400" /> Thinking…
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {note && <p className="px-4 pb-1 text-center text-[11px] text-cyan-300">{note}</p>}
+          <form onSubmit={submitTyped} className="flex items-center gap-2 border-t border-white/10 p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+            <input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoFocus
+              placeholder="Message…"
+              className="flex-1 rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-2.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25"
+            />
+            <button type="submit" disabled={!typed.trim() || mode === "processing"} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-500" aria-label="Send">
+              <Send className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      )}
 
       {/* Email draft — review & edit, then send. Never sent automatically. */}
       {emailDraft && (
