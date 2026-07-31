@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2, Volume2 } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2, Volume2, Brain } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -11,6 +11,7 @@ import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
 import CustomizeDonnaPanel from "@/components/donna/CustomizeDonnaPanel";
+import ThoughtsPanel from "@/components/donna/ThoughtsPanel";
 import { resolveTileKey, setTileHidden, ALL_TILES } from "@/components/donna/dashboardConfig";
 import {
   loadPrefs, onPrefsChange, patchPrefs, personaPrefsForServer,
@@ -126,6 +127,7 @@ export default function Donna() {
   const [chatMode, setChatMode] = useState(() => { try { return localStorage.getItem("assistant_mode") === "chat"; } catch { return false; } });
   const chatModeRef = useRef(chatMode);
   const chatScrollRef = useRef(null);
+  const [showThoughts, setShowThoughts] = useState(false); // brain-dump / import panel
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
   const [sources, setSources] = useState([]); // web-research source links for the last answer
@@ -1341,6 +1343,16 @@ export default function Donna() {
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">{chatMode ? "Chat" : "Donna"}</h1>
 
+      {/* Capture thoughts — record / paste / import, organized into your notes. */}
+      <button
+        type="button"
+        onClick={() => setShowThoughts(true)}
+        className="absolute top-3.5 right-[9.5rem] z-30 flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+        title="Capture thoughts — record, paste, or import"
+      >
+        <Brain className="h-3.5 w-3.5" /> Thoughts
+      </button>
+
       {/* Mode switcher — full assistant (Donna) vs plain typed chat with the same powers. */}
       <div className="absolute top-3.5 right-4 z-30 flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 text-[11px] backdrop-blur-sm">
         <button
@@ -1625,6 +1637,18 @@ export default function Donna() {
             </button>
           </form>
         </div>
+      )}
+
+      {/* Capture-thoughts panel — record/paste/import → organized into your notes. */}
+      {showThoughts && (
+        <ThoughtsPanel
+          onClose={() => setShowThoughts(false)}
+          onSaved={(title) => {
+            setShowThoughts(false);
+            setNote(`Saved "${title}" to your notes`);
+            queryClient.invalidateQueries({ queryKey: ["grid"] });
+          }}
+        />
       )}
 
       {/* Email draft — review & edit, then send. Never sent automatically. */}

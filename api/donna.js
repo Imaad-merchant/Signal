@@ -10,6 +10,9 @@ import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
 import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText } from "./google/_client.js";
 import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_client.js";
+
+// Larger body limit so the voice-recorder can POST base64 audio for transcription.
+export const config = { api: { bodyParser: { sizeLimit: "12mb" } } };
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 
@@ -69,6 +72,7 @@ export default async function handler(req, res) {
     if (route === "plaid-exchange") return await plaidExchange(auth, body, res);
     if (route === "plaid-sync") return await plaidSync(auth, res);
     if (route === "tts") return await ttsSpeak(auth, body, res);
+    if (route === "transcribe") return await transcribe(auth, body, res);
     return res.status(400).json({ error: "Unknown route" });
   } catch (err) {
     console.error(`Jarvis route "${route}" error:`, err);
@@ -686,6 +690,30 @@ async function ttsSpeak(auth, body, res) {
     return res.status(200).json({ audio: buf.toString("base64"), mime: "audio/mpeg" });
   } catch (err) {
     return res.status(502).json({ error: err.message || "TTS failed" });
+  }
+}
+
+// ---- Speech-to-text (OpenAI Whisper) — transcribe a recorded voice memo. ----
+async function transcribe(auth, body, res) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return res.status(503).json({ error: "Transcription not configured (no OPENAI_API_KEY)" });
+  const b64 = String(body.audio || "");
+  if (!b64) return res.status(400).json({ error: "audio required" });
+  try {
+    const buf = Buffer.from(b64, "base64");
+    const form = new FormData();
+    form.append("file", new Blob([buf], { type: body.mime || "audio/webm" }), "memo.webm");
+    form.append("model", "whisper-1");
+    const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    if (!r.ok) { const t = await r.text(); return res.status(502).json({ error: `Transcribe ${r.status}: ${t.slice(0, 200)}` }); }
+    const data = await r.json();
+    return res.status(200).json({ text: data.text || "" });
+  } catch (err) {
+    return res.status(502).json({ error: err.message || "Transcription failed" });
   }
 }
 
