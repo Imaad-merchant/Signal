@@ -58,6 +58,7 @@ export default async function handler(req, res) {
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
     if (route === "cleanup") return await cleanup(body, res);
+    if (route === "docedit") return await docEdit(body, res);
     if (route === "log") return await logEntry(body, res);
     if (route === "capture") return await capture(auth, body, res);
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
@@ -359,6 +360,45 @@ Organise it now.`;
     title: parsed?.title ? String(parsed.title).slice(0, 160) : "Note",
     content: parsed?.content ? String(parsed.content) : "",
     spoken: parsed?.spoken ? String(parsed.spoken) : "Sorted — saved to your notes.",
+  });
+}
+
+// ---- route: docedit (the corner assistant in the document view). Answers a
+//      question about the open document, or rewrites it on instruction. Returns the
+//      full new markdown so the client can drop it into the editor for review —
+//      nothing is written to storage here. `content` is echoed back unchanged when
+//      the request was a question rather than an edit. ----
+async function docEdit(body, res) {
+  const instruction = typeof body.instruction === "string" ? body.instruction.trim() : "";
+  if (!instruction) return res.status(400).json({ error: "Instruction required" });
+  const content = typeof body.content === "string" ? body.content : "";
+  const title = typeof body.title === "string" ? body.title.slice(0, 160) : "";
+
+  const system = `You are Donna, helping the principal with ONE open document.
+Decide whether they are asking a QUESTION about it or instructing an EDIT.
+- Question → answer in "reply"; set "content" to null (do not rewrite).
+- Edit → return the COMPLETE new document in "content" (markdown, no code fences,
+  no commentary), and a one-line confirmation in "reply".
+Preserve their voice, structure and any content the instruction doesn't touch.
+Never invent facts about them. Never drop existing entries unless told to.
+Return JSON: { "reply": string, "content": string | null }`;
+  const user = `Document title: ${title || "Untitled"}
+
+Document:
+"""
+${content.slice(0, 12000)}
+"""
+
+Their request: ${instruction}`;
+
+  const raw = await callLLM({ system, user, json: true });
+  const parsed = parseJSON(raw);
+  let next = parsed && typeof parsed.content === "string" ? parsed.content : null;
+  // Guard against the model fencing the markdown despite instructions.
+  if (next) next = next.replace(/^\s*```(?:markdown|md)?\n?/i, "").replace(/\n?```\s*$/i, "");
+  return res.status(200).json({
+    reply: parsed?.reply ? String(parsed.reply) : "Done.",
+    content: next,
   });
 }
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2, Volume2, Brain } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2, Volume2, Brain, PanelLeftOpen } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -12,6 +12,10 @@ import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
 import CustomizeDonnaPanel from "@/components/donna/CustomizeDonnaPanel";
 import ThoughtsPanel from "@/components/donna/ThoughtsPanel";
+import DocsSidebar from "@/components/donna/DocsSidebar";
+import DocView from "@/components/donna/DocView";
+import MiniChat from "@/components/donna/MiniChat";
+import { loadLibrary, saveDoc, saveChatSession } from "@/components/donna/library";
 import { resolveTileKey, setTileHidden, ALL_TILES } from "@/components/donna/dashboardConfig";
 import {
   loadPrefs, onPrefsChange, patchPrefs, personaPrefsForServer,
@@ -128,6 +132,17 @@ export default function Donna() {
   const chatModeRef = useRef(chatMode);
   const chatScrollRef = useRef(null);
   const [showThoughts, setShowThoughts] = useState(false); // brain-dump / import panel
+  // ---- The Library: the left rail of folders, and the document it opens. When a
+  //      document is open it takes the main screen and the wide chat bar stands
+  //      down in favour of the corner assistant (see MiniChat). ----
+  const [library, setLibrary] = useState(null);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try { return localStorage.getItem("donna_sidebar") !== "0"; } catch { return true; }
+  });
+  const [activeDoc, setActiveDoc] = useState(null);
+  const docBridgeRef = useRef(null); // set by DocView so MiniChat can read/edit the buffer
+  const chatSessionRef = useRef(null); // Page id of the chat currently being saved into
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
   const [sources, setSources] = useState([]); // web-research source links for the last answer
@@ -243,6 +258,50 @@ export default function Donna() {
     if (!v) return;
     setTurns((prev) => [...prev.slice(-49), { id: ++turnId.current, who, text: v }]);
   }, []);
+
+  // ---- Library ----
+  const refreshLibrary = useCallback(async () => {
+    setLibraryLoading(true);
+    const lib = await loadLibrary().catch(() => null);
+    if (lib) setLibrary(lib);
+    setLibraryLoading(false);
+    return lib;
+  }, []);
+
+  useEffect(() => { refreshLibrary(); }, [refreshLibrary]);
+
+  useEffect(() => {
+    try { localStorage.setItem("donna_sidebar", sidebarOpen ? "1" : "0"); } catch { /* ignore */ }
+  }, [sidebarOpen]);
+
+  // Save the conversation so it survives a reload and shows up under Chats.
+  // Debounced, and it updates one Page per session rather than creating a new
+  // document for every message.
+  useEffect(() => {
+    if (turns.length === 0) return undefined;
+    const t = window.setTimeout(async () => {
+      const id = await saveChatSession(turns, chatSessionRef.current);
+      if (id && id !== chatSessionRef.current) {
+        chatSessionRef.current = id;
+        refreshLibrary();
+      }
+    }, 4000);
+    return () => window.clearTimeout(t);
+  }, [turns, refreshLibrary]);
+
+  // Open a document on the main screen. Re-read it from the library first so you
+  // never edit a stale copy left over from an earlier load.
+  const openDoc = useCallback((doc) => {
+    setActiveDoc(doc);
+    setShowThoughts(false);
+  }, []);
+
+  const persistDoc = useCallback(async ({ title, content }) => {
+    if (!activeDoc) return;
+    await saveDoc(activeDoc, { title, content });
+    setActiveDoc((d) => (d ? { ...d, title, content } : d));
+    refreshLibrary();
+  }, [activeDoc, refreshLibrary]);
 
   // Handle a finished transcript (from voice or the type box).
   const handleTranscript = useCallback(async (text) => {
@@ -1335,9 +1394,34 @@ export default function Donna() {
 
   return (
     <div
-      className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden"
+      className="flex h-full w-full overflow-hidden"
       style={{ background: "radial-gradient(circle at 50% 42%, #12151c 0%, #08090c 72%)" }}
     >
+      {/* The Library rail — folders of everything written down, expanding in place. */}
+      {sidebarOpen && (
+        <DocsSidebar
+          library={library}
+          loading={libraryLoading}
+          activeKey={activeDoc ? activeDoc.key : ""}
+          onOpen={openDoc}
+          onRefresh={refreshLibrary}
+          onCollapse={() => setSidebarOpen(false)}
+        />
+      )}
+
+    <div className="relative flex min-w-0 flex-1 flex-col items-center justify-center overflow-hidden">
+      {!sidebarOpen && (
+        <button
+          type="button"
+          onClick={() => setSidebarOpen(true)}
+          className="absolute top-4 left-[3.4rem] z-30 rounded-full p-2 text-gray-400 transition-colors hover:bg-white/5 hover:text-cyan-300"
+          title="Show library"
+          aria-label="Show library"
+        >
+          <PanelLeftOpen className="h-5 w-5" />
+        </button>
+      )}
+
       <Link to="/Dashboard" className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors" title="Back" aria-label="Back">
         <ArrowLeft className="h-5 w-5" />
       </Link>
@@ -1454,6 +1538,29 @@ export default function Donna() {
         </div>
       )}
 
+      {/* ---- A document is open: it owns the main screen. The orb, the tiles and
+             the wide chat bar all stand down; help comes from the corner assistant
+             (MiniChat) so the editor keeps the space. ---- */}
+      {activeDoc && (
+        <>
+          <DocView
+            doc={activeDoc}
+            onClose={() => setActiveDoc(null)}
+            onSaved={persistDoc}
+            registerApply={(bridge) => { docBridgeRef.current = bridge; }}
+          />
+          <MiniChat
+            docTitle={activeDoc.title}
+            getDoc={() => {
+              const b = docBridgeRef.current;
+              return b ? { title: b.getTitle(), content: b.getContent() } : { title: activeDoc.title, content: activeDoc.content };
+            }}
+            onApply={(next) => { const b = docBridgeRef.current; if (b) b.apply(next); }}
+          />
+        </>
+      )}
+
+      {!activeDoc && (<>
       {/* The status "matrix" — tiles framing the orb (reads live entities). */}
       <StatusGrid />
 
@@ -1639,6 +1746,8 @@ export default function Donna() {
         </div>
       )}
 
+      </>)}
+
       {/* Capture-thoughts panel — record/paste/import → organized into your notes. */}
       {showThoughts && (
         <ThoughtsPanel
@@ -1647,6 +1756,7 @@ export default function Donna() {
             setShowThoughts(false);
             setNote(`Saved "${title}" to your notes`);
             queryClient.invalidateQueries({ queryKey: ["grid"] });
+            refreshLibrary();
           }}
         />
       )}
@@ -1706,6 +1816,7 @@ export default function Donna() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }
