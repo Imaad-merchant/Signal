@@ -51,7 +51,7 @@ export default function MiniChat({ docTitle, getDoc, onApply }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="absolute bottom-5 right-5 z-30 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/40 bg-[#0e1015]/90 text-cyan-300 shadow-[0_0_24px_-6px_rgba(34,211,238,0.6)] backdrop-blur-sm transition-transform hover:scale-105"
+        className="absolute bottom-5 right-5 z-50 flex h-12 w-12 items-center justify-center rounded-full border border-cyan-400/40 bg-[#0e1015]/90 text-cyan-300 shadow-[0_0_24px_-6px_rgba(34,211,238,0.6)] backdrop-blur-sm transition-transform hover:scale-105"
         title="Ask for help with this document"
         aria-label="Open assistant"
       >
@@ -61,7 +61,7 @@ export default function MiniChat({ docTitle, getDoc, onApply }) {
   }
 
   return (
-    <div className="absolute bottom-5 right-5 z-30 flex h-[22rem] w-[20rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0e1015]/95 shadow-2xl backdrop-blur-md">
+    <div className="absolute bottom-5 right-5 z-50 flex h-[22rem] w-[20rem] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0e1015]/95 shadow-2xl backdrop-blur-md">
       <header className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-2">
         <Sparkles className="h-3.5 w-3.5 shrink-0 text-cyan-300" />
         <span className="min-w-0 flex-1 truncate text-[11px] text-gray-400">

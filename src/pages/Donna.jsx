@@ -1543,12 +1543,19 @@ export default function Donna() {
              (MiniChat) so the editor keeps the space. ---- */}
       {activeDoc && (
         <>
-          <DocView
-            doc={activeDoc}
-            onClose={() => setActiveDoc(null)}
-            onSaved={persistDoc}
-            registerApply={(bridge) => { docBridgeRef.current = bridge; }}
-          />
+          {/* Opaque overlay so the editor gets the full column — the surrounding
+              column centres its children for the orb, which would otherwise shrink
+              this to its content width. Sits above the orb-screen chrome (back,
+              customize, mode switcher) so nothing pokes through the document; its
+              own header carries the close. */}
+          <div className="absolute inset-0 z-40 flex bg-[#0b0d11]">
+            <DocView
+              doc={activeDoc}
+              onClose={() => setActiveDoc(null)}
+              onSaved={persistDoc}
+              registerApply={(bridge) => { docBridgeRef.current = bridge; }}
+            />
+          </div>
           <MiniChat
             docTitle={activeDoc.title}
             getDoc={() => {
