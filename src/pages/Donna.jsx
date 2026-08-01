@@ -23,6 +23,7 @@ import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
 import { parseMoneyQuery, answerMoneyQuery } from "@/components/money/voice";
+import { parseEventCommand, parseDate, friendlyDate, pickUnusedColor, slugify, DEFAULT_CATEGORY_COLORS } from "@/components/donna/calendar";
 import {
   loadReminders, saveReminders, newId, parseReminderCreate, parseReminderCancel,
   parseDelivery, matchReminder, everyLabel, deliveryLabel,
@@ -159,6 +160,8 @@ export default function Donna() {
   const [pendingLog, setPendingLogState] = useState(null); // awaiting "which log?" answer
   const pendingLogRef = useRef(null);
   const setPendingLog = useCallback((v) => { pendingLogRef.current = v; setPendingLogState(v); }, []);
+  const pendingEventRef = useRef(null); // awaiting a date/category for a calendar event
+  const setPendingEvent = useCallback((v) => { pendingEventRef.current = v; }, []);
   const lastEmailRef = useRef(null); // { from, subject } of the last email read (for replies)
   const emailDraftRef = useRef(null); // mirror so a voice "send it" can act on the staged draft
   useEffect(() => { emailDraftRef.current = emailDraft; }, [emailDraft]);
@@ -326,6 +329,27 @@ export default function Donna() {
       return;
     }
 
+    // ---- Calendar event: we asked for a missing date or category — this answers it. ----
+    if (pendingEventRef.current) {
+      const p = pendingEventRef.current; setPendingEvent(null);
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      if (p.need === "date") {
+        const dm = parseDate(t, new Date());
+        if (!dm) { setPendingEvent(p); const say = `I didn't catch a date — say something like "August 4th" or "next Monday".`; setReply(say); pushTurn("signal", say); speak(say); return; }
+        const next = { title: p.title, date: dm.date, category: p.category || null };
+        if (!next.category) { setPendingEvent({ ...next, need: "category" }); const say = `Got it — ${friendlyDate(next.date)}. What category should "${next.title}" go under? Say a name, or "none".`; setReply(say); pushTurn("signal", say); speak(say); return; }
+        await createCalendarEvent(next); return;
+      }
+      if (p.need === "category") {
+        const said = t.trim().toLowerCase();
+        let category = null;
+        if (!/^(no|none|no category|skip|nope|without|no thanks|don'?t)\b/.test(said)) {
+          category = t.trim().replace(/^(under\s+|the\s+|category\s+|a\s+new\s+|call\s+it\s+|put\s+it\s+under\s+)/i, "").replace(/\s+category$/i, "").trim() || null;
+        }
+        await createCalendarEvent({ title: p.title, date: p.date, category }); return;
+      }
+    }
+
     // ---- Recurring reminders ("routines"), handled locally before the server route. ----
     // 1) We just asked HOW to deliver a reminder — this utterance is the answer.
     if (pendingReminderRef.current) {
@@ -363,6 +387,26 @@ export default function Donna() {
       else say = "You don't have a reminder like that set.";
       setReply(say); pushTurn("signal", say); speak(say);
       return;
+    }
+
+    // ---- Calendar events: "add … to my calendar [on <date>] [under <category>]".
+    //      Missing date/category → ask; new category → created with an unused colour. ----
+    {
+      const ev = parseEventCommand(t);
+      if (ev && ev.title) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        if (!ev.date) {
+          setPendingEvent({ title: ev.title, category: ev.category || null, need: "date" });
+          const say = `Sure — what date should I put "${ev.title}" on?`;
+          setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        if (!ev.category) {
+          setPendingEvent({ title: ev.title, date: ev.date, need: "category" });
+          const say = `Adding "${ev.title}" on ${friendlyDate(ev.date)}. What category should it go under? Say a name, or "none".`;
+          setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        await createCalendarEvent(ev); return;
+      }
     }
 
     // ---- Connect / reconnect Google (works even when the inbox already has signals) ----
@@ -975,6 +1019,45 @@ export default function Donna() {
       setNote("Couldn't reach the server — try again.");
     }
   };
+
+  // ---- Create a calendar event (a dated Task), auto-creating its category with an
+  //      unused colour when it's new. Speaks a confirmation and offers Undo. ----
+  async function createCalendarEvent({ title, date, category }) {
+    setMode("processing");
+    try {
+      let catKey = null, catLabel = null, madeNew = false;
+      if (category) {
+        const catsRaw = await base44.entities.Category.list().catch(() => []);
+        const cats = Array.isArray(catsRaw) ? catsRaw : [];
+        const key = slugify(category);
+        const existing = cats.find((c) => (c.label || "").toLowerCase() === category.toLowerCase() || (c.key || "") === key);
+        if (existing) { catKey = existing.key || key; catLabel = existing.label || category; }
+        else {
+          catKey = key; catLabel = category; madeNew = true;
+          const color = pickUnusedColor([...cats.map((c) => c.color), ...DEFAULT_CATEGORY_COLORS]);
+          await base44.entities.Category.create({ label: category, key: catKey, color }).catch(() => {});
+        }
+      }
+      const rec = await base44.entities.Task.create({ title, due_date: date, category: catKey || "work", status: "not_started" });
+      try {
+        const logged = await base44.entities.AgentAction.create({
+          action_type: "add", target: "tasks/" + (rec?.id || ""),
+          payload: { title, due_date: date, category: catKey },
+          executed_at: new Date().toISOString(),
+          undo_deadline: new Date(Date.now() + 86400000).toISOString(),
+        });
+        if (logged?.id) setLastActions([logged]);
+      } catch { /* undo logging is best-effort */ }
+      queryClient.invalidateQueries({ queryKey: ["grid"] });
+      const catPart = catLabel ? ` under ${catLabel}${madeNew ? " (new category)" : ""}` : "";
+      const say = `Added "${title}" on ${friendlyDate(date)}${catPart}.`;
+      setNote(say); setReply(say); pushTurn("signal", say); speak(say);
+    } catch {
+      setMode("idle");
+      const say = "I couldn't add that to your calendar — try again.";
+      setReply(say); pushTurn("signal", say); speak(say);
+    }
+  }
 
   // ---- create the entities the intent asked for, logging each to AgentAction ----
   // Returns { count, records } where records are the AgentAction docs (with id +
