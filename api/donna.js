@@ -227,9 +227,17 @@ RULES:
 - LOG: when they want to record/journal something ("log that …", "log in my workouts that …", "add to my journal …"), emit ONE "log" action with the observation in "text"; if they name a specific log ("my workouts log", "the volunteering log"), put that name in "log", else leave "log" null.
 - EMAIL: if they ask to email/message someone, emit an "email" action — write a clear subject and a complete, well-phrased body in their voice. Put a real address in "to" only if they gave one; otherwise null (they'll fill it). Say in "reply" that you've drafted it for them to review and send — it is NOT sent automatically.
 - RESEARCH: if they ask you to look something up / find CURRENT external info you can't know from their data (available services, schedules, opening hours, prices, news, "what tutoring does UH offer"), emit ONE "research" action with a focused, specific web-search query (fold in the specifics they mentioned — school, classes, professor). In "reply" just say you'll look it up. Do NOT invent the facts yourself.
-- "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.`;
+- "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.
+- CONTINUITY: "Conversation so far" (when present) is the recent back-and-forth. If your previous turn asked a follow-up question and the user now gives a SHORT answer (yes / no / sure / nah / a bare date or value), interpret it IN THAT CONTEXT — never reply "can you clarify". If they DECLINE your follow-up ("no", "that's fine", "leave it"), the item you already created stands: acknowledge briefly (e.g. "Right — no deadline then.") and emit NO actions (don't recreate it). If they ACCEPT/answer (e.g. "yes, tomorrow"), emit the action their answer implies (e.g. a "remind" with the date) for that same item.`;
 
-  const user = `The user said: "${transcript}"
+  const history = Array.isArray(body.history) ? body.history : [];
+  const convo = history
+    .slice(-8)
+    .filter((h) => h && h.text)
+    .map((h) => `${h.who === "assistant" ? "You (Donna)" : "User"}: ${String(h.text).slice(0, 300)}`)
+    .join("\n");
+
+  const user = `${convo ? `Conversation so far:\n${convo}\n\n` : ""}The user said: "${transcript}"
 
 Context (JSON): ${JSON.stringify({
     today,
