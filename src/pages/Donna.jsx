@@ -160,6 +160,7 @@ export default function Donna() {
   const [pendingLog, setPendingLogState] = useState(null); // awaiting "which log?" answer
   const pendingLogRef = useRef(null);
   const setPendingLog = useCallback((v) => { pendingLogRef.current = v; setPendingLogState(v); }, []);
+  const turnsRef = useRef([]); // live conversation history for multi-turn context
   const pendingEventRef = useRef(null); // awaiting a date/category for a calendar event
   const setPendingEvent = useCallback((v) => { pendingEventRef.current = v; }, []);
   const lastEmailRef = useRef(null); // { from, subject } of the last email read (for replies)
@@ -244,7 +245,11 @@ export default function Donna() {
   const pushTurn = useCallback((who, text) => {
     const v = (text || "").trim();
     if (!v) return;
-    setTurns((prev) => [...prev.slice(-49), { id: ++turnId.current, who, text: v }]);
+    setTurns((prev) => {
+      const next = [...prev.slice(-49), { id: ++turnId.current, who, text: v }];
+      turnsRef.current = next; // keep a live copy for multi-turn context
+      return next;
+    });
   }, []);
 
   // Handle a finished transcript (from voice or the type box).
@@ -791,6 +796,9 @@ export default function Donna() {
         route: "intent",
         transcript: t,
         prefs: personaPrefsForServer(prefsRef.current),
+        // Recent conversation (excluding this very message) so follow-ups like
+        // "no" after "add a deadline?" resolve in context instead of resetting.
+        history: (turnsRef.current || []).filter((x) => x.text !== t).slice(-8).map((x) => ({ who: x.who === "you" ? "user" : "assistant", text: x.text })),
         context: {
           today,
           commitments: (Array.isArray(commitments) ? commitments : []).map((c) => ({ text: c.text, due_on: c.due_on })),
