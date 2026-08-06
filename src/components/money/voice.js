@@ -1,7 +1,9 @@
 import { base44 } from "@/api/base44Client";
 import {
-  CATEGORIES, categorize, fmtMoney, detectSubscriptions, monthlyCost, yearlyCost, normMerchant, spendingByCategory,
+  CATEGORIES, fmtMoney, detectSubscriptions, monthlyCost, yearlyCost, normMerchant,
 } from "@/components/money/money";
+import { resolveCategory } from "@/components/money/rules";
+import { monthKey, spendingWithDelta, upcomingDays, netWorthBreakdown } from "@/components/money/analytics";
 
 const monthPrefix = (d = new Date()) => d.toISOString().slice(0, 7);
 const lastMonthPrefix = () => { const d = new Date(); d.setMonth(d.getMonth() - 1); return monthPrefix(d); };
@@ -29,6 +31,7 @@ export function parseMoneyQuery(text) {
     return { kind: "spend", period, category, merchant };
   }
   if (/\bbudget\b/.test(s)) return { kind: "budget" };
+  if (/\b(upcoming|due soon|coming up|bills? due)\b/.test(s)) return { kind: "upcoming" };
   return null;
 }
 
@@ -42,17 +45,21 @@ const periodLabel = (p) => (p === "today" ? "today" : p === "week" ? "this week"
 
 // Answer a parsed money query by reading the user's data. Returns a spoken string.
 export async function answerMoneyQuery(q) {
-  const [accounts, transactions, subsRaw] = await Promise.all([
+  const [accounts, transactions, subsRaw, budgetsRaw, rulesRaw] = await Promise.all([
     base44.entities.Account.list("-created_date", 100).catch(() => []),
     base44.entities.Transaction.list("-date", 2000).catch(() => []),
     base44.entities.Subscription.list("-created_date", 200).catch(() => []),
+    base44.entities.Budget.list("-created_date", 100).catch(() => []),
+    base44.entities.CategoryRule.list("-created_date", 200).catch(() => []),
   ]);
   const tx = Array.isArray(transactions) ? transactions : [];
+  const budgets = Array.isArray(budgetsRaw) ? budgetsRaw : [];
+  const rules = Array.isArray(rulesRaw) ? rulesRaw : [];
 
   if (q.kind === "networth") {
     if (!accounts.length) return "You haven't added or linked any accounts yet, so I can't calculate your net worth.";
-    const nw = accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0);
-    return `Your net worth is ${fmtMoney(nw)} across ${accounts.length} account${accounts.length > 1 ? "s" : ""}.`;
+    const nw = netWorthBreakdown(accounts);
+    return `Your net worth is ${fmtMoney(nw.net)} — ${fmtMoney(nw.assetTotal)} in assets across ${nw.assetCount} account${nw.assetCount === 1 ? "" : "s"}${nw.debtTotal > 0 ? `, less ${fmtMoney(nw.debtTotal)} of debt` : ""}.`;
   }
 
   if (q.kind === "subscriptions") {
@@ -68,17 +75,39 @@ export async function answerMoneyQuery(q) {
   }
 
   if (q.kind === "budget") {
-    const spend = spendingByCategory(tx, monthPrefix());
-    if (!spend.length) return "No spending recorded this month yet.";
-    const top = spend[0];
-    const total = spend.reduce((s, c) => s + c.total, 0);
-    return `This month you've spent ${fmtMoney(total)}. Your biggest category is ${top.category} at ${fmtMoney(top.total)}. You can set budgets per category on the Money tab.`;
+    const spend = spendingWithDelta(tx, monthKey());
+    const total = spend.reduce((s, c) => s + c.amount, 0);
+    if (!budgets.length) {
+      if (!spend.length) return "No spending recorded this month yet, and you haven't set any budgets.";
+      return `This month you've spent ${fmtMoney(total)}, mostly on ${spend[0].category} at ${fmtMoney(spend[0].amount)}. You haven't set any budgets yet — you can add them in the Budgets view.`;
+    }
+    const spentByCat = Object.fromEntries(spend.map((c) => [c.category, c.amount]));
+    const limit = budgets.filter((b) => b.category !== "Income").reduce((s, b) => s + (Number(b.amount) || 0), 0);
+    const used = budgets.filter((b) => b.category !== "Income").reduce((s, b) => s + (spentByCat[b.category] || 0), 0);
+    const over = budgets
+      .filter((b) => b.category !== "Income" && (spentByCat[b.category] || 0) > (Number(b.amount) || 0))
+      .map((b) => b.category);
+    const left = limit - used;
+    return `You've used ${fmtMoney(used)} of your ${fmtMoney(limit)} budget this month, so ${left >= 0 ? `${fmtMoney(left)} left` : `${fmtMoney(-left)} over`}.${over.length ? ` You're over on ${over.join(" and ")}.` : ""}`;
+  }
+
+  if (q.kind === "upcoming") {
+    const manual = (Array.isArray(subsRaw) ? subsRaw : []).filter((s) => s.active !== false).map((s) => ({ ...s, source: "manual" }));
+    const seen = new Set(manual.map((s) => normMerchant(s.merchant)));
+    const merged = [...manual];
+    for (const d of detectSubscriptions(tx)) if (!seen.has(normMerchant(d.merchant))) merged.push(d);
+    const week = upcomingDays(merged, 7);
+    const items = week.flatMap((d) => d.items);
+    const total = week.reduce((s, d) => s + d.total, 0);
+    if (!items.length) return "Nothing is due in the next 7 days.";
+    const soonest = week.find((d) => d.items.length > 0);
+    return `You have ${items.length} charge${items.length > 1 ? "s" : ""} due in the next 7 days, totalling ${fmtMoney(total)}. The next is ${soonest.items[0].merchant} on ${soonest.date.toLocaleDateString(undefined, { weekday: "long" })}.`;
   }
 
   if (q.kind === "spend") {
     const inPeriod = periodFilter(q.period);
-    let spends = tx.filter((t) => Number(t.amount) < 0 && inPeriod(t.date || ""));
-    if (q.category) spends = spends.filter((t) => (t.category || categorize(t.merchant, t.amount)) === q.category);
+    let spends = tx.filter((t) => Number(t.amount) < 0 && !t.ignored && inPeriod(t.date || ""));
+    if (q.category) spends = spends.filter((t) => resolveCategory(t, rules) === q.category);
     if (q.merchant) spends = spends.filter((t) => (t.merchant || "").toLowerCase().includes(q.merchant));
     const total = spends.reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
     const where = q.category ? ` on ${q.category}` : q.merchant ? ` at ${q.merchant}` : "";

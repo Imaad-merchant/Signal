@@ -73,7 +73,40 @@ async function runPlaidSync(db) {
       items++; accounts += r.accounts; added += r.added; removed += r.removed;
     } catch (err) { failed++; console.warn("plaid nightly sync item failed:", err.message); }
   }
-  return { items, accounts, added, removed, failed };
+  let snapshots = 0;
+  try { snapshots = await writeNetWorthSnapshots(db, snap.docs); }
+  catch (err) { console.warn("net-worth snapshot failed:", err.message); }
+  return { items, accounts, added, removed, failed, snapshots };
+}
+
+// One assets/debts/net row per linked user per day, so the Net Worth view has a
+// trend to draw. The doc id is `${uid}_${YYYY-MM-DD}` so re-running the cron (or
+// a manual sync on the same day) overwrites rather than duplicating.
+async function writeNetWorthSnapshots(db, itemDocs) {
+  const uids = [...new Set(itemDocs.map((d) => d.data().userId).filter(Boolean))];
+  const day = new Date().toISOString().slice(0, 10);
+  let written = 0;
+  for (const uid of uids) {
+    const accts = await db.collection("accounts").where("userId", "==", uid).get();
+    let assets = 0, debts = 0;
+    for (const a of accts.docs) {
+      const bal = Number(a.data().balance) || 0;
+      if (bal < 0) debts += Math.abs(bal); else assets += bal;
+    }
+    const now = new Date().toISOString();
+    await db.collection("networth_snapshots").doc(`${uid}_${day}`).set({
+      userId: uid,
+      date: day,
+      assets,
+      debts,
+      net: assets - debts,
+      accounts: accts.size,
+      created_date: now,
+      updated_date: now,
+    }, { merge: true });
+    written++;
+  }
+  return written;
 }
 
 // Notification copy per slot.
