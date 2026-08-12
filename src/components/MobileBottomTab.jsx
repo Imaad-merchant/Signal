@@ -1,14 +1,14 @@
 import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { CalendarDays, ListTodo, BarChart2, Wallet, Settings } from "lucide-react";
+import { CalendarDays, ListTodo, Wallet, Sparkles, Settings } from "lucide-react";
 
 const TABS = [
-  { label: "Calendar",  icon: CalendarDays, page: "Dashboard" },
-  { label: "Tasks",     icon: ListTodo,     page: "Tasks" },
-  { label: "Money",     icon: Wallet,       page: "Money" },
-  { label: "Analytics", icon: BarChart2,    page: "Analytics" },
-  { label: "Settings",  icon: Settings,     page: "Settings" },
+  { label: "Calendar", icon: CalendarDays, page: "Dashboard" },
+  { label: "Tasks",    icon: ListTodo,     page: "Tasks" },
+  { label: "Money",    icon: Wallet,       page: "Money" },
+  { label: "Donna",    icon: Sparkles,     page: "Donna" },
+  { label: "Settings", icon: Settings,     page: "Settings" },
 ];
 
 export default function MobileBottomTab({ currentPageName }) {
