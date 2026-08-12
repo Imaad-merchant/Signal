@@ -786,13 +786,19 @@ export default function Donna() {
         }
       }
 
-      const [commitments, tasksRaw, domains, signalsRaw, gradesRaw] = await Promise.all([
+      const [commitments, tasksRaw, domains, signalsRaw, gradesRaw, pagesRaw] = await Promise.all([
         base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
         base44.entities.Task.list("-created_date").catch(() => []),
         base44.entities.Domain.list("sort_order").catch(() => []),
         base44.entities.Signal.list("-created_date", 80).catch(() => []),
         base44.entities.Grade.list("-updated_date", 60).catch(() => []),
+        base44.entities.Page.list("-updated_date", 25).catch(() => []),
       ]);
+      // Recent notes/logs so Donna can recall what was captured earlier (not just this chat).
+      const recentNotes = (Array.isArray(pagesRaw) ? pagesRaw : []).slice(0, 20).map((p) => ({
+        title: p.title || "Note",
+        snippet: String(p.content || "").replace(/\s+/g, " ").slice(0, 180),
+      }));
       const today = todayKey();
       const allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
       const todayTasks = allTasks
@@ -843,6 +849,7 @@ export default function Donna() {
           calendar,
           emails,
           grades,
+          recent_notes: recentNotes,
           domains: Array.isArray(domains) ? domains : [],
         },
       });
