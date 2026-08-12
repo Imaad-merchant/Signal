@@ -47,6 +47,16 @@ export function parseDate(text, now = new Date()) {
     return { date: iso(d), text: m[0] };
   }
 
+  // Bare ordinal day ("the 6th", "the 20th") → this month, or next month if past.
+  if ((m = s.match(/\bthe\s+(\d{1,2})(?:st|nd|rd|th)?\b/i)) || (m = s.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/i))) {
+    const day = +m[1];
+    if (day >= 1 && day <= 31) {
+      let d = new Date(now.getFullYear(), now.getMonth(), day);
+      if (d < today) d = new Date(now.getFullYear(), now.getMonth() + 1, day);
+      return { date: iso(d), text: m[0] };
+    }
+  }
+
   if ((m = s.match(/\btoday\b/i))) return { date: iso(today), text: m[0] };
   if ((m = s.match(/\btomorrow\b/i))) { const d = new Date(today); d.setDate(d.getDate() + 1); return { date: iso(d), text: m[0] }; }
   if ((m = s.match(/\bin\s+(\d{1,2})\s+days?\b/i))) { const d = new Date(today); d.setDate(d.getDate() + +m[1]); return { date: iso(d), text: m[0] }; }
@@ -121,6 +131,34 @@ export function parseEventCommand(text, now = new Date()) {
     .trim();
 
   return { title: title || "", date, category };
+}
+
+// Parse a reschedule/delete command. Returns { op:"move"|"delete", title, date }
+// or null. `title` is the event name to match against existing events.
+export function parseEventEdit(text, now = new Date()) {
+  let s = String(text || "").trim().replace(/^\s*(?:hey\s+|ok\s+|okay\s+)?donna[,\s]*/i, "");
+  const strip = (t) => t
+    .replace(/\bfrom\s+(?:my\s+)?calendar\b/ig, " ")
+    .replace(/\b(to|the|my|an?|on|for|event|appointment|meeting|calendar|please)\b/ig, " ")
+    .replace(/\s+/g, " ").trim();
+
+  const mv = s.match(/\b(move|reschedule|re-?schedule|change|push|bump|shift)\b/i);
+  if (mv) {
+    const rest = s.slice(mv.index + mv[0].length);
+    const dm = parseDate(rest, now);
+    let title = rest;
+    if (dm) title = title.replace(dm.text, " ");
+    title = strip(title);
+    if (title) return { op: "move", title, date: dm ? dm.date : null };
+  }
+
+  const dv = s.match(/\b(delete|remove|cancel|scrap|clear|get rid of)\b/i);
+  if (dv) {
+    if (/\bremind/i.test(s)) return null; // reminder cancellation is handled elsewhere
+    const title = strip(s.slice(dv.index + dv[0].length));
+    if (title) return { op: "delete", title, date: null };
+  }
+  return null;
 }
 
 // --- Category colours ---
