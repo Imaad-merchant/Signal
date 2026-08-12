@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2, Volume2, Brain } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, X, Check, Bell, Settings2, Volume2, Brain } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import StatusGrid from "@/components/donna/StatusGrid";
@@ -19,7 +19,7 @@ import {
   parsePersonaTweak, parseNudgeTweak, addCheckinQuestion, removeCheckinQuestionByText,
 } from "@/components/donna/settings";
 import { useVoice } from "@/components/donna/useVoice";
-import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
+import { useWakeWord } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
 import { parseMoneyQuery, answerMoneyQuery } from "@/components/money/voice";
@@ -241,7 +241,7 @@ export default function Donna() {
       try { voice.stop(); } catch { /* ignore */ }
       setMode("idle"); setNudgeReady(false);
     }
-  }, [chatMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chatMode]);  
 
   const pushTurn = useCallback((who, text) => {
     const v = (text || "").trim();
@@ -415,11 +415,28 @@ export default function Donna() {
     // 3) "stop reminding me [to X]" / "delete the reminder"
     const rx = parseReminderCancel(t);
     if (rx) {
-      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       const target = matchReminder(remindersRef.current, rx.title);
+      if (target) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        removeReminder(target.id);
+        const say = `Stopped reminding you to ${target.title}.`;
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+      // No matching routine — maybe they mean a standing commitment
+      // ("stop reminding me about the shared list"). Try to dismiss that.
+      const commitsRaw = await base44.entities.Commitment.filter({ status: "open" }).catch(() => []);
+      const commits = (Array.isArray(commitsRaw) ? commitsRaw : []).map((c) => ({ id: c.id, text: c.text }));
+      const commit = pickCommitment(commits, `${rx.title || ""} ${t}`, "", false);
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       let say;
-      if (target) { removeReminder(target.id); say = `Stopped reminding you to ${target.title}.`; }
-      else say = "You don't have a reminder like that set.";
+      if (commit?.id) {
+        await base44.entities.Commitment.update(commit.id, { status: "dismissed" }).catch(() => {});
+        try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 7 * 24 * 3600 * 1000)); } catch { /* ignore */ }
+        say = `Done — I've dropped "${commit.text}" and won't bring it up again.`;
+      } else {
+        say = "You don't have a reminder like that set.";
+      }
       setReply(say); pushTurn("signal", say); speak(say);
       return;
     }

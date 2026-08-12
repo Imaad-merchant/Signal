@@ -17,8 +17,7 @@ import { Highlight } from "@tiptap/extension-highlight";
 import {
   Undo2, Redo2, Bold, Italic, Underline as UIcon, Strikethrough, Code,
   List, ListOrdered, CheckSquare, Quote, Code2, Minus, Link as LinkIcon,
-  AlignLeft, AlignCenter, AlignRight, AlignJustify, Heading1, Heading2, Heading3,
-  Type, ChevronDown, Palette, Highlighter, Table as TableIcon, RemoveFormatting, Sparkles
+  AlignLeft, AlignCenter, AlignRight, AlignJustify, ChevronDown, Highlighter, Table as TableIcon, RemoveFormatting, Sparkles
 } from "lucide-react";
 
 const TEXT_COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];

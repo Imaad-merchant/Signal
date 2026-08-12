@@ -1,7 +1,6 @@
 // Push handlers, imported into the generated service worker (see vite.config.js
 // workbox.importScripts). Kept separate so the app's precache/network-first
 // caching is untouched — these listeners only fire on push / notification events.
-/* eslint-disable no-restricted-globals */
 
 self.addEventListener("push", (event) => {
   let data = {};

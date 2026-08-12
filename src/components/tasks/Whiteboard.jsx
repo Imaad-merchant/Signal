@@ -12,7 +12,6 @@ import {
   objectBounds,
   shiftObj,
   hitTest,
-  worldToScreen,
   snap,
   snapObj,
   GRID_SIZE,

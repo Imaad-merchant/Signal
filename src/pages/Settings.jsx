@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo, Unlink, FilePlus2, FileDown, FileUp } from "lucide-react";
+import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, Unlink, FilePlus2, FileDown } from "lucide-react";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";

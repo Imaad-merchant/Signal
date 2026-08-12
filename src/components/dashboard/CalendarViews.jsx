@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 
-import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear, parseISO, differenceInCalendarDays, isWithinInterval } from "date-fns";
+import { format, isSameDay, isSameMonth, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth, getMonth, getYear, parseISO, differenceInCalendarDays } from "date-fns";
 import { Check, CheckCircle2, Circle, Clock, X } from "lucide-react";
 import TaskContextMenu from "./TaskContextMenu";
 import { base44 } from "@/api/base44Client";

@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { CalendarDays, ListTodo, Wallet, Sparkles, Settings } from "lucide-react";
