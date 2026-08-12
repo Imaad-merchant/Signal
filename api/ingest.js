@@ -45,7 +45,7 @@ export default async function handler(req, res) {
       if (!job || job === "morning") out.google = await runGooglePoll(db);
       if (job) {
         out.pushed = await sendBriefingPush(db, job);
-        out.emailed = await sendBriefingEmail(job);
+        out.emailed = await sendBriefingEmail(db, job);
       }
       return res.status(200).json({ ok: true, ...out, ran_at: new Date().toISOString() });
     }
@@ -111,24 +111,74 @@ async function sendBriefingPush(db, slot) {
 }
 
 // A dependable second channel: email the reminder (works on any device, no install).
-async function sendBriefingEmail(slot) {
+// Gather the user's actionable items so the daily email carries the real agenda —
+// the user checks email daily, not the app. Small personal DB → filter in JS.
+async function gatherAgenda(db) {
+  const uid = process.env.DEVICE_USER_ID || null;
+  const today = new Date().toISOString().slice(0, 10);
+  const mine = (docs) => docs.map((d) => d.data()).filter((x) => x && (!uid || x.userId === uid));
+  const [tSnap, cSnap] = await Promise.all([
+    db.collection("tasks").get(),
+    db.collection("commitments").get(),
+  ]);
+  const tasks = mine(tSnap.docs).filter((t) => t.status !== "done");
+  const commitments = mine(cSnap.docs).filter((c) => (c.status || "open") === "open").slice(0, 15);
+  const overdue = tasks.filter((t) => t.due_date && t.due_date < today).sort((a, b) => (a.due_date < b.due_date ? -1 : 1)).slice(0, 15);
+  const dueToday = tasks.filter((t) => t.due_date === today).slice(0, 15);
+  return { overdue, dueToday, commitments };
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function renderBriefingEmail(slot, agenda) {
+  const link = `${(process.env.APP_URL || "").replace(/\/$/, "")}/cowork`;
+  const greeting = slot === "evening" ? "Evening review" : "Good morning";
+  const taskLine = (t) => `${t.title || "(untitled)"}${t.due_date ? ` — due ${t.due_date}` : ""}`;
+  const commitLine = (c) => `${c.text || "(untitled)"}${c.due_on ? ` — by ${c.due_on}` : ""}`;
+  const total = agenda.overdue.length + agenda.dueToday.length + agenda.commitments.length;
+  const subject = `Donna — ${greeting}${total ? ` · ${total} to handle` : ""}`;
+  const intro = total
+    ? (slot === "evening" ? "Here's what's still open — anything to wrap up or carry into tomorrow?" : "Here's what's on your plate today:")
+    : "Nothing outstanding — you're all clear.";
+
+  const textParts = [], htmlParts = [];
+  const section = (label, items, fmt) => {
+    if (!items.length) return;
+    textParts.push(`${label}:\n` + items.map((x) => `  • ${fmt(x)}`).join("\n"));
+    htmlParts.push(`<h3 style="margin:18px 0 6px;font-size:14px;color:#9aa4b2;text-transform:uppercase;letter-spacing:.05em">${escapeHtml(label)}</h3>` +
+      `<ul style="margin:0;padding-left:20px">` + items.map((x) => `<li style="margin:4px 0">${escapeHtml(fmt(x))}</li>`).join("") + `</ul>`);
+  };
+  section("Overdue", agenda.overdue, taskLine);
+  section("Due today", agenda.dueToday, taskLine);
+  section("Open commitments", agenda.commitments, commitLine);
+
+  const text = `${greeting}.\n\n${intro}\n\n${textParts.join("\n\n")}${textParts.length ? "\n\n" : ""}Open Donna: ${link}`;
+  const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;color:#e5e7eb;background:#0e1015;padding:24px;border-radius:12px">
+    <h2 style="margin:0 0 8px">${escapeHtml(greeting)}</h2>
+    <p style="margin:0 0 4px;color:#c7ccd4">${escapeHtml(intro)}</p>
+    ${htmlParts.join("")}
+    <p style="margin:22px 0 0"><a href="${link}" style="color:#60a5fa">Open Donna →</a></p>
+  </div>`;
+  return { subject, text, html };
+}
+
+async function sendBriefingEmail(db, slot) {
   const to = process.env.NOTIFY_EMAIL || process.env.SMTP_USER;
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   if (!to || !host || !user || !pass) return false;
-  const copy = briefingCopy(slot);
+  let agenda = { overdue: [], dueToday: [], commitments: [] };
+  try { agenda = await gatherAgenda(db); } catch { /* fall back to an empty agenda */ }
+  const { subject, text, html } = renderBriefingEmail(slot, agenda);
   try {
     const transport = nodemailer.createTransport({
       host, port: Number(process.env.SMTP_PORT || 587), secure: Number(process.env.SMTP_PORT || 587) === 465,
       auth: { user, pass },
     });
-    await transport.sendMail({
-      from: process.env.SMTP_FROM || user,
-      to,
-      subject: `Donna — ${copy.title}`,
-      text: `${copy.body}\n\nOpen Donna: ${(process.env.APP_URL || "").replace(/\/$/, "")}/cowork`,
-    });
+    await transport.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text, html });
     return true;
   } catch {
     return false;
