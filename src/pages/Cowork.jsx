@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, ArrowLeft, FolderPlus, CheckCircle2, ExternalLink, ChevronRight, ChevronDown, Globe, FileText, FolderOpen, ListChecks, PanelRightOpen, PanelRightClose, Plus, Mic, MicOff } from "lucide-react";
+import { Sparkles, Send, X, User, Square, ArrowLeft, FolderPlus, CheckCircle2, ExternalLink, ChevronRight, ChevronDown, Globe, FileText, FolderOpen, ListChecks, PanelRightOpen, PanelRightClose, Plus, Mic, MicOff } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";

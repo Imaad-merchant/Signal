@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import {
@@ -8,7 +8,7 @@ import {
 } from "date-fns";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Check, Orbit } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Orbit } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";

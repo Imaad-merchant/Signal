@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -15,9 +15,9 @@ import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
 import { ICON_MAP } from "../components/tasks/NotionSidebar";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { format, isSameDay, isToday, parseISO } from "date-fns";
+import { format, isToday, parseISO } from "date-fns";
 import { useIsMobile } from "../components/useIsMobile";
 
 const PULL_THRESHOLD = 70;

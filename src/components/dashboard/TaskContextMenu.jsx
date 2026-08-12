@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
-import { Pencil, Trash2, Tag, Check, Edit2 } from "lucide-react";
+import { Trash2, Tag, Check, Edit2 } from "lucide-react";
 import EditTaskDialog from "./EditTaskDialog";
 
 export default function TaskContextMenu({ task, position, onClose, onUpdated, categories = [] }) {
