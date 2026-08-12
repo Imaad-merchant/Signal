@@ -23,7 +23,7 @@ import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
 import { parseMoneyQuery, answerMoneyQuery } from "@/components/money/voice";
-import { parseEventCommand, parseDate, friendlyDate, pickUnusedColor, slugify, DEFAULT_CATEGORY_COLORS } from "@/components/donna/calendar";
+import { parseEventCommand, parseEventEdit, parseDate, friendlyDate, pickUnusedColor, slugify, DEFAULT_CATEGORY_COLORS } from "@/components/donna/calendar";
 import {
   loadReminders, saveReminders, newId, parseReminderCreate, parseReminderCancel,
   parseDelivery, matchReminder, everyLabel, deliveryLabel,
@@ -338,6 +338,14 @@ export default function Donna() {
     if (pendingEventRef.current) {
       const p = pendingEventRef.current; setPendingEvent(null);
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      if (p.op === "move") {
+        const dm = parseDate(t, new Date());
+        if (!dm) { setPendingEvent(p); const say = `I didn't catch a date — say something like "the 6th" or "next Monday".`; setReply(say); pushTurn("signal", say); speak(say); return; }
+        await base44.entities.Task.update(p.id, { due_date: dm.date }).catch(() => {});
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        const say = `Moved "${p.title}" to ${friendlyDate(dm.date)}.`;
+        setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
+      }
       if (p.need === "date") {
         const dm = parseDate(t, new Date());
         if (!dm) { setPendingEvent(p); const say = `I didn't catch a date — say something like "August 4th" or "next Monday".`; setReply(say); pushTurn("signal", say); speak(say); return; }
@@ -392,6 +400,34 @@ export default function Donna() {
       else say = "You don't have a reminder like that set.";
       setReply(say); pushTurn("signal", say); speak(say);
       return;
+    }
+
+    // ---- Reschedule / delete a calendar event ("move X to <date>", "delete X"). ----
+    {
+      const edit = parseEventEdit(t);
+      if (edit) {
+        const tasksRaw = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+        const match = findTask(Array.isArray(tasksRaw) ? tasksRaw : [], edit.title);
+        if (match?.id) {
+          setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+          if (edit.op === "delete") {
+            await base44.entities.Task.delete(match.id).catch(() => {});
+            queryClient.invalidateQueries({ queryKey: ["grid"] });
+            const say = `Deleted "${match.title}" from your calendar.`;
+            setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
+          }
+          if (!edit.date) {
+            setPendingEvent({ op: "move", id: match.id, title: match.title, need: "date" });
+            const say = `What date should I move "${match.title}" to?`;
+            setReply(say); pushTurn("signal", say); speak(say); return;
+          }
+          await base44.entities.Task.update(match.id, { due_date: edit.date }).catch(() => {});
+          queryClient.invalidateQueries({ queryKey: ["grid"] });
+          const say = `Moved "${match.title}" to ${friendlyDate(edit.date)}.`;
+          setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        // No matching event — fall through to other handlers / the LLM.
+      }
     }
 
     // ---- Calendar events: "add … to my calendar [on <date>] [under <category>]".
