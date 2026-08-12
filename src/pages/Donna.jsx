@@ -162,6 +162,7 @@ export default function Donna() {
   const setPendingLog = useCallback((v) => { pendingLogRef.current = v; setPendingLogState(v); }, []);
   const turnsRef = useRef([]); // live conversation history for multi-turn context
   const pendingEventRef = useRef(null); // awaiting a date/category for a calendar event
+  const pendingNudgeRef = useRef(null); // { commitments, say, at } — a just-voiced nudge, so "skip/no" can dismiss it
   const setPendingEvent = useCallback((v) => { pendingEventRef.current = v; }, []);
   const lastEmailRef = useRef(null); // { from, subject } of the last email read (for replies)
   const emailDraftRef = useRef(null); // mirror so a voice "send it" can act on the staged draft
@@ -363,6 +364,27 @@ export default function Donna() {
       }
     }
 
+    // ---- A nudge was just voiced — "skip / no / cancel / not doing that" DISMISSES
+    //      the underlying commitment for good (not just a 6h quiet). ----
+    if (pendingNudgeRef.current && (Date.now() - pendingNudgeRef.current.at < 5 * 60 * 1000)) {
+      const nudge = pendingNudgeRef.current;
+      const isDismiss = /\b(skip|cancel|no|nope|nah|drop it|forget (it|that|about)|never ?mind|not (doing|interested)|we'?re not|don'?t (do|want)|dismiss|stop (bringing|reminding)|remove (it|that)|get rid|leave it)\b/i.test(t) || /^(no|nah|nope|skip|pass)\b/i.test(t.trim());
+      if (isDismiss) {
+        pendingNudgeRef.current = null;
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        const target = pickCommitment(nudge.commitments || [], t, nudge.say);
+        try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 7 * 24 * 3600 * 1000)); } catch { /* ignore */ }
+        if (target?.id) {
+          await base44.entities.Commitment.update(target.id, { status: "dismissed" }).catch(() => {});
+          const say = `Done — I've dropped that and won't bring it up again.`;
+          setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        const say = (nudge.commitments || []).length > 1 ? `Alright — which one should I drop? Say a word or two from it.` : `Alright, I'll leave it.`;
+        setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+      pendingNudgeRef.current = null; // engaging, not dismissing → continue normally
+    }
+
     // ---- Recurring reminders ("routines"), handled locally before the server route. ----
     // 1) We just asked HOW to deliver a reminder — this utterance is the answer.
     if (pendingReminderRef.current) {
@@ -428,6 +450,22 @@ export default function Donna() {
         }
         // No matching event — fall through to other handlers / the LLM.
       }
+    }
+
+    // ---- Cancel a standing commitment ("forget the Emiliano list", "stop reminding
+    //      me about X"). Marks it dismissed so nudges/briefings stop surfacing it. ----
+    if (/\b(forget|cancel|drop|scrap|stop\s+(reminding\s+me|bringing\s+up)|get\s+rid\s+of|don'?t\s+remind\s+me)\b/i.test(t)) {
+      const commitsRaw = await base44.entities.Commitment.filter({ status: "open" }).catch(() => []);
+      const commits = (Array.isArray(commitsRaw) ? commitsRaw : []).map((c) => ({ id: c.id, text: c.text }));
+      const target = pickCommitment(commits, t, "", false); // require a keyword match — never guess
+      if (target?.id) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        await base44.entities.Commitment.update(target.id, { status: "dismissed" }).catch(() => {});
+        try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 7 * 24 * 3600 * 1000)); } catch { /* ignore */ }
+        const say = `Done — I've dropped "${target.text}" and won't bring it up again.`;
+        setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+      // No matching commitment — fall through (might be a task delete / the LLM).
     }
 
     // ---- Calendar events: "add … to my calendar [on <date>] [under <category>]".
@@ -1063,12 +1101,31 @@ export default function Donna() {
       });
       const data = res && res.data ? res.data : res || {};
       const say = data.say ? String(data.say) : "";
-      if (say) { setReply(say); pushTurn("signal", say); speak(say); }
-      else setMode("idle");
+      if (say) {
+        // Remember what this nudge was about so a "skip/no/cancel" reply can
+        // actually dismiss the underlying commitment (not just quiet it 6h).
+        pendingNudgeRef.current = { commitments: (Array.isArray(commits) ? commits : []).map((c) => ({ id: c.id, text: c.text })), say, at: Date.now() };
+        setReply(say); pushTurn("signal", say); speak(say);
+      } else setMode("idle");
     } catch {
       setMode("idle");
       setNote("Couldn't reach the server — try again.");
     }
+  };
+
+  // Choose which open commitment a dismissal refers to: keywords from the user's
+  // reply first, then the nudge's own wording, then the sole candidate.
+  const pickCommitment = (candidates, replyText, sayText, allowSingle = true) => {
+    const words = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 3);
+    const stop = new Set(["skip", "cancel", "forget", "about", "that", "this", "stop", "reminding", "bringing", "remind", "dont", "don", "want", "doing", "never", "mind", "drop", "them", "with", "make", "share", "shared", "list"]);
+    const overlap = (text, keys) => keys.filter((w) => !stop.has(w) && String(text || "").toLowerCase().includes(w)).length;
+    let best = null, bestScore = 0;
+    for (const c of candidates) {
+      const s = overlap(c.text, words(replyText)) * 2 + overlap(c.text, words(sayText));
+      if (s > bestScore) { bestScore = s; best = c; }
+    }
+    if (best && bestScore > 0) return best;
+    return allowSingle && candidates.length === 1 ? candidates[0] : null;
   };
 
   // ---- Create a calendar event (a dated Task), auto-creating its category with an
