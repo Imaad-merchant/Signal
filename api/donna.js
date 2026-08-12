@@ -220,6 +220,7 @@ RULES:
 - ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
 - LISTS: when the user talks about a project/list ("my business list", "for the app"), use add/complete/remove with that list name. Default the list to "Business" only if they clearly mean their main venture and name none.
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
+- RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
 - GRADE QUESTIONS: when they ask about grades, answer from the "grades" context — name the course and score, and if a grade recently dropped or an assignment is missing, say so plainly. If grades is empty, say you don't have their latest yet and they can have their school check run.
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
@@ -246,6 +247,7 @@ Context (JSON): ${JSON.stringify({
     lists: Array.isArray(context.lists) ? context.lists.slice(0, 12) : [],
     upcoming_calendar: Array.isArray(context.calendar) ? context.calendar.slice(0, 30) : [],
     recent_emails: Array.isArray(context.emails) ? context.emails.slice(0, 15) : [],
+    recent_notes: Array.isArray(context.recent_notes) ? context.recent_notes.slice(0, 20) : [],
     grades: Array.isArray(context.grades) ? context.grades.slice(0, 40) : [],
     domains: Array.isArray(context.domains) ? context.domains : [],
   }).slice(0, 7000)}
