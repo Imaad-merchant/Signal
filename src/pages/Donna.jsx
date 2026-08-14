@@ -148,7 +148,8 @@ export default function Donna() {
   const [pendingReminder, setPendingReminder] = useState(null); // awaiting a delivery choice
   const pendingReminderRef = useRef(null);
   const [orbAlert, setOrbAlert] = useState(false); // orb-delivery glow
-  const [reminderToast, setReminderToast] = useState(""); // on-screen reminder banner
+  const [reminderToast, setReminderToast] = useState(null); // { title, id } — on-screen reminder banner
+  const lastReminderRef = useRef(null); // { id, title, at } — the reminder that just fired, so "skip/done" deletes it
   const [showRoutines, setShowRoutines] = useState(false); // routines editor panel
   const [showCustomize, setShowCustomize] = useState(false); // customize overlay (tabbed)
   const [customizeTab, setCustomizeTab] = useState("donna"); // "donna" | "dashboard"
@@ -193,6 +194,8 @@ export default function Donna() {
   const deliverRef = useRef(null);
   deliverRef.current = (r) => {
     const title = r.title;
+    // Remember which reminder just fired so "skip / done / get rid of it" can delete it.
+    lastReminderRef.current = { id: r.id, title, at: Date.now() };
     pushTurn("signal", `Reminder — ${title}.`);
     if (r.delivery === "voice" && !muted) {
       speak(`Time to ${title}.`);
@@ -204,8 +207,8 @@ export default function Donna() {
     }
     // Always show the banner for orb/text (and as the fallback when voice is muted)
     // so it's clear what the reminder is.
-    setReminderToast(title);
-    window.setTimeout(() => setReminderToast((c) => (c === title ? "" : c)), 30000);
+    setReminderToast({ title, id: r.id });
+    window.setTimeout(() => setReminderToast((c) => (c && c.id === r.id ? null : c)), 30000);
   };
 
   // Fire due reminders while the page is open (checks every 15s).
@@ -383,6 +386,21 @@ export default function Donna() {
         setReply(say); pushTurn("signal", say); speak(say); return;
       }
       pendingNudgeRef.current = null; // engaging, not dismissing → continue normally
+    }
+
+    // ---- A reminder just fired — "skip / done / get rid of it / stop" deletes that
+    //      recurring routine so it stops nagging (not just closes the banner). ----
+    if (lastReminderRef.current && (Date.now() - lastReminderRef.current.at < 4 * 60 * 1000)) {
+      const lr = lastReminderRef.current;
+      const isDismiss = /\b(skip( it| that)?|get\s+rid\s+of\s+(it|that|this|the reminder)|delete\s+(it|that|this|the reminder)|stop\s*(it|that|reminding( me)?)?|cancel\s+(it|that|the reminder)|remove\s+(it|that)|did\s+it|already\s+(did|done|handled)|handled( it)?|drop it|forget it|nix it)\b/i.test(t) || /^(skip|done|stop)\b/i.test(t.trim());
+      if (isDismiss) {
+        lastReminderRef.current = null;
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        removeReminder(lr.id);
+        setReminderToast((c) => (c && c.id === lr.id ? null : c));
+        const say = `Done — I've stopped reminding you to ${lr.title}.`;
+        setReply(say); pushTurn("signal", say); speak(say); return;
+      }
     }
 
     // ---- Recurring reminders ("routines"), handled locally before the server route. ----
@@ -1609,8 +1627,17 @@ export default function Donna() {
         <div className="absolute top-14 left-1/2 z-30 -translate-x-1/2">
           <div className="flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-100 shadow-lg backdrop-blur-sm">
             <Bell className="h-4 w-4 text-cyan-300" />
-            <span>Reminder — {reminderToast}</span>
-            <button type="button" onClick={() => setReminderToast("")} aria-label="Dismiss" className="ml-1 text-cyan-200/70 hover:text-cyan-100">
+            <span>Reminder — {reminderToast.title}</span>
+            {/* Skip = stop this recurring reminder for good (not just close the banner). */}
+            <button
+              type="button"
+              onClick={() => { if (reminderToast.id) removeReminder(reminderToast.id); lastReminderRef.current = null; setReminderToast(null); }}
+              className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-cyan-50 hover:bg-white/20"
+              title="Stop this reminder"
+            >
+              <Trash2 className="h-3 w-3" /> Skip
+            </button>
+            <button type="button" onClick={() => setReminderToast(null)} aria-label="Close" className="text-cyan-200/70 hover:text-cyan-100">
               <X className="h-4 w-4" />
             </button>
           </div>
