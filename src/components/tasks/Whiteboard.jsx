@@ -1001,6 +1001,98 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  // ─── Image paste / drag-drop ─────────────────────────────────────
+  // Load a dropped/pasted image file, downscale large ones (keeps the board's JSON
+  // under Firestore's 1MB doc limit), and return a data URL + dimensions.
+  const processImageFile = useCallback((file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200;
+        const nw = img.naturalWidth || 300, nh = img.naturalHeight || 200;
+        const scale = Math.min(1, maxDim / Math.max(nw, nh));
+        const big = typeof reader.result === "string" && reader.result.length > 700000;
+        if (scale < 1 || big) {
+          const outW = Math.max(1, Math.round(nw * scale));
+          const outH = Math.max(1, Math.round(nh * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = outW; canvas.height = outH;
+          canvas.getContext("2d").drawImage(img, 0, 0, outW, outH);
+          const isPng = /png/i.test(file.type || "");
+          resolve({ url: canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.82), w: outW, h: outH });
+        } else {
+          resolve({ url: reader.result, w: nw, h: nh });
+        }
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  }), []);
+
+  // Drop an image onto the canvas as an auto-sized box (reuses text-box rendering,
+  // so it's selectable/movable/resizable like anything else).
+  const insertImageObject = useCallback(({ url, w, h }, worldX, worldY) => {
+    const maxW = 460;
+    const dispW = Math.min(w || 300, maxW);
+    const dispH = Math.max(1, Math.round(dispW * ((h || 200) / (w || 300))));
+    let cx = worldX, cy = worldY;
+    if (cx == null || cy == null) {
+      cx = (containerSize.w / 2 - viewport.x) / viewport.zoom;
+      cy = (containerSize.h / 2 - viewport.y) / viewport.zoom;
+    }
+    const obj = {
+      id: uid(), type: "text", x: cx - dispW / 2, y: cy - dispH / 2, w: dispW, h: dispH,
+      text: `<img src="${url}" style="width:100%;height:auto;display:block;border-radius:6px;" />`,
+      color, fontSize,
+    };
+    pushHistory(objectsRef.current);
+    setObjects(prev => [...prev, obj]);
+    setSelectedIds([obj.id]);
+  }, [color, fontSize, viewport, containerSize, pushHistory]);
+
+  // Paste an image from the system clipboard onto the canvas (unless a text box is
+  // being edited, which has its own inline-image paste).
+  useEffect(() => {
+    const onPaste = (e) => {
+      if (editingTextIdRef.current) return;
+      const t = e.target;
+      const tag = (t?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || t?.isContentEditable) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of Array.from(items)) {
+        if (it.type && it.type.startsWith("image/")) {
+          const file = it.getAsFile();
+          if (file) { e.preventDefault(); processImageFile(file).then((r) => insertImageObject(r)).catch(() => {}); }
+          return;
+        }
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [processImageFile, insertImageObject]);
+
+  // Drag-and-drop image files onto the canvas.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onDragOver = (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } };
+    const onDrop = (e) => {
+      const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/"));
+      if (!files.length) return;
+      e.preventDefault();
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      files.forEach((f, i) => processImageFile(f).then((r) => insertImageObject(r, x + i * 28, y + i * 28)).catch(() => {}));
+    };
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("drop", onDrop);
+    return () => { el.removeEventListener("dragover", onDragOver); el.removeEventListener("drop", onDrop); };
+  }, [screenToWorld, processImageFile, insertImageObject]);
+
   const handleClear = () => {
     if (objects.length === 0) return;
     if (!confirm("Clear the entire whiteboard?")) return;
