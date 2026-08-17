@@ -563,7 +563,10 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
       if (mod && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
       if (mod && e.key === "c") { e.preventDefault(); copySelection(); return; }
-      if (mod && e.key === "v") { e.preventDefault(); pasteClipboard(); return; }
+      // Only hijack Cmd/Ctrl+V for the internal object clipboard when it actually
+      // has something — otherwise let the browser's native paste event fire so a
+      // clipboard IMAGE can be dropped onto the canvas (see the paste useEffect).
+      if (mod && e.key === "v") { if (clipboardRef.current.length) { e.preventDefault(); pasteClipboard(); } return; }
       if (mod && e.key === "x") { e.preventDefault(); copySelection(); deleteSelection(); return; }
       if (mod && e.key === "d") { e.preventDefault(); duplicateSelection(); return; }
       if (mod && e.key === "a") { e.preventDefault(); setSelectedIds(objects.filter(o => !o.locked).map(o => o.id)); return; }
@@ -1061,14 +1064,17 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       const t = e.target;
       const tag = (t?.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || t?.isContentEditable) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (const it of Array.from(items)) {
-        if (it.type && it.type.startsWith("image/")) {
-          const file = it.getAsFile();
-          if (file) { e.preventDefault(); processImageFile(file).then((r) => insertImageObject(r)).catch(() => {}); }
-          return;
-        }
+      const dt = e.clipboardData;
+      if (!dt) return;
+      // Prefer the DataTransferItemList (Chrome/Firefox), fall back to .files (Safari).
+      let file = null;
+      for (const it of Array.from(dt.items || [])) {
+        if (it.type && it.type.startsWith("image/")) { file = it.getAsFile(); break; }
+      }
+      if (!file) file = Array.from(dt.files || []).find((f) => f.type.startsWith("image/")) || null;
+      if (file) {
+        e.preventDefault();
+        processImageFile(file).then((r) => insertImageObject(r)).catch(() => {});
       }
     };
     window.addEventListener("paste", onPaste);
