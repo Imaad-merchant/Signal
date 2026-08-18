@@ -5,7 +5,6 @@
 // routes that used to be separate files (checkin, intent, seedDomains, and the
 // Google connect/disconnect kickoff) are merged here and dispatched on `body.route`.
 // Each route keeps its original request/response shape.
-import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
 import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText, insertEvent, patchEvent, deleteEvent } from "./google/_client.js";
@@ -853,6 +852,9 @@ async function sendEmail(body, res) {
     return res.status(503).json({ error: "Email sending not configured (set SMTP_HOST / SMTP_USER / SMTP_PASS)" });
   }
 
+  // Loaded on demand so the ~every-other request (tts, transcribe, intent…) that
+  // never sends email doesn't pay nodemailer's import cost at cold start.
+  const { default: nodemailer } = await import("nodemailer");
   const transport = nodemailer.createTransport({
     host,
     port,
