@@ -238,13 +238,16 @@ export default function Donna() {
   useEffect(() => {
     chatModeRef.current = chatMode;
     try { localStorage.setItem("assistant_mode", chatMode ? "chat" : "donna"); } catch { /* ignore */ }
+    // Clear the shared status line so a note from one mode (e.g. the voice-test
+    // result) doesn't bleed into the other after switching.
+    setNote(""); setReply(""); setSpoken({ text: "", idx: 0 });
     if (chatMode) {
       try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
       try { if (ttsAudioRef.current) { ttsAudioRef.current.pause(); } } catch { /* ignore */ }
       try { voice.stop(); } catch { /* ignore */ }
       setMode("idle"); setNudgeReady(false);
     }
-  }, [chatMode]);  
+  }, [chatMode]);
 
   const pushTurn = useCallback((who, text) => {
     const v = (text || "").trim();

@@ -170,12 +170,33 @@ const PALETTE = [
 // The 5 built-in category colours, so a new one never collides with them.
 export const DEFAULT_CATEGORY_COLORS = ["#4285f4", "#a142f4", "#0f9d58", "#f4b400", "#db4437"];
 
-// Pick a random colour that isn't already used by an existing category.
+const hexToRgb = (h) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(h || "").trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const dist2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+
+// Pick a category colour that's the most VISUALLY DISTINCT from the ones already
+// in use — not just a non-exact match, so a new category never looks like an
+// existing one (e.g. two near-identical oranges).
 export function pickUnusedColor(used = []) {
+  const usedRgb = used.filter(Boolean).map(hexToRgb).filter(Boolean);
+  if (!usedRgb.length) return PALETTE[Math.floor(Math.random() * PALETTE.length)];
   const u = new Set(used.filter(Boolean).map((c) => String(c).toLowerCase()));
   const free = PALETTE.filter((c) => !u.has(c.toLowerCase()));
   const pool = free.length ? free : PALETTE;
-  return pool[Math.floor(Math.random() * pool.length)];
+  // Maximise the distance to the NEAREST used colour (max-min separation).
+  let best = pool[0], bestScore = -1;
+  for (const c of pool) {
+    const rgb = hexToRgb(c);
+    if (!rgb) continue;
+    let minD = Infinity;
+    for (const ur of usedRgb) minD = Math.min(minD, dist2(rgb, ur));
+    if (minD > bestScore) { bestScore = minD; best = c; }
+  }
+  return best;
 }
 
 export function slugify(s) {
