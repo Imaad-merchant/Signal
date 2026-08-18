@@ -1,0 +1,16 @@
+{
+  "//": "Optional composite indexes (userId + created_date desc) that let base44Client.list() do server-side ordering+limit instead of downloading whole collections. The app works WITHOUT these (it falls back to a full read + client sort). Deploy with: firebase deploy --only firestore:indexes",
+  "indexes": [
+    { "collectionGroup": "tasks",        "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "signals",      "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "check_ins",    "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "insights",     "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "commitments",  "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "memory",       "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "accounts",     "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "subscriptions","queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "budgets",      "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "reports",      "queryScope": "COLLECTION", "fields": [ { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "created_date", "order": "DESCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}
