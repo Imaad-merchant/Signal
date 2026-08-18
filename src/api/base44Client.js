@@ -87,6 +87,9 @@ function createEntityHandler(collectionName) {
         return results;
       } catch (err) {
         console.error(`Firestore list error (${collectionName}):`, err);
+        // Surface a misconfigured-rules denial (data exists but is blocked) so the
+        // UI can tell the user to publish rules, instead of silently showing empty.
+        if (err?.code === "permission-denied") throw err;
         return [];
       }
     },
@@ -122,6 +125,7 @@ function createEntityHandler(collectionName) {
       return results;
       } catch (err) {
         console.error(`Firestore filter error (${collectionName}):`, err);
+        if (err?.code === "permission-denied") throw err;
         return [];
       }
     },
