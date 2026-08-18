@@ -698,17 +698,17 @@ export default function Dashboard() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
         <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/[0.08] flex-shrink-0 min-w-0 bg-[#232425]">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar" className="p-2 rounded-lg hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <Menu className="h-4 w-4" />
           </button>
 
           <button onClick={navigateToday} className="px-2.5 py-1.5 rounded-md border border-white/[0.08] text-[11px] text-gray-400 hover:bg-white/5 transition-colors font-medium flex-shrink-0">
             Today
           </button>
-          <button onClick={navigatePrev} className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
+          <button onClick={navigatePrev} aria-label="Previous" className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
-          <button onClick={navigateNext} className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
+          <button onClick={navigateNext} aria-label="Next" className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
             <ChevronRight className="h-3.5 w-3.5" />
           </button>
 

@@ -4,6 +4,7 @@ import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDial
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
+import SetupChecklist from "../components/SetupChecklist";
 
 
 
@@ -343,6 +344,8 @@ export default function Settings() {
           <p className="text-sm text-gray-500 mt-1">Customize your Signal experience</p>
         </div>
       </div>
+
+      <SetupChecklist />
 
       {/* Import & Export */}
       <Section title="Import & Export">
