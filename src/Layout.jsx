@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import MobileBottomTab from "./components/MobileBottomTab";
+import DesktopNav from "./components/DesktopNav";
 
 export default function Layout({ children, currentPageName }) {
   const [themeColor, setThemeColor] = useState(() => localStorage.getItem("pulse_theme") || "#4285f4");
@@ -15,7 +16,7 @@ export default function Layout({ children, currentPageName }) {
   const isFullHeight = currentPageName === "Dashboard" || currentPageName === "Tasks" || currentPageName === "Donna";
 
   return (
-    <div className="min-h-[100dvh] bg-[#1e1f20]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+    <div className="min-h-[100dvh] bg-[#1e1f20] md:pl-16" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       <style>{`
         * { -webkit-font-smoothing: antialiased; }
         body {
@@ -46,6 +47,7 @@ export default function Layout({ children, currentPageName }) {
         </motion.main>
       </AnimatePresence>
       <MobileBottomTab currentPageName={currentPageName} />
+      <DesktopNav currentPageName={currentPageName} />
     </div>
   );
 }
