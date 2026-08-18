@@ -918,9 +918,13 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
         if (cfg.dimX) newW = Math.max(GRID_SIZE, snap(newW));
         if (cfg.dimY) newH = Math.max(GRID_SIZE, snap(newH));
       }
-      // Shift on a corner handle locks the original aspect ratio. Use the larger
-      // proposed scale on either axis so the box grows/shrinks uniformly.
-      if (ev.shiftKey && cfg.dimX && cfg.dimY && b.w > 0 && b.h > 0) {
+      // Corner handles keep aspect ratio: locked by DEFAULT for images (so pictures
+      // don't distort), and via Shift for everything else. Shift inverts it for
+      // images (hold Shift to free-stretch a picture). Uses the larger proposed
+      // scale on either axis so the box grows/shrinks uniformly.
+      const lockAspect = cfg.dimX && cfg.dimY && b.w > 0 && b.h > 0 &&
+        (obj.type === "image" ? !ev.shiftKey : ev.shiftKey);
+      if (lockAspect) {
         const scale = Math.max(newW / b.w, newH / b.h);
         newW = Math.max(8, b.w * scale);
         newH = Math.max(8, b.h * scale);
@@ -1047,14 +1051,14 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       cy = (containerSize.h / 2 - viewport.y) / viewport.zoom;
     }
     const obj = {
-      id: uid(), type: "text", x: cx - dispW / 2, y: cy - dispH / 2, w: dispW, h: dispH,
-      text: `<img src="${url}" style="width:100%;height:auto;display:block;border-radius:6px;" />`,
-      color, fontSize,
+      id: uid(), type: "image", src: url,
+      x: cx - dispW / 2, y: cy - dispH / 2, w: dispW, h: dispH,
+      aspect: dispH / dispW, // native ratio, for aspect-locked corner resize
     };
     pushHistory(objectsRef.current);
     setObjects(prev => [...prev, obj]);
     setSelectedIds([obj.id]);
-  }, [color, fontSize, viewport, containerSize, pushHistory]);
+  }, [viewport, containerSize, pushHistory]);
 
   // Paste an image from the system clipboard onto the canvas (unless a text box is
   // being edited, which has its own inline-image paste).
@@ -1500,6 +1504,26 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
               const objDash = strokeDashArray(o);
               const objFill = o.fill && o.fill !== "transparent" ? o.fill : (o.color + "20");
               const lockedStyle = o.locked ? { ...selStyle, opacity: 0.7 } : selStyle;
+
+              if (o.type === "image") {
+                const w = Math.max(1, o.w || 200);
+                const h = Math.max(1, o.h || 150);
+                return (
+                  <image
+                    key={o.id}
+                    href={o.src}
+                    x={o.x}
+                    y={o.y}
+                    width={w}
+                    height={h}
+                    preserveAspectRatio="none"
+                    opacity={fillOpacityOf(o)}
+                    transform={o.rotation ? `rotate(${o.rotation} ${o.x + w / 2} ${o.y + h / 2})` : undefined}
+                    style={{ ...lockedStyle, borderRadius: 6 }}
+                    draggable={false}
+                  />
+                );
+              }
 
               if (o.type === "rect" || o.type === "roundedRect") {
                 const x = Math.min(o.x, o.x + o.w);
