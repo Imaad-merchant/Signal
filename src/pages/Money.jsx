@@ -1,11 +1,13 @@
 import React, { useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
   Wallet, Plus, Trash2, Upload, Repeat, TrendingUp, TrendingDown, X, Landmark, RefreshCw, Loader2,
-  ShoppingBag, Utensils, Car, Home, Film, HeartPulse, Plane, DollarSign, Package,
+  ShoppingBag, Utensils, Car, Home, Film, HeartPulse, Plane, DollarSign, Package, ArrowLeft,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { toast } from "@/components/ui/use-toast";
 import {
   CATEGORIES, categorize, fmtMoney, detectSubscriptions, monthlyCost, yearlyCost, normMerchant,
   spendingByCategory, parseTransactionsCsv, initials, avatarColor, nextDue, relDue,
@@ -43,6 +45,7 @@ function Avatar({ name, color }) {
 
 export default function Money() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["money"] }); };
 
   const accountsQ = useQuery({ queryKey: ["money", "accounts"], queryFn: () => base44.entities.Account.list("-created_date", 100) });
@@ -54,6 +57,7 @@ export default function Money() {
   // the money collections — server writes succeed via Admin, client reads deny).
   const loadError = accountsQ.error || txQ.error || subsQ.error;
   const permDenied = loadError && /permission|insufficient|PERMISSION_DENIED/i.test(String(loadError?.message || loadError));
+  const initialLoading = (accountsQ.isLoading || txQ.isLoading) && !loadError;
 
   const accounts = Array.isArray(accountsQ.data) ? accountsQ.data : [];
   const transactions = Array.isArray(txQ.data) ? txQ.data : [];
@@ -99,7 +103,10 @@ export default function Money() {
     <div className="h-full overflow-y-auto bg-[#0b0d11] pb-[calc(5rem+env(safe-area-inset-bottom))] text-gray-100">
       <div className="mx-auto max-w-2xl px-4 py-6">
         <div className="mb-4 flex items-center justify-between gap-2">
-          <h1 className="flex items-center gap-2 text-xl font-semibold"><Wallet className="h-5 w-5 text-cyan-300" /> Money</h1>
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <button onClick={() => navigate(-1)} aria-label="Back" className="-ml-1 rounded-full p-1 text-gray-400 hover:bg-white/5 hover:text-gray-100"><ArrowLeft className="h-5 w-5" /></button>
+            <Wallet className="h-5 w-5 text-cyan-300" /> Money
+          </h1>
           <div className="flex items-center gap-1.5">
             {hasPlaid && (
               <button onClick={doSync} disabled={!!banking} className="inline-flex items-center gap-1 rounded-lg border border-white/10 px-2.5 py-1.5 text-xs text-gray-300 hover:border-cyan-400/40 disabled:opacity-50">
@@ -120,16 +127,25 @@ export default function Money() {
           </div>
         )}
 
-        {/* Net worth hero */}
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-cyan-500/10 to-violet-500/15 p-5">
-          <div className="text-[11px] uppercase tracking-wide text-gray-400">Net worth</div>
-          <div className="mt-1 text-3xl font-bold text-white">{fmtMoney(netWorth)}</div>
-          <div className="mt-3 flex gap-5 text-xs">
-            <div><span className="text-gray-400">Spent in {monthName()}</span><div className="text-sm font-semibold text-rose-300">{fmtMoney(monthSpend)}</div></div>
-            <div><span className="text-gray-400">Income</span><div className="text-sm font-semibold text-emerald-300">{fmtMoney(monthIncome)}</div></div>
-            <div><span className="text-gray-400">Subscriptions</span><div className="text-sm font-semibold text-violet-300">{fmtMoney(subsMonthly)}/mo</div></div>
+        {/* Net worth hero (skeleton while the first read is in flight, so a real
+            $0.00 never looks the same as "still loading"). */}
+        {initialLoading ? (
+          <div className="animate-pulse overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+            <div className="h-3 w-20 rounded bg-white/10" />
+            <div className="mt-2 h-8 w-40 rounded bg-white/10" />
+            <div className="mt-4 flex gap-5"><div className="h-8 w-16 rounded bg-white/10" /><div className="h-8 w-16 rounded bg-white/10" /><div className="h-8 w-20 rounded bg-white/10" /></div>
           </div>
-        </div>
+        ) : (
+          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-cyan-500/10 to-violet-500/15 p-5">
+            <div className="text-[11px] uppercase tracking-wide text-gray-400">Net worth</div>
+            <div className="mt-1 text-3xl font-bold text-white">{fmtMoney(netWorth)}</div>
+            <div className="mt-3 flex gap-5 text-xs">
+              <div><span className="text-gray-400">Spent in {monthName()}</span><div className="text-sm font-semibold text-rose-300">{fmtMoney(monthSpend)}</div></div>
+              <div><span className="text-gray-400">Income</span><div className="text-sm font-semibold text-emerald-300">{fmtMoney(monthIncome)}</div></div>
+              <div><span className="text-gray-400">Subscriptions</span><div className="text-sm font-semibold text-violet-300">{fmtMoney(subsMonthly)}/mo</div></div>
+            </div>
+          </div>
+        )}
 
         <Accounts accounts={accounts} netWorth={netWorth} onChange={invalidate} />
         <Spending byCat={byCat} total={monthSpend} delta={spendDelta} />
@@ -154,8 +170,8 @@ function Card({ title, children, right }) {
 }
 
 function AccountRow({ a, onChange }) {
-  const update = async (bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(() => {}); onChange(); };
-  const del = async () => { await base44.entities.Account.delete(a.id).catch(() => {}); onChange(); };
+  const update = async (bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); };
+  const del = async () => { await base44.entities.Account.delete(a.id).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); };
   return (
     <div className="flex items-center gap-2 rounded-lg bg-white/[0.03] px-3 py-2">
       <Avatar name={a.name} />
@@ -182,7 +198,7 @@ function Accounts({ accounts, netWorth, onChange }) {
   const debtTotal = debts.reduce((s, a) => s + Math.abs(Number(a.balance) || 0), 0);
   const add = async () => {
     if (!name.trim()) return;
-    await base44.entities.Account.create({ name: name.trim(), type, balance: Number(balance) || 0 }).catch(() => {});
+    await base44.entities.Account.create({ name: name.trim(), type, balance: Number(balance) || 0 }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." }));
     setName(""); setBalance(""); setOpen(false); onChange();
   };
 
@@ -290,11 +306,11 @@ function Budgets({ budgets, byCat, onChange }) {
 
   const add = async () => {
     if (!cat || !amount) return;
-    await base44.entities.Budget.create({ category: cat, amount: Number(amount) || 0 }).catch(() => {});
+    await base44.entities.Budget.create({ category: cat, amount: Number(amount) || 0 }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." }));
     setAmount(""); setOpen(false); onChange();
   };
-  const update = async (b, amt) => { await base44.entities.Budget.update(b.id, { amount: Number(amt) || 0 }).catch(() => {}); onChange(); };
-  const del = async (b) => { await base44.entities.Budget.delete(b.id).catch(() => {}); onChange(); };
+  const update = async (b, amt) => { await base44.entities.Budget.update(b.id, { amount: Number(amt) || 0 }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); };
+  const del = async (b) => { await base44.entities.Budget.delete(b.id).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); };
 
   return (
     <Card title="Budgets" right={budgets.length > 0 && <span className="text-[11px] font-semibold text-gray-300">{fmtMoney(totalSpent)} / {fmtMoney(totalBudget)}</span>}>
@@ -351,11 +367,11 @@ function Subscriptions({ subs, monthly, onChange }) {
   const [cadence, setCadence] = useState("monthly");
   const add = async () => {
     if (!merchant.trim() || !amount) return;
-    await base44.entities.Subscription.create({ merchant: merchant.trim(), amount: Number(amount) || 0, cadence, active: true }).catch(() => {});
+    await base44.entities.Subscription.create({ merchant: merchant.trim(), amount: Number(amount) || 0, cadence, active: true }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." }));
     setMerchant(""); setAmount(""); setOpen(false); onChange();
   };
-  const track = async (d) => { await base44.entities.Subscription.create({ merchant: d.merchant, amount: d.amount, cadence: d.cadence, active: true }).catch(() => {}); onChange(); };
-  const cancel = async (s) => { if (s.id) { await base44.entities.Subscription.update(s.id, { active: false }).catch(() => {}); onChange(); } };
+  const track = async (d) => { await base44.entities.Subscription.create({ merchant: d.merchant, amount: d.amount, cadence: d.cadence, active: true }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); };
+  const cancel = async (s) => { if (s.id) { await base44.entities.Subscription.update(s.id, { active: false }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); } };
   const yearly = subs.reduce((s, x) => s + yearlyCost(x), 0);
   return (
     <Card title="Recurring & subscriptions" right={
@@ -415,10 +431,10 @@ function Transactions({ transactions, accounts, onChange }) {
     const amt = Number(amount);
     await base44.entities.Transaction.create({
       date, merchant: merchant.trim(), amount: amt, category: cat || categorize(merchant, amt), account_id: accounts[0]?.id || null,
-    }).catch(() => {});
+    }).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." }));
     setMerchant(""); setAmount(""); setCat(""); setAdding(false); onChange();
   };
-  const del = async (t) => { await base44.entities.Transaction.delete(t.id).catch(() => {}); onChange(); };
+  const del = async (t) => { await base44.entities.Transaction.delete(t.id).catch(() => toast({ variant: "destructive", title: "Couldn't save — try again." })); onChange(); };
 
   const importCsv = async (text) => {
     const parsed = parseTransactionsCsv(text);
@@ -428,7 +444,7 @@ function Transactions({ transactions, accounts, onChange }) {
       const rows = parsed.slice(0, 2000).map((p) => ({ ...p, account_id: accounts[0]?.id || null }));
       if (base44.entities.Transaction.bulkCreate) await base44.entities.Transaction.bulkCreate(rows);
       else for (const r of rows) await base44.entities.Transaction.create(r);
-      setMsg(`Imported ${rows.length} transactions.`);
+      setMsg(`Imported ${rows.length} transactions.`); toast({ title: `Imported ${rows.length} transactions` });
       setCsv(""); onChange();
     } catch { setMsg("Import failed — try again."); }
     setImporting(false);
