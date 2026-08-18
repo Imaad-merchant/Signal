@@ -349,6 +349,7 @@ export default function Donna() {
         const dm = parseDate(t, new Date());
         if (!dm) { setPendingEvent(p); const say = `I didn't catch a date — say something like "the 6th" or "next Monday".`; setReply(say); pushTurn("signal", say); speak(say); return; }
         await base44.entities.Task.update(p.id, { due_date: dm.date }).catch(() => {});
+        pushEventToGoogle(p.title, dm.date, p.gcalId).then((gid) => { if (gid && !p.gcalId) base44.entities.Task.update(p.id, { gcal_id: gid }).catch(() => {}); });
         queryClient.invalidateQueries({ queryKey: ["grid"] });
         const say = `Moved "${p.title}" to ${friendlyDate(dm.date)}.`;
         setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
@@ -472,16 +473,18 @@ export default function Donna() {
           setHeard(t); pushTurn("you", t); setNote(""); setReply("");
           if (edit.op === "delete") {
             await base44.entities.Task.delete(match.id).catch(() => {});
+            deleteEventFromGoogle(match.gcal_id);
             queryClient.invalidateQueries({ queryKey: ["grid"] });
             const say = `Deleted "${match.title}" from your calendar.`;
             setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
           }
           if (!edit.date) {
-            setPendingEvent({ op: "move", id: match.id, title: match.title, need: "date" });
+            setPendingEvent({ op: "move", id: match.id, title: match.title, gcalId: match.gcal_id, need: "date" });
             const say = `What date should I move "${match.title}" to?`;
             setReply(say); pushTurn("signal", say); speak(say); return;
           }
           await base44.entities.Task.update(match.id, { due_date: edit.date }).catch(() => {});
+          pushEventToGoogle(match.title, edit.date, match.gcal_id).then((gid) => { if (gid && !match.gcal_id) base44.entities.Task.update(match.id, { gcal_id: gid }).catch(() => {}); });
           queryClient.invalidateQueries({ queryKey: ["grid"] });
           const say = `Moved "${match.title}" to ${friendlyDate(edit.date)}.`;
           setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
@@ -1168,6 +1171,19 @@ export default function Donna() {
 
   // ---- Create a calendar event (a dated Task), auto-creating its category with an
   //      unused colour when it's new. Speaks a confirmation and offers Undo. ----
+  // Mirror a calendar event to Google (create or update); returns the event id or null.
+  const pushEventToGoogle = async (title, date, gcalId) => {
+    try {
+      const res = await base44.functions.invoke("donna", { route: "gcal-push", title, date, gcalId: gcalId || null });
+      const d = (res && res.data) ? res.data : res || {};
+      return d.ok ? (d.gcalId || null) : null;
+    } catch { return null; }
+  };
+  const deleteEventFromGoogle = (gcalId) => {
+    if (!gcalId) return;
+    base44.functions.invoke("donna", { route: "gcal-delete", gcalId }).catch(() => {});
+  };
+
   async function createCalendarEvent({ title, date, category }) {
     setMode("processing");
     try {
@@ -1185,6 +1201,8 @@ export default function Donna() {
         }
       }
       const rec = await base44.entities.Task.create({ title, due_date: date, category: catKey || "work", status: "not_started" });
+      // Mirror to Google Calendar (best-effort); store the event id for later edits/sync.
+      pushEventToGoogle(title, date, null).then((gid) => { if (gid && rec?.id) base44.entities.Task.update(rec.id, { gcal_id: gid }).catch(() => {}); });
       try {
         const logged = await base44.entities.AgentAction.create({
           action_type: "add", target: "tasks/" + (rec?.id || ""),
@@ -1252,7 +1270,7 @@ export default function Donna() {
           const match = findTask(allTasks, a.text, a.list);
           if (match?.id) {
             if (a.type === "complete") await base44.entities.Task.update(match.id, { status: "done" });
-            else await base44.entities.Task.delete(match.id);
+            else { await base44.entities.Task.delete(match.id); deleteEventFromGoogle(match.gcal_id); }
             n++;
           }
           continue; // executed in place; not part of the create-then-undo trail

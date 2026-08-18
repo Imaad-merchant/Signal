@@ -11,6 +11,7 @@ import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 import { callLLM, parseJSON } from "./_llm.js";
 import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents } from "./google/_client.js";
 import { syncPlaidItem } from "./plaid/_client.js";
+import { syncCalendarForUser } from "./google/_sync.js";
 
 function matches(header, secret) {
   if (!secret) return false;
@@ -39,6 +40,11 @@ export default async function handler(req, res) {
       if (req.query && req.query.job === "plaid-sync") {
         const out = await runPlaidSync(db);
         return res.status(200).json({ ok: true, job: "plaid-sync", ...out, ran_at: new Date().toISOString() });
+      }
+      // Google Calendar pull — mirror each connected user's events into tasks.
+      if (req.query && req.query.job === "gcal-sync") {
+        const out = await runGcalSync(db);
+        return res.status(200).json({ ok: true, job: "gcal-sync", ...out, ran_at: new Date().toISOString() });
       }
       const job = req.query && (req.query.job === "morning" || req.query.job === "evening") ? req.query.job : null;
       const out = { job: job || "poll" };
@@ -74,6 +80,21 @@ async function runPlaidSync(db) {
     } catch (err) { failed++; console.warn("plaid nightly sync item failed:", err.message); }
   }
   return { items, accounts, added, removed, failed };
+}
+
+// Periodic: pull Google Calendar into tasks for every connected user.
+async function runGcalSync(db) {
+  const snap = await db.collection("google_tokens").get();
+  let users = 0, created = 0, updated = 0, deleted = 0, failed = 0;
+  for (const doc of snap.docs) {
+    try {
+      const r = await syncCalendarForUser(db, doc.id);
+      if (r.error) { failed++; continue; }
+      if (r.skipped) continue;
+      users++; created += r.created || 0; updated += r.updated || 0; deleted += r.deleted || 0;
+    } catch (err) { failed++; console.warn("gcal sync user failed:", err.message); }
+  }
+  return { users, created, updated, deleted, failed };
 }
 
 // Notification copy per slot.

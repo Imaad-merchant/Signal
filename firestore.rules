@@ -170,6 +170,10 @@ service cloud.firestore {
     match /google_tokens/{docId} {
       allow read, write: if false;
     }
+    // Google Calendar sync cursor (syncToken) — server-only.
+    match /gcal_state/{docId} {
+      allow read, write: if false;
+    }
     // Plaid item access tokens — written ONLY by the server (Admin SDK). Never
     // client-readable: bank access tokens must not reach the browser.
     match /plaid_items/{docId} {

@@ -8,7 +8,8 @@
 import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
-import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText } from "./google/_client.js";
+import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText, insertEvent, patchEvent, deleteEvent } from "./google/_client.js";
+import { syncCalendarForUser } from "./google/_sync.js";
 import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_client.js";
 
 // Larger body limit so the voice-recorder can POST base64 audio for transcription.
@@ -73,6 +74,9 @@ export default async function handler(req, res) {
     if (route === "plaid-sync") return await plaidSync(auth, res);
     if (route === "tts") return await ttsSpeak(auth, body, res);
     if (route === "transcribe") return await transcribe(auth, body, res);
+    if (route === "gcal-push") return await gcalPush(auth, body, res);
+    if (route === "gcal-delete") return await gcalDelete(auth, body, res);
+    if (route === "gcal-sync") return await gcalSync(auth, res);
     return res.status(400).json({ error: "Unknown route" });
   } catch (err) {
     console.error(`Jarvis route "${route}" error:`, err);
@@ -701,6 +705,37 @@ async function ttsSpeak(auth, body, res) {
   } catch (err) {
     return res.status(502).json({ error: err.message || "TTS failed" });
   }
+}
+
+// ---- Two-way Google Calendar sync. App events (Tasks with a due_date) push to
+//      Google on create/move/delete; a pull sync mirrors Google back into tasks. ----
+async function gcalPush(auth, body, res) {
+  const accessToken = await getAccessTokenForUid(auth.uid);
+  if (!accessToken) return res.status(200).json({ ok: false, error: "no-google" });
+  const title = String(body.title || "").trim();
+  const date = String(body.date || "").trim();
+  if (!title || !date) return res.status(400).json({ error: "title and date required" });
+  try {
+    if (body.gcalId) { await patchEvent(accessToken, body.gcalId, { title, date }); return res.status(200).json({ ok: true, gcalId: body.gcalId }); }
+    const id = await insertEvent(accessToken, { title, date });
+    return res.status(200).json({ ok: true, gcalId: id });
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err.message || "Calendar push failed" });
+  }
+}
+
+async function gcalDelete(auth, body, res) {
+  const accessToken = await getAccessTokenForUid(auth.uid);
+  if (!accessToken) return res.status(200).json({ ok: false, error: "no-google" });
+  if (!body.gcalId) return res.status(400).json({ error: "gcalId required" });
+  try { await deleteEvent(accessToken, body.gcalId); return res.status(200).json({ ok: true }); }
+  catch (err) { return res.status(502).json({ ok: false, error: err.message || "Calendar delete failed" }); }
+}
+
+async function gcalSync(auth, res) {
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
+  const r = await syncCalendarForUser(getAdminDb(), auth.uid);
+  return res.status(200).json({ ok: !r.error, ...r });
 }
 
 // ---- Speech-to-text (OpenAI Whisper) — transcribe a recorded voice memo. ----

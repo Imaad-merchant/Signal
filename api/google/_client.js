@@ -12,7 +12,8 @@
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/drive.readonly",
-  "https://www.googleapis.com/auth/calendar.readonly",
+  // calendar.events = read + write events (two-way sync). Re-consent once after this.
+  "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/userinfo.email",
   "openid",
 ];
@@ -165,6 +166,59 @@ export async function listUpcomingEvents(accessToken, days = 14, timeZone = "Ame
     end: e.end?.dateTime || e.end?.date || "",
     link: e.htmlLink || "",
   }));
+}
+
+// --- Calendar write (two-way sync). App events are all-day on a YYYY-MM-DD date. ---
+async function gapiWrite(method, url, accessToken, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`Google API ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  return res.status === 204 ? {} : res.json();
+}
+function addDay(date) {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+// Create an all-day event; returns the new event id.
+export async function insertEvent(accessToken, { title, date }) {
+  const data = await gapiWrite("POST", "https://www.googleapis.com/calendar/v3/calendars/primary/events", accessToken, {
+    summary: title || "(untitled)", start: { date }, end: { date: addDay(date) },
+  });
+  return data.id;
+}
+// Update an existing event's title and/or date.
+export async function patchEvent(accessToken, eventId, { title, date }) {
+  const body = {};
+  if (title != null) body.summary = title;
+  if (date) { body.start = { date }; body.end = { date: addDay(date) }; }
+  return gapiWrite("PATCH", `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, accessToken, body);
+}
+// Delete an event (already-gone is treated as success).
+export async function deleteEvent(accessToken, eventId) {
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok && res.status !== 404 && res.status !== 410) throw new Error(`Google API ${res.status}: ${(await res.text()).slice(0, 120)}`);
+  return true;
+}
+// List events for incremental sync. With a syncToken, returns only changes (incl.
+// cancellations); otherwise a time-window snapshot. Returns { items, nextPageToken,
+// nextSyncToken }. Throws an error with .code=410 when the syncToken has expired.
+export async function listEventsForSync(accessToken, { syncToken, timeMin, timeMax, pageToken } = {}) {
+  const params = new URLSearchParams({ singleEvents: "true", maxResults: "250", showDeleted: "true" });
+  if (syncToken) params.set("syncToken", syncToken);
+  else { if (timeMin) params.set("timeMin", timeMin); if (timeMax) params.set("timeMax", timeMax); }
+  if (pageToken) params.set("pageToken", pageToken);
+  const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (res.status === 410) { const e = new Error("sync token expired"); e.code = 410; throw e; }
+  if (!res.ok) throw new Error(`Google API ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  return res.json();
 }
 
 // --- Live, on-demand reads for the voice assistant ---
