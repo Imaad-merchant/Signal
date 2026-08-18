@@ -112,7 +112,7 @@ async function sendBriefingPush(db, slot) {
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:signal@example.com", pub, priv);
 
   const copy = briefingCopy(slot);
-  const payload = JSON.stringify({ ...copy, url: "/cowork" });
+  const payload = JSON.stringify({ ...copy, url: "/Donna" });
   const snap = await db.collection("push_subscriptions").get();
   let sent = 0;
   for (const doc of snap.docs) {
@@ -154,7 +154,7 @@ function escapeHtml(s) {
 }
 
 function renderBriefingEmail(slot, agenda) {
-  const link = `${(process.env.APP_URL || "").replace(/\/$/, "")}/cowork`;
+  const link = `${(process.env.APP_URL || "").replace(/\/$/, "")}/Donna`;
   const greeting = slot === "evening" ? "Evening review" : "Good morning";
   const taskLine = (t) => `${t.title || "(untitled)"}${t.due_date ? ` — due ${t.due_date}` : ""}`;
   const commitLine = (c) => `${c.text || "(untitled)"}${c.due_on ? ` — by ${c.due_on}` : ""}`;

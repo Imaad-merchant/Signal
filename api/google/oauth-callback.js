@@ -10,7 +10,7 @@ import { getAdminDb, isAdminConfigured } from "../_firebaseAdmin.js";
 
 function redirectBack(res, status) {
   const app = process.env.APP_URL || "";
-  res.writeHead(302, { Location: `${app}/cowork?google=${status}` });
+  res.writeHead(302, { Location: `${app}/Donna?google=${status}` });
   res.end();
 }
 
