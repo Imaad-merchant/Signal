@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
@@ -10,7 +10,9 @@ import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import NotionSidebar from "../components/tasks/NotionSidebar";
 import DocsHome from "../components/tasks/DocsHome";
-import Whiteboard from "../components/tasks/Whiteboard";
+// Lazy-loaded: the whiteboard (+ dompurify/html2canvas) is large and only needed
+// when a whiteboard page is opened, so it stays out of the initial bundle.
+const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
@@ -867,7 +869,11 @@ export default function Tasks() {
               );
             }
             // Default: whiteboard
-            return <Whiteboard key={selectedPage.id} page={selectedPage} onSave={updatePageById} headerSlot={header} />;
+            return (
+              <Suspense key={selectedPage.id} fallback={<div className="flex h-full items-center justify-center text-sm text-gray-500">Loading whiteboard…</div>}>
+                <Whiteboard page={selectedPage} onSave={updatePageById} headerSlot={header} />
+              </Suspense>
+            );
           })() : (
             <DocsHome
               pages={activePages}
