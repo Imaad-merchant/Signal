@@ -262,7 +262,7 @@ export default function Donna() {
   // Handle a finished transcript (from voice or the type box).
   const handleTranscript = useCallback(async (text) => {
     const t = (text || "").trim();
-    if (!t) { setMode("idle"); return; }
+    if (!t) { setMode("idle"); if (!chatModeRef.current) setNote("Didn't catch that — tap the orb and try again."); return; }
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt any current speech */ }
 
     // ---- Logging helpers (Page-backed logs; entries condensed by the server `log`
@@ -1590,34 +1590,37 @@ export default function Donna() {
       </Link>
       <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">{chatMode ? "Chat" : "Donna"}</h1>
 
-      {/* Capture thoughts — record / paste / import, organized into your notes. */}
-      <button
-        type="button"
-        onClick={() => setShowThoughts(true)}
-        className="absolute top-3.5 right-[9.5rem] z-30 flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
-        title="Capture thoughts — record, paste, or import"
-      >
-        <Brain className="h-3.5 w-3.5" /> Thoughts
-      </button>
-
-      {/* Mode switcher — full assistant (Donna) vs plain typed chat with the same powers. */}
-      <div className="absolute top-3.5 right-4 z-30 flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 text-[11px] backdrop-blur-sm">
+      {/* Top-right controls — one flex row so they never collide on narrow screens. */}
+      <div className="absolute top-3.5 right-3 z-30 flex items-center gap-1.5">
+        {/* Capture thoughts — record / paste / import, organized into your notes. */}
         <button
           type="button"
-          onClick={() => setChatMode(false)}
-          className={`rounded-full px-3 py-1 font-medium transition-colors ${!chatMode ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400 hover:text-gray-200"}`}
-          title="Full assistant — voice, briefings, always listening"
+          onClick={() => setShowThoughts(true)}
+          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+          title="Capture thoughts — record, paste, or import"
+          aria-label="Capture thoughts"
         >
-          Donna
+          <Brain className="h-3.5 w-3.5" /> <span className="hidden xs:inline sm:inline">Thoughts</span>
         </button>
-        <button
-          type="button"
-          onClick={() => setChatMode(true)}
-          className={`rounded-full px-3 py-1 font-medium transition-colors ${chatMode ? "bg-blue-500/25 text-blue-200" : "text-gray-400 hover:text-gray-200"}`}
-          title="Plain typed chat — same powers, no briefings or auto-talking"
-        >
-          Chat
-        </button>
+        {/* Mode switcher — full assistant (Donna) vs plain typed chat with the same powers. */}
+        <div className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 text-[11px] backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => setChatMode(false)}
+            className={`rounded-full px-2.5 py-1 font-medium transition-colors ${!chatMode ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400 hover:text-gray-200"}`}
+            title="Full assistant — voice, briefings, always listening"
+          >
+            Donna
+          </button>
+          <button
+            type="button"
+            onClick={() => setChatMode(true)}
+            className={`rounded-full px-2.5 py-1 font-medium transition-colors ${chatMode ? "bg-blue-500/25 text-blue-200" : "text-gray-400 hover:text-gray-200"}`}
+            title="Plain typed chat — same powers, no briefings or auto-talking"
+          >
+            Chat
+          </button>
+        </div>
       </div>
 
       {/* Customize (Donna + dashboard). */}
@@ -1748,6 +1751,21 @@ export default function Donna() {
         <div className="flex min-h-[1.5rem] w-[min(92vw,620px)] flex-col items-center gap-0.5">
           {userLine && <p className="text-center text-xs text-gray-400">{userLine}</p>}
           {note && <p className="text-center text-[11px] text-gray-500">{note}</p>}
+          {/* Idle discoverability: a few tappable example commands. */}
+          {mode === "idle" && !reply && !note && !nudgeReady && !chatMode && (
+            <div className="mt-1 flex max-w-[min(92vw,560px)] flex-wrap justify-center gap-1.5">
+              {["What's on today?", "Remind me to email my professor at 5pm", "How much did I spend this month?", "Add dentist to my calendar Friday"].map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => handleTranscript(ex)}
+                  className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] text-gray-400 transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          )}
           {voice.micError && <p className="flex items-center justify-center gap-1 text-[11px] text-amber-400/80"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
           {sources.length > 0 && (
             <div className="mt-0.5 flex max-w-[min(92vw,620px)] flex-wrap justify-center gap-1.5">
@@ -1763,7 +1781,7 @@ export default function Donna() {
 
       {/* When Donna asks several things, list them on the right so you can track answers. */}
       {donnaQuestions.length >= 2 && mode !== "listening" && (
-        <div className="absolute right-3 top-1/2 z-[8] hidden max-h-[64vh] w-60 -translate-y-1/2 overflow-y-auto rounded-2xl border border-cyan-400/20 bg-[#0e1015]/92 p-3 shadow-2xl backdrop-blur-md sm:block">
+        <div className="absolute right-3 top-1/2 z-[8] max-h-[60vh] w-[min(62vw,15rem)] -translate-y-1/2 overflow-y-auto rounded-2xl border border-cyan-400/20 bg-[#0e1015]/92 p-3 shadow-2xl backdrop-blur-md">
           <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80">Tap to answer</div>
           <ul className="flex flex-col gap-1.5">
             {donnaQuestions.map((q, i) => {
