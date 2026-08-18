@@ -20,7 +20,7 @@ export const FONT_FAMILIES = [
 
 export const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 48, 60, 72];
 
-export const BOX_TYPES = ["text", "rect", "ellipse", "triangle", "diamond", "roundedRect", "star"];
+export const BOX_TYPES = ["text", "image", "rect", "ellipse", "triangle", "diamond", "roundedRect", "star"];
 
 export function execCmd(cmd, value) {
   try {
@@ -62,6 +62,7 @@ export function shiftObj(o, dx, dy) {
   if (dx === 0 && dy === 0) return o;
   switch (o.type) {
     case "text":
+    case "image":
     case "rect":
     case "ellipse":
     case "triangle":
@@ -83,6 +84,8 @@ export function objectBounds(o) {
   switch (o.type) {
     case "text":
       return { x: o.x, y: o.y, w: o.w || 200, h: o.h || (o.fontSize || 18) * 1.4 };
+    case "image":
+      return { x: o.x, y: o.y, w: o.w || 200, h: o.h || 150 };
     case "rect":
     case "ellipse":
     case "triangle":
@@ -139,6 +142,7 @@ export function hitTest(o, x, y, tolerance = 8) {
   }
   switch (o.type) {
     case "text":
+    case "image":
     case "rect":
     case "ellipse":
     case "triangle":
@@ -175,6 +179,7 @@ export function snap(v, size = GRID_SIZE) {
 export function snapObj(o, size = GRID_SIZE) {
   switch (o.type) {
     case "text":
+    case "image":
     case "rect":
     case "ellipse":
     case "triangle":
