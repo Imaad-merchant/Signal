@@ -8,9 +8,9 @@ const accentColor = () => localStorage.getItem("pulse_secondary") || "#f59e0b";
 
 function MetricCard({ label, value }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+    <div className="bg-white/[0.03] rounded-xl border border-white/10 p-4 shadow-sm">
       <p className="text-xs text-gray-400 mb-1">{label}</p>
-      <p className="text-xl font-bold text-gray-900">{value ?? "—"}</p>
+      <p className="text-xl font-bold text-gray-100">{value ?? "—"}</p>
     </div>
   );
 }
@@ -19,8 +19,8 @@ function PriceChart({ data }) {
   if (!data || data.length === 0) return null;
   const accent = accentColor();
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">Price (Close)</h3>
+    <div className="bg-white/[0.03] rounded-xl border border-white/10 p-5 shadow-sm">
+      <h3 className="text-sm font-semibold text-gray-300 mb-4">Price (Close)</h3>
       <ResponsiveContainer width="100%" height={220}>
         <AreaChart data={data}>
           <defs>
@@ -47,8 +47,8 @@ function VolHeatmap({ data }) {
   const accent = accentColor();
   const maxRange = Math.max(...data.map(d => d.avgRange));
   return (
-    <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">🔥 Hourly Volatility (Avg H-L Range)</h3>
+    <div className="bg-white/[0.03] rounded-xl border border-white/10 p-5 shadow-sm">
+      <h3 className="text-sm font-semibold text-gray-300 mb-4">Hourly Volatility</h3>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={data}>
           <XAxis dataKey="hour" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={h => `${h}:00`} />
@@ -74,17 +74,17 @@ function ChatMessage({ msg }) {
   return (
     <div className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
       {!isUser && (
-        <div className="h-7 w-7 rounded-lg bg-amber-100 flex items-center justify-center shrink-0 mt-0.5">
-          <Bot className="h-4 w-4 text-amber-600" />
+        <div className="h-7 w-7 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0 mt-0.5">
+          <Bot className="h-4 w-4 text-amber-300" />
         </div>
       )}
       <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-        isUser ? "bg-gray-900 text-white" : "bg-white border border-gray-100 text-gray-800"
+        isUser ? "bg-blue-600 text-white" : "bg-white/[0.03] border border-white/10 text-gray-200"
       }`}>
         {msg.content}
       </div>
       {isUser && (
-        <div className="h-7 w-7 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 mt-0.5">
+        <div className="h-7 w-7 rounded-lg bg-white/10 flex items-center justify-center shrink-0 mt-0.5">
           <User className="h-4 w-4 text-gray-500" />
         </div>
       )}
@@ -110,12 +110,18 @@ export default function Markets() {
     setError("");
     setStats(null);
     setChartData([]);
-    const res = await base44.functions.invoke("quantTerminal", { action: "getData", symbol, days });
-    if (res.data.error) {
-      setError(res.data.error);
+    let res;
+    try {
+      res = await base44.functions.invoke("quantTerminal", { action: "getData", symbol, days });
+    } catch {
+      setError("Couldn't reach the market data service — try again."); setLoading(false); return;
+    }
+    const data = (res && res.data) ? res.data : {};
+    if (data.error || !data.stats) {
+      setError(data.error || "No data returned for that ticker.");
     } else {
-      setStats(res.data.stats);
-      const formatted = res.data.chartData.map(d => ({
+      setStats(data.stats);
+      const formatted = (data.chartData || []).map(d => ({
         ...d,
         label: format(new Date(d.time), "MM/dd HH:mm"),
       }));
@@ -148,14 +154,13 @@ SD Levels anchored to London Mean:
     setMessages(newMessages);
     setInput("");
     setChatLoading(true);
-    const res = await base44.functions.invoke("quantTerminal", {
-      action: "chat",
-      messages: newMessages,
-      context: buildContext(),
-    });
-    if (res.data.answer) {
-      setMessages([...newMessages, { role: "assistant", content: res.data.answer }]);
-    }
+    let res;
+    try {
+      res = await base44.functions.invoke("quantTerminal", { action: "chat", messages: newMessages, context: buildContext() });
+    } catch { res = null; }
+    const answer = (res && res.data && res.data.answer) ? res.data.answer : null;
+    if (answer) setMessages([...newMessages, { role: "assistant", content: answer }]);
+    else setMessages([...newMessages, { role: "assistant", content: "I couldn't answer that just now — try again." }]);
     setChatLoading(false);
   };
 
@@ -164,20 +169,20 @@ SD Levels anchored to London Mean:
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">⚡ Alpha Quant Terminal</h1>
-          <p className="text-sm text-gray-400 mt-0.5">London SD levels & volatility analysis</p>
+          <h1 className="text-2xl font-bold text-gray-100">Markets</h1>
+          <p className="text-sm text-gray-400 mt-0.5">London SD levels & volatility</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input
             value={symbol}
             onChange={e => setSymbol(e.target.value.toUpperCase())}
             placeholder="Ticker (e.g. NQ=F)"
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm w-32 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            className="border border-white/10 rounded-xl px-3 py-2 text-sm w-32 focus:outline-none focus:ring-2 bg-white/5 text-gray-100 placeholder-gray-500 focus:ring-amber-400/40"
           />
           <select
             value={days}
             onChange={e => setDays(Number(e.target.value))}
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+            className="border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 bg-white/5 text-gray-100 placeholder-gray-500 focus:ring-amber-400/40"
           >
             {[7, 14, 30, 60].map(d => <option key={d} value={d}>{d} days</option>)}
           </select>
@@ -194,7 +199,7 @@ SD Levels anchored to London Mean:
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{error}</div>
+        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-200 text-sm rounded-xl px-4 py-3">{error}</div>
       )}
 
       {/* Metrics */}
@@ -213,33 +218,33 @@ SD Levels anchored to London Mean:
 
       {/* AI Chat */}
       {stats && (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
+        <div className="bg-white/[0.03] rounded-2xl border border-white/10 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/10 flex items-center gap-2">
             <Bot className="h-4 w-4 text-amber-500" />
-            <h3 className="text-sm font-semibold text-gray-800">AI Quant Researcher</h3>
+            <h3 className="text-sm font-semibold text-gray-200">AI Quant Researcher</h3>
           </div>
-          <div className="h-72 overflow-y-auto p-5 space-y-4 bg-gray-50/50">
+          <div className="h-72 overflow-y-auto p-5 space-y-4 bg-white/[0.02]">
             {messages.length === 0 && (
               <p className="text-sm text-gray-400 text-center pt-10">Ask about SD reversals, levels, or market structure...</p>
             )}
             {messages.map((m, i) => <ChatMessage key={i} msg={m} />)}
             {chatLoading && (
               <div className="flex gap-3 justify-start">
-                <div className="h-7 w-7 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
-                  <Loader2 className="h-4 w-4 text-amber-600 animate-spin" />
+                <div className="h-7 w-7 rounded-lg bg-amber-500/15 flex items-center justify-center shrink-0">
+                  <Loader2 className="h-4 w-4 text-amber-300 animate-spin" />
                 </div>
-                <div className="bg-white border border-gray-100 rounded-2xl px-4 py-2.5 text-sm text-gray-400">Thinking...</div>
+                <div className="bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-2.5 text-sm text-gray-400">Thinking...</div>
               </div>
             )}
             <div ref={chatEndRef} />
           </div>
-          <div className="px-4 py-3 border-t border-gray-100 flex gap-2">
+          <div className="px-4 py-3 border-t border-white/10 flex gap-2">
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && sendMessage()}
               placeholder="Ask about the SD reversals..."
-              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+              className="flex-1 border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 bg-white/5 text-gray-100 placeholder-gray-500 focus:ring-amber-400/40"
             />
             <button
               onClick={sendMessage}
