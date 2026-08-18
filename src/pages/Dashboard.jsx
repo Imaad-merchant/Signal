@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import {
@@ -78,6 +78,25 @@ function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChan
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
+
+  // Pull Google Calendar → tasks when the calendar opens (throttled), so events
+  // added/changed in Google show up here. App→Google push happens on each edit.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const last = Number(localStorage.getItem("gcal_last_sync") || 0);
+        if (Date.now() - last < 3 * 60 * 1000) return;
+        localStorage.setItem("gcal_last_sync", String(Date.now()));
+        const res = await base44.functions.invoke("donna", { route: "gcal-sync" });
+        const d = (res && res.data) ? res.data : res || {};
+        if (!cancelled && d.ok && ((d.created || 0) + (d.updated || 0) + (d.deleted || 0)) > 0) {
+          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        }
+      } catch { /* offline or Google not connected — ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [queryClient]);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAIAssistant, setShowAIAssistant] = useState(false);
