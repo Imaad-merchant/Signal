@@ -69,12 +69,33 @@ function createEntityHandler(collectionName) {
 
     async list(sortStr, limitNum) {
       const user = requireUser();
+      const sort = parseSort(sortStr);
+      // Fast path: let Firestore do the ordering + limiting server-side so we don't
+      // download the whole collection. Restricted to `created_date` (base44 sets it on
+      // every create, so no doc is dropped for a missing sort field) + a limit. Needs a
+      // composite index (userId, created_date); if it's absent Firestore throws
+      // failed-precondition and we fall back to the full read below — so this is a pure
+      // optimization that never breaks reads.
+      if (sort && sort.field === "created_date" && limitNum) {
+        try {
+          const fastQ = query(
+            collection(db, collectionName),
+            where("userId", "==", user.uid),
+            orderBy("created_date", sort.direction === "desc" ? "desc" : "asc"),
+            firestoreLimit(limitNum),
+          );
+          const fastSnap = await getDocs(fastQ);
+          return fastSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (err) {
+          if (err?.code === "permission-denied") throw err;
+          // missing index / any other issue → fall through to the compatible path
+        }
+      }
       try {
         const q = query(collection(db, collectionName), where("userId", "==", user.uid));
         const snap = await getDocs(q);
         let results = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        const sort = parseSort(sortStr);
         if (sort) {
           results.sort((a, b) => {
             const av = a[sort.field] || "";
