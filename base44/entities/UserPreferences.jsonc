@@ -1,0 +1,17 @@
+{
+  "name": "UserPreferences",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string",
+      "description": "The user's email (used to look up their preferences)"
+    },
+    "preferences": {
+      "type": "string",
+      "description": "Free-text preferences the AI should remember, e.g. 'I prefer workouts at 6am', 'Trading tasks are always high priority'"
+    }
+  },
+  "required": [
+    "user_email"
+  ]
+}

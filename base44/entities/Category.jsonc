@@ -1,0 +1,23 @@
+{
+  "name": "Category",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "Category name"
+    },
+    "color": {
+      "type": "string",
+      "description": "Hex color code"
+    },
+    "key": {
+      "type": "string",
+      "description": "Unique key for the category"
+    }
+  },
+  "required": [
+    "label",
+    "color",
+    "key"
+  ]
+}

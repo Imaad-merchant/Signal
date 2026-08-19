@@ -1,0 +1,49 @@
+{
+  "name": "DailyLog",
+  "type": "object",
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "The date of the log"
+    },
+    "productivity_score": {
+      "type": "number",
+      "description": "Self-rated productivity 1-10"
+    },
+    "tasks_completed": {
+      "type": "number",
+      "default": 0
+    },
+    "focus_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "mood": {
+      "type": "string",
+      "enum": [
+        "great",
+        "good",
+        "okay",
+        "low",
+        "bad"
+      ],
+      "default": "good"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "energy_level": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "default": "medium"
+    }
+  },
+  "required": [
+    "date"
+  ]
+}
