@@ -748,7 +748,7 @@ export default function Dashboard() {
          <div
            ref={calBodyRef}
            data-scroll-container
-           className="flex-1 min-h-0 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+           className="flex-1 min-h-0 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))]"
            onTouchStart={handleCalTouchStart}
            onTouchMove={handleCalTouchMove}
            onTouchEnd={handleCalTouchEnd}

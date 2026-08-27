@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import MobileBottomTab from "./components/MobileBottomTab";
-import DesktopNav from "./components/DesktopNav";
 
 export default function Layout({ children, currentPageName }) {
   const [themeColor, setThemeColor] = useState(() => localStorage.getItem("pulse_theme") || "#4285f4");
@@ -17,7 +16,7 @@ export default function Layout({ children, currentPageName }) {
   const isFullHeight = currentPageName === "Dashboard" || currentPageName === "Tasks" || currentPageName === "Donna";
 
   return (
-    <div className="min-h-[100dvh] bg-[#1e1f20] md:pl-16" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+    <div className="min-h-[100dvh] bg-[#1e1f20]" style={{ paddingTop: "env(safe-area-inset-top)" }}>
       <style>{`
         * { -webkit-font-smoothing: antialiased; }
         body {
@@ -41,14 +40,13 @@ export default function Layout({ children, currentPageName }) {
           animate={{ opacity: 1, x: 0 }}
           exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -16 }}
           transition={{ duration: reduceMotion ? 0.08 : 0.18, ease: "easeInOut" }}
-          className={isFullHeight ? "overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}
+          className={isFullHeight ? "overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20"}
           style={isFullHeight ? { height: "calc(100dvh - env(safe-area-inset-top))" } : undefined}
         >
           {children}
         </motion.main>
       </AnimatePresence>
       <MobileBottomTab currentPageName={currentPageName} />
-      <DesktopNav currentPageName={currentPageName} />
     </div>
   );
 }

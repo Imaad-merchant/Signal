@@ -21,7 +21,7 @@ export default function MobileBottomTab({ currentPageName }) {
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-[#1e1f20] border-t border-white/10"
+      className="fixed bottom-0 left-0 right-0 z-50 flex bg-[#1e1f20] border-t border-white/10"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       {TABS.map(({ label, icon: Icon, page }) => {
