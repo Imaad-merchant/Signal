@@ -5,8 +5,10 @@ import { ICON_MAP } from "./NotionSidebar";
 const TYPE_COLOR = { whiteboard: "#60a5fa", document: "#34d399", notion: "#c084fc" };
 const colorFor = (p) => TYPE_COLOR[p?.type] || "#9ca3af";
 
-// A memory made by Donna (tagged at creation, or an old voice Log).
-const isDonna = (p) => p?.source === "donna" || p?.category === "Log";
+// Yours only when explicitly tagged source:"user" (files you make in the
+// workspace, or ones you mark as yours). Everything else is Donna's — her
+// captures, logs, and imported vault notes.
+const isDonna = (p) => p?.source !== "user";
 
 // Auto-category, read from the note's title + content (Donna groups by topic).
 const CATEGORIES = [
@@ -616,6 +618,9 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
           <div className="fixed z-50 w-[160px] rounded-xl border border-white/[0.1] bg-[#2a2b2d] py-1 shadow-2xl" style={{ left: rowMenu.x, top: rowMenu.y }} onClick={(e) => e.stopPropagation()}>
             <button onClick={() => { const p = rowMenu.page; setRowMenu(null); openMemory(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
               <Pencil className="h-3.5 w-3.5 text-blue-400" /> Edit
+            </button>
+            <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onUpdate?.(p.id, { source: isDonna(p) ? "user" : "donna" }); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
+              <ArrowUpRight className="h-3.5 w-3.5 text-cyan-400" /> {isDonna(rowMenu.page) ? "Move to yours" : "Move to Donna's"}
             </button>
             <div className="my-1 h-px bg-white/[0.08]" />
             <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onDelete?.(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-rose-300 hover:bg-rose-500/15">

@@ -223,10 +223,15 @@ async function retrieveRelevantNotes(uid, query) {
   }
 }
 
-// A question that benefits from digging through the vault/memories (reflection,
-// advice, self-assessment, "based on my …") rather than a quick command.
+// Should Donna dig through the vault/memories before answering? Fire on anything
+// that reads like a question, reflection, advice, or personal recall — but skip
+// pure quick commands (remind/log/add/…) that never need the vault. Broad on
+// purpose: recall should feel automatic.
 function wantsDeepRecall(t) {
-  return /\?|\b(how|what|why|which|should|help|advice|prepare|interview|resume|cover letter|leverage|strength|weakness|achieve|accomplish|experience|background|story|goal|value|personality|based on my|about my|my life|remind me (?:what|how)|tell me about|summar|reflect|pattern)\b/i.test(t || "");
+  if (!t) return false;
+  const s = t.toLowerCase().trim();
+  if (/^(remind me to|log |add |create |delete |remove |complete |mark |set |schedule )/.test(s) && s.length < 70) return false;
+  return /\?|\b(how|what|why|which|who|when|where|should|could|would|help|advice|prepare|prep|interview|resume|cover ?letter|apply|application|leverage|strength|weakness|achieve|accomplish|experience|background|story|goal|value|personality|passion|skill|based on|about my|my (life|work|business|goals?|notes?|memor|projects?|experience|background|classes|school)|do i|have i|did i|tell me|give me|remember|recall|summar|reflect|pattern|know about|think about|opinion|draft|write .*(for me|about)|idea|explain|describe|help me)\b/.test(s);
 }
 
 // ---- route: intent (voice command → reply + actions) ----

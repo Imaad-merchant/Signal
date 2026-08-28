@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
-import { Plus, FileText, Folder as FolderIcon, MoreVertical, Pin, PinOff, Trash2, Download, CheckSquare, ArrowUpDown, X, Check } from "lucide-react";
+import { Plus, FileText, Folder as FolderIcon, FolderPlus, MoreVertical, Pin, PinOff, Trash2, Download, CheckSquare, ArrowUpDown, X, Check } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
 
 // Relative "edited X ago" label.
@@ -90,11 +90,17 @@ function CreateCard({ preview, title, subtitle, onClick }) {
   );
 }
 
-function FolderCard({ page, count, onOpen }) {
+function FolderCard({ page, count, onNavigate, onDropFile, onDragOverFolder, onDragLeaveFolder, isDropTarget }) {
   const cfg = ICON_MAP[page.icon] || ICON_MAP.folder;
   const Icon = cfg.icon;
   return (
-    <button onClick={() => onOpen(page)} className="group flex items-center gap-3 text-left rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/[0.12] p-3 transition-colors">
+    <div
+      onClick={() => onNavigate(page)}
+      onDragOver={(e) => { e.preventDefault(); onDragOverFolder(page.id); }}
+      onDragLeave={() => onDragLeaveFolder(page.id)}
+      onDrop={(e) => { e.preventDefault(); onDropFile(page.id); }}
+      className={`group flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-left transition-colors ${isDropTarget ? "border-blue-400/60 bg-blue-500/[0.12]" : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.04]"}`}
+    >
       <div className="h-9 w-9 rounded-lg bg-white/[0.04] flex items-center justify-center shrink-0">
         <Icon className={`h-4 w-4 ${cfg.color}`} />
       </div>
@@ -102,7 +108,7 @@ function FolderCard({ page, count, onOpen }) {
         <p className="text-[13px] font-medium text-gray-100 truncate group-hover:text-white">{page.title || "Untitled"}</p>
         <p className="text-[10.5px] text-gray-500 mt-0.5">{count} item{count !== 1 ? "s" : ""}</p>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -112,13 +118,16 @@ const SORTS = [
   { key: "type", label: "Type" },
 ];
 
-export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUpdate }) {
+export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUpdate, onCreateFolder, onMove }) {
   const [sortKey, setSortKey] = useState("modified");
   const [sortOpen, setSortOpen] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [menu, setMenu] = useState(null); // { page, x, y }
+  const [folderId, setFolderId] = useState(null); // current folder we're browsing (null = root)
+  const [dropTarget, setDropTarget] = useState(null); // folder id being hovered during a drag
   const sortRef = useRef(null);
+  const dragIdRef = useRef(null);
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -132,19 +141,25 @@ export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUp
     for (const p of pages) if (p.parent_id) counts[p.parent_id] = (counts[p.parent_id] || 0) + 1;
     return counts;
   }, [pages]);
-  const rootPages = useMemo(() => pages.filter((p) => !p.parent_id), [pages]);
-  const folders = useMemo(() => rootPages.filter((p) => childCount[p.id] > 0), [rootPages, childCount]);
+  const isFolder = (p) => p.is_folder || p.type === "folder" || childCount[p.id] > 0;
+  // Pages at the current level (children of the folder we're in; null = root).
+  const levelPages = useMemo(() => pages.filter((p) => (p.parent_id || null) === (folderId || null)), [pages, folderId]);
+  const folders = useMemo(() => levelPages.filter(isFolder), [levelPages, childCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  const currentFolder = folderId ? pages.find((p) => p.id === folderId) : null;
 
   const files = useMemo(() => {
-    const list = rootPages.filter((p) => !childCount[p.id]);
+    const list = levelPages.filter((p) => !isFolder(p));
     const cmp = {
       modified: (a, b) => (b.updated_date || "").localeCompare(a.updated_date || ""),
       name: (a, b) => (a.title || "Untitled").localeCompare(b.title || "Untitled"),
       type: (a, b) => typeLabel(a.type).localeCompare(typeLabel(b.type)) || (a.title || "").localeCompare(b.title || ""),
     }[sortKey];
-    // Pinned always first, then the chosen sort.
     return list.sort((a, b) => (!!b.pinned - !!a.pinned) || cmp(a, b));
-  }, [rootPages, childCount, sortKey]);
+  }, [levelPages, sortKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const moveInto = (fileId, targetFolderId) => {
+    if (fileId && fileId !== targetFolderId) onMove?.(fileId, { parent_id: targetFolderId });
+  };
 
   const ownerName = user?.name || user?.email?.split("@")[0] || "Me";
   const ownerInitial = (user?.name || user?.email || "?").trim().charAt(0).toUpperCase();
@@ -163,19 +178,34 @@ export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUp
   return (
     <div className="h-full overflow-y-auto pb-[calc(4rem+env(safe-area-inset-bottom))]">
       <div className="max-w-5xl mx-auto px-6 py-7">
-        {/* Header */}
-        <h1 className="text-[22px] leading-[30px] font-semibold text-gray-100 mb-6">My workspace</h1>
+        {/* Header / breadcrumb */}
+        <div className="mb-6 flex items-center gap-2 min-w-0">
+          {currentFolder ? (
+            <>
+              <button onClick={() => setFolderId(null)} className="text-[22px] leading-[30px] font-semibold text-gray-500 hover:text-gray-300">My workspace</button>
+              <span className="text-gray-600">/</span>
+              <h1 className="text-[22px] leading-[30px] font-semibold text-gray-100 truncate">{currentFolder.title || "Folder"}</h1>
+            </>
+          ) : (
+            <h1 className="text-[22px] leading-[30px] font-semibold text-gray-100">My workspace</h1>
+          )}
+        </div>
 
         {/* Create new */}
         <section className="mb-8">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 mb-3">Create new</h2>
+          <div className="mb-3 flex items-center gap-3">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Create new</h2>
+            <button onClick={() => onCreateFolder?.(folderId)} className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[11.5px] text-gray-300 hover:bg-white/[0.05]">
+              <FolderPlus className="h-3.5 w-3.5" /> New folder
+            </button>
+          </div>
           <div className="grid grid-cols-2 gap-3 max-w-lg">
             <CreateCard preview={<DocPreview />} title="Document" subtitle="Rich-text notes" onClick={() => onCreate("document")} />
             <CreateCard preview={<WhiteboardPreview />} title="Whiteboard" subtitle="Freeform canvas" onClick={() => onCreate("whiteboard")} />
           </div>
         </section>
 
-        {/* Folders */}
+        {/* Folders — drop a file onto one to move it in */}
         {folders.length > 0 && (
           <section className="mb-7">
             <div className="flex items-center gap-2 mb-3 text-gray-400">
@@ -183,7 +213,18 @@ export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUp
               <h2 className="text-[11px] font-semibold uppercase tracking-wider">Folders</h2>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-              {folders.map((p) => <FolderCard key={p.id} page={p} count={childCount[p.id] || 0} onOpen={onOpen} />)}
+              {folders.map((p) => (
+                <FolderCard
+                  key={p.id}
+                  page={p}
+                  count={childCount[p.id] || 0}
+                  onNavigate={(f) => setFolderId(f.id)}
+                  onDragOverFolder={(id) => setDropTarget(id)}
+                  onDragLeaveFolder={(id) => setDropTarget((t) => (t === id ? null : t))}
+                  onDropFile={(id) => { moveInto(dragIdRef.current, id); dragIdRef.current = null; setDropTarget(null); }}
+                  isDropTarget={dropTarget === p.id}
+                />
+              ))}
             </div>
           </section>
         )}
@@ -254,6 +295,9 @@ export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUp
                 return (
                   <div
                     key={p.id}
+                    draggable={!selectMode}
+                    onDragStart={() => { dragIdRef.current = p.id; }}
+                    onDragEnd={() => { dragIdRef.current = null; setDropTarget(null); }}
                     onClick={() => rowClick(p)}
                     className={`grid grid-cols-[1fr_150px_34px] md:grid-cols-[1fr_130px_150px_34px] gap-3 items-center px-4 py-2.5 border-b border-white/[0.03] cursor-pointer transition-colors last:border-b-0 ${isSel ? "bg-blue-500/[0.08]" : "hover:bg-white/[0.03]"}`}
                   >

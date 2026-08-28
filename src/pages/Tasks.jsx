@@ -244,6 +244,14 @@ export default function Tasks() {
     setTemplatePicker({ parentId, section });
   };
 
+  const handleCreateFolder = async (parentId = null) => {
+    await base44.entities.Page.create({
+      title: "New folder", icon: "folder", is_folder: true, type: "folder",
+      parent_id: parentId || null, section: "private", status: "not_started", source: "user",
+    });
+    refreshPages();
+  };
+
   const handleCreateFromTemplate = async (template) => {
     const ctx = templatePicker || { parentId: null, section: "private" };
     setTemplatePicker(null);
@@ -256,6 +264,7 @@ export default function Tasks() {
       type: template.type || "whiteboard",
       content: template.content || "",
       whiteboard: template.whiteboard || "",
+      source: "user", // made by you in the workspace (vs Donna's memories)
     };
     const newPage = await base44.entities.Page.create(payload);
     refreshPages();
@@ -902,6 +911,8 @@ export default function Tasks() {
               onCreate={(type) => handleCreateFromTemplate({ type, icon: "file", title: "" })}
               onDelete={handleDeletePage}
               onUpdate={handleUpdatePageById}
+              onCreateFolder={handleCreateFolder}
+              onMove={handleUpdatePageById}
             />
           )}
         </div>
