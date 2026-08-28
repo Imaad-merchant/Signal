@@ -64,15 +64,8 @@ async function tick() {
   try {
     const payload = { telemetry: collectTelemetry() };
 
-    // Opt-in grades scrape (local-only; disabled unless cfg.uh.enabled).
-    try {
-      const grades = await scrapeGrades(cfg.uh);
-      if (grades.length) payload.grades = grades;
-    } catch (err) {
-      console.warn("[worker] grades step failed:", err.message);
-    }
-
-    // Local knowledge index (Obsidian vault / folders) — every N minutes, not every tick.
+    // Local knowledge index (Obsidian vault / folders) FIRST — so the vault stays
+    // fresh promptly and isn't blocked behind the (slow, Playwright) grades scrape.
     if (cfg.knowledge?.enabled) {
       const everyMs = (cfg.knowledge.intervalMinutes ?? 20) * 60000;
       if (Date.now() - lastIndexAt >= everyMs) {
@@ -85,6 +78,14 @@ async function tick() {
           console.warn("[worker] knowledge index failed:", err.message);
         }
       }
+    }
+
+    // Opt-in grades scrape (local-only; disabled unless cfg.uh.enabled).
+    try {
+      const grades = await scrapeGrades(cfg.uh);
+      if (grades.length) payload.grades = grades;
+    } catch (err) {
+      console.warn("[worker] grades step failed:", err.message);
     }
 
     // Active-app context → time-blindness notifications (macOS).
