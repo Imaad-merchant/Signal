@@ -53,7 +53,7 @@ export default async function handler(req, res) {
 
   try {
     if (route === "checkin") return await checkin(body, res);
-    if (route === "intent") return await intent(body, res);
+    if (route === "intent") return await intent(auth, body, res);
     if (route === "nudge") return await nudge(body, res);
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
@@ -190,12 +190,55 @@ Produce exactly one payback object now.`;
   return res.status(400).json({ error: "Unknown action (expected 'questions' or 'payback')" });
 }
 
+// Retrieve the notes/memories most RELEVANT to a question from the user's `notes`
+// store (indexed Obsidian vault + Donna's captured memories) — keyword prefilter
+// then embedding cosine rank. Best-effort: returns [] on any failure so the answer
+// never depends on it. Gated by the caller to reflective/personal questions.
+async function retrieveRelevantNotes(uid, query) {
+  if (!uid || !isAdminConfigured()) return [];
+  try {
+    const db = getAdminDb();
+    const snap = await db.collection("notes").where("userId", "==", uid).get();
+    const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!notes.length) return [];
+    const terms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const pre = notes
+      .map((n) => {
+        const hay = `${n.title || ""} ${n.content || ""}`.toLowerCase();
+        let s = 0; for (const t of terms) if (hay.includes(t)) s++;
+        return { n, s };
+      })
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.n)
+      .slice(0, 40);
+    const vecs = await embed([query, ...pre.map((c) => `${c.title || ""}\n${(c.content || "").slice(0, 1500)}`)]);
+    const qv = vecs[0];
+    return pre
+      .map((c, i) => ({ title: c.title || "Untitled", folder: c.folder || "", excerpt: (c.content || "").replace(/\s+/g, " ").trim().slice(0, 600), score: cosine(qv, vecs[i + 1]) }))
+      .sort((a, b) => b.score - a.score)
+      .filter((r) => r.score > 0.15)
+      .slice(0, 6);
+  } catch {
+    return [];
+  }
+}
+
+// A question that benefits from digging through the vault/memories (reflection,
+// advice, self-assessment, "based on my …") rather than a quick command.
+function wantsDeepRecall(t) {
+  return /\?|\b(how|what|why|which|should|help|advice|prepare|interview|resume|cover letter|leverage|strength|weakness|achieve|accomplish|experience|background|story|goal|value|personality|based on my|about my|my life|remind me (?:what|how)|tell me about|summar|reflect|pattern)\b/i.test(t || "");
+}
+
 // ---- route: intent (voice command → reply + actions) ----
-async function intent(body, res) {
+async function intent(auth, body, res) {
   const transcript = typeof body.transcript === "string" ? body.transcript.trim() : "";
   if (!transcript) return res.status(400).json({ error: "Transcript required" });
   const context = body.context && typeof body.context === "object" ? body.context : {};
   const today = context.today || new Date().toISOString().slice(0, 10);
+
+  // Auto-retrieval: for reflective/personal questions, pull the most relevant
+  // notes + memories from the vault so Donna answers grounded in the user's life.
+  const relevantNotes = wantsDeepRecall(transcript) ? await retrieveRelevantNotes(auth?.uid, transcript) : [];
 
   const system = `${personaLine(body.prefs)}
 You are a sharp, unflappable chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
@@ -224,6 +267,7 @@ RULES:
 - LISTS: when the user talks about a project/list ("my business list", "for the app"), use add/complete/remove with that list name. Default the list to "Business" only if they clearly mean their main venture and name none.
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
 - RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
+- DEEP RECALL / REFLECTION: "relevant_notes" are the notes + memories from their Obsidian vault most relevant to THIS question (retrieved semantically). For reflective or advice questions — interview prep, "how do I leverage my life/achievements", self-assessment, "based on my experience", goals, patterns — DRAW ON relevant_notes: weave in concrete specifics (real achievements, experiences, values they actually wrote) rather than generic advice, and name where it comes from when useful. If relevant_notes is empty, answer from what you do have and say you don't have much in their vault on it yet.
 - GRADE QUESTIONS: when they ask about grades, answer from the "grades" context — name the course and score, and if a grade recently dropped or an assignment is missing, say so plainly. If grades is empty, say you don't have their latest yet and they can have their school check run.
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
@@ -251,9 +295,10 @@ Context (JSON): ${JSON.stringify({
     upcoming_calendar: Array.isArray(context.calendar) ? context.calendar.slice(0, 30) : [],
     recent_emails: Array.isArray(context.emails) ? context.emails.slice(0, 15) : [],
     recent_notes: Array.isArray(context.recent_notes) ? context.recent_notes.slice(0, 20) : [],
+    relevant_notes: relevantNotes,
     grades: Array.isArray(context.grades) ? context.grades.slice(0, 40) : [],
     domains: Array.isArray(context.domains) ? context.domains : [],
-  }).slice(0, 7000)}
+  }).slice(0, 9000)}
 
 Parse it now.`;
 
