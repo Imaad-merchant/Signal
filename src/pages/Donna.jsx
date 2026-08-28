@@ -1006,8 +1006,9 @@ export default function Donna() {
     setNote("Sending a test briefing to your email…");
     try {
       const r = await base44.functions.invoke("donna", { route: "test-brief" });
-      const ok = (r && r.data && r.data.sent) ?? r?.sent;
-      setNote(ok ? "Sent — check your inbox." : "Couldn't send — email isn't configured on the server.");
+      const d = (r && r.data) || r || {};
+      if (d.sent) setNote(`Sent (${d.mode || "?"}${d.mode === "static" && d.reason ? ` — ${d.reason}` : ""}) — check your inbox.`);
+      else setNote(`Couldn't send${d.reason ? ` — ${d.reason}` : " — email not configured"}.`);
     } catch {
       setNote("Couldn't send the test briefing.");
     } finally {

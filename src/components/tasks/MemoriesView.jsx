@@ -5,10 +5,12 @@ import { ICON_MAP } from "./NotionSidebar";
 const TYPE_COLOR = { whiteboard: "#60a5fa", document: "#34d399", notion: "#c084fc" };
 const colorFor = (p) => TYPE_COLOR[p?.type] || "#9ca3af";
 
-// Yours only when explicitly tagged source:"user" (files you make in the
-// workspace, or ones you mark as yours). Everything else is Donna's — her
-// captures, logs, and imported vault notes.
-const isDonna = (p) => p?.source !== "user";
+// Three memory sources, kept separate in the sidebar:
+//  • obsidian — indexed vault notes (read-only, from your Obsidian)
+//  • me       — files you made in the workspace / marked as yours (source:"user")
+//  • donna    — everything else: her captures, logs, and voice notes
+const authorOf = (p) => (p?._vault ? "obsidian" : p?.source === "user" ? "me" : "donna");
+const isDonna = (p) => authorOf(p) === "donna"; // used by the reassign action
 
 // Auto-category, read from the note's title + content (Donna groups by topic).
 const CATEGORIES = [
@@ -157,6 +159,7 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
   const dragRef = useRef(null);
   const hoverRef = useRef(null);
   const rafRef = useRef(0);
+  const alphaRef = useRef(1); // simulation "heat" — decays so the graph settles
   const selRef = useRef(null);
   useEffect(() => { selRef.current = selectedId; }, [selectedId]);
 
@@ -183,6 +186,7 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
     });
     const byId = new Map(nodes.map((n) => [n.id, n]));
     simRef.current = { nodes, byId };
+    alphaRef.current = 1; // reheat so the new layout can settle
   }, [pages]);
 
   // Resize canvas to its container (devicePixelRatio-aware).
@@ -244,11 +248,23 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
         b.fx -= ux * f; b.fy -= uy * f;
       }
       const dragging = dragRef.current?.mode === "node" ? dragRef.current.id : null;
-      for (const nd of nodes) {
-        if (nd.id === dragging) { nd.vx = 0; nd.vy = 0; continue; }
-        nd.vx = (nd.vx + nd.fx) * DAMP;
-        nd.vy = (nd.vy + nd.fy) * DAMP;
-        nd.x += nd.vx; nd.y += nd.vy;
+      // Cool-down: forces fade to zero over time so the layout SETTLES instead of
+      // jittering forever. Velocity is clamped so nodes never fling out ("spazz").
+      const alpha = alphaRef.current;
+      const MAXV = 22;
+      if (alpha > 0.002) {
+        for (const nd of nodes) {
+          if (nd.id === dragging) { nd.vx = 0; nd.vy = 0; continue; }
+          nd.vx = (nd.vx + nd.fx * alpha) * DAMP;
+          nd.vy = (nd.vy + nd.fy * alpha) * DAMP;
+          const sp = Math.hypot(nd.vx, nd.vy);
+          if (sp > MAXV) { nd.vx = (nd.vx / sp) * MAXV; nd.vy = (nd.vy / sp) * MAXV; }
+          nd.x += nd.vx; nd.y += nd.vy;
+        }
+        alphaRef.current = alpha - 0.006; // ~160 ticks to settle
+      } else if (dragging) {
+        const nd = simRef.current.byId.get(dragging); // keep the dragged node tracking the cursor
+        if (nd) { nd.vx = 0; nd.vy = 0; }
       }
 
       // render
@@ -342,6 +358,7 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
     const hit = nodeAt(e.clientX, e.clientY);
     if (hit) {
       dragRef.current = { mode: "node", id: hit.id, moved: false, lastX: e.clientX, lastY: e.clientY };
+      alphaRef.current = Math.max(alphaRef.current, 0.5); // gently reheat while repositioning
     } else {
       dragRef.current = { mode: "pan", moved: false, lastX: e.clientX, lastY: e.clientY };
     }
@@ -405,11 +422,12 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
   // collapsible, colour-coded sections — sorted and colour-filtered.
   const grouped = useMemo(() => {
     const cmp = (SORTS.find((s) => s.key === sortKey) || SORTS[0]).cmp;
-    const meta = pages.map((p) => ({ p, cat: categorize(p), donna: isDonna(p) }));
+    const meta = pages.map((p) => ({ p, cat: categorize(p), who: authorOf(p) }));
     const filtered = colorFilter ? meta.filter((m) => m.cat.key === colorFilter) : meta;
     const authors = [
-      { key: "donna", label: "Donna's memories", accent: "#67e8f9", items: filtered.filter((m) => m.donna) },
-      { key: "you", label: "Your notes", accent: "#93c5fd", items: filtered.filter((m) => !m.donna) },
+      { key: "me", label: "Made by me", accent: "#93c5fd", items: filtered.filter((m) => m.who === "me") },
+      { key: "donna", label: "Donna's memories", accent: "#67e8f9", items: filtered.filter((m) => m.who === "donna") },
+      { key: "obsidian", label: "Obsidian vault", accent: "#a78bfa", items: filtered.filter((m) => m.who === "obsidian") },
     ];
     return authors
       .map((a) => {

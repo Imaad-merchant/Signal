@@ -144,7 +144,9 @@ async function gatherAgenda(db) {
   ]);
   const tasks = mine(tSnap.docs).filter((t) => t.status !== "done");
   const commitments = mine(cSnap.docs).filter((c) => (c.status || "open") === "open").slice(0, 15);
-  const overdue = tasks.filter((t) => t.due_date && t.due_date < today).sort((a, b) => (a.due_date < b.due_date ? -1 : 1)).slice(0, 15);
+  // Overdue, but only recently (last 21 days) — never dredge up months-old items.
+  const cutoff = new Date(Date.now() - 21 * 86400000).toISOString().slice(0, 10);
+  const overdue = tasks.filter((t) => t.due_date && t.due_date < today && t.due_date >= cutoff).sort((a, b) => (a.due_date < b.due_date ? -1 : 1)).slice(0, 10);
   const dueToday = tasks.filter((t) => t.due_date === today).slice(0, 15);
   return { overdue, dueToday, commitments };
 }
@@ -282,8 +284,9 @@ resume: ${JSON.stringify((resumeText || "").slice(0, 4000))}
 Write the briefing.`;
 
   let parsed;
-  try { parsed = parseJSON(await callLLM({ system, user, json: true })); } catch { return null; }
-  if (!parsed || !parsed.subject) return null;
+  try { parsed = parseJSON(await callLLM({ system, user, json: true })); }
+  catch (e) { return { error: `llm:${(e && e.message) || "failed"}`.slice(0, 120) }; }
+  if (!parsed || !parsed.subject) return { error: "no-json" };
 
   try {
     if (stateRef) {
@@ -292,7 +295,7 @@ Write the briefing.`;
     }
   } catch { /* ignore */ }
 
-  return { subject: parsed.subject, text: renderSmartText(parsed, link), html: renderSmartHtml(parsed, link) };
+  return { payload: { subject: parsed.subject, text: renderSmartText(parsed, link), html: renderSmartHtml(parsed, link) } };
 }
 
 export async function sendBriefingEmail(db, slot) {
@@ -300,10 +303,14 @@ export async function sendBriefingEmail(db, slot) {
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  if (!to || !host || !user || !pass) return false;
+  if (!to || !host || !user || !pass) return { sent: false, mode: "none", reason: "smtp-not-configured" };
   // Smart, personalised briefing first; fall back to the static agenda email.
-  let payload = null;
-  try { payload = await composeSmartBriefing(db, slot); } catch { payload = null; }
+  let payload = null, mode = "smart", reason = "";
+  try {
+    const r = await composeSmartBriefing(db, slot);
+    if (r && r.payload) { payload = r.payload; }
+    else { mode = "static"; reason = (r && r.error) || "null"; }
+  } catch (e) { mode = "static"; reason = `threw:${(e && e.message) || ""}`.slice(0, 120); }
   if (!payload) {
     let agenda = { overdue: [], dueToday: [], commitments: [] };
     try { agenda = await gatherAgenda(db); } catch { /* empty */ }
@@ -316,9 +323,9 @@ export async function sendBriefingEmail(db, slot) {
       auth: { user, pass },
     });
     await transport.sendMail({ from: process.env.SMTP_FROM || user, to, subject, text, html });
-    return true;
-  } catch {
-    return false;
+    return { sent: true, mode, reason };
+  } catch (e) {
+    return { sent: false, mode, reason: `smtp:${(e && e.message) || ""}`.slice(0, 120) };
   }
 }
 
