@@ -897,8 +897,9 @@ export default function Tasks() {
               pages={activePages}
               user={user}
               onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
-              onCreate={() => handleCreatePage(null, "private")}
-              onImport={() => setTemplatePicker(true)}
+              onCreate={(type) => handleCreateFromTemplate({ type, icon: "file", title: "" })}
+              onDelete={handleDeletePage}
+              onUpdate={handleUpdatePageById}
             />
           )}
         </div>
