@@ -75,7 +75,7 @@ export default function ThoughtsPanel({ onClose, onSaved }) {
       const data = (res && res.data) ? res.data : res || {};
       const title = data.title || "Thoughts";
       const content = data.content || raw;
-      await base44.entities.Page.create({ title, type: "document", content }).catch(() => null);
+      await base44.entities.Page.create({ title, type: "document", content, source: "donna" }).catch(() => null);
       setMsg(`Saved "${title}" to your notes.`);
       setText("");
       onSaved && onSaved(title);

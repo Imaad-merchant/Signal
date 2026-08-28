@@ -837,6 +837,8 @@ export default function Tasks() {
             <MemoriesView
               pages={activePages}
               onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
+              onDelete={handleDeletePage}
+              onUpdate={handleUpdatePageById}
             />
           ) : view === "page" && selectedPage ? (() => {
             const pageType = selectedPage.type || "whiteboard";

@@ -1,9 +1,37 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { ArrowUpRight, Link2, CornerDownRight, FileText, ChevronLeft } from "lucide-react";
+import { ArrowUpRight, Link2, CornerDownRight, FileText, ChevronLeft, ChevronRight, ChevronDown, MoreVertical, Trash2, Pencil, Check, ArrowUpDown, CheckSquare, X, Sparkles } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
 
 const TYPE_COLOR = { whiteboard: "#60a5fa", document: "#34d399", notion: "#c084fc" };
 const colorFor = (p) => TYPE_COLOR[p?.type] || "#9ca3af";
+
+// A memory made by Donna (tagged at creation, or an old voice Log).
+const isDonna = (p) => p?.source === "donna" || p?.category === "Log";
+
+// Auto-category, read from the note's title + content (Donna groups by topic).
+const CATEGORIES = [
+  { key: "business", label: "Business", color: "#3b82f6", re: /\b(business|startup|revenue|customers?|market(ing)?|sales|pricing|product|launch|growth|founder|gridmail|saas|invoice|clients?|deal|pitch|investor)\b/i },
+  { key: "school", label: "School", color: "#f59e0b", re: /\b(class|course|exam|quiz|homework|assignment|professor|lecture|study|grade|semester|university|college|wcjc|econ|unit\s*\d|chapter\s*\d)\b/i },
+  { key: "health", label: "Health", color: "#22c55e", re: /\b(gym|workout|run(ning)?|health|sleep|diet|calorie|meditat|stretch|doctor|dentist|exercise|fitness)\b/i },
+  { key: "research", label: "Research", color: "#06b6d4", re: /\b(research|paper|analysis|data|experiment|findings?|report|writeup|intel|study of)\b/i },
+  { key: "personal", label: "Personal", color: "#a855f7", re: /\b(family|friend|mom|dad|birthday|personal|home|relationship|feel|volunteer|scout|church)\b/i },
+  { key: "journal", label: "Journal", color: "#eab308", re: /\b(journal|log|reflect|note to self|diary|today i)\b/i },
+];
+const OTHER_CAT = { key: "other", label: "Uncategorized", color: "#6b7280" };
+const categorize = (p) => {
+  const hay = `${p?.title || ""} ${(p?.content || "").replace(/<[^>]+>/g, " ").slice(0, 800)}`;
+  return CATEGORIES.find((c) => c.re.test(hay)) || OTHER_CAT;
+};
+const contentLen = (p) => (p?.content || "").replace(/<[^>]+>/g, "").length;
+
+const SORTS = [
+  { key: "recent", label: "Recently edited", cmp: (a, b) => (b.updated_date || "").localeCompare(a.updated_date || "") },
+  { key: "name", label: "Name (A–Z)", cmp: (a, b) => (a.title || "Untitled").localeCompare(b.title || "Untitled") },
+  { key: "most", label: "Most used", cmp: (a, b) => (b.open_count || 0) - (a.open_count || 0) },
+  { key: "least", label: "Least used", cmp: (a, b) => (a.open_count || 0) - (b.open_count || 0) },
+  { key: "longest", label: "Longest", cmp: (a, b) => contentLen(b) - contentLen(a) },
+  { key: "shortest", label: "Shortest", cmp: (a, b) => contentLen(a) - contentLen(b) },
+];
 
 const relTime = (iso) => {
   if (!iso) return "";
@@ -92,10 +120,31 @@ function useGraphModel(pages) {
   }, [pages]);
 }
 
-export default function MemoriesView({ pages, onOpen }) {
+export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
   const model = useGraphModel(pages);
   const [showMentions, setShowMentions] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  // Sidebar management: collapse, sort, colour filter, multi-select, row menu.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const [sortKey, setSortKey] = useState("recent");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [colorFilter, setColorFilter] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [checked, setChecked] = useState(() => new Set());
+  const [rowMenu, setRowMenu] = useState(null); // { page, x, y }
+  const sortRef = useRef(null);
+  useEffect(() => {
+    if (!sortOpen) return;
+    const h = (e) => { if (sortRef.current && !sortRef.current.contains(e.target)) setSortOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [sortOpen]);
+
+  // Open a memory, bumping its usage counter (drives most/least-used sort).
+  const openMemory = useCallback((p) => {
+    try { onUpdate?.(p.id, { open_count: (p.open_count || 0) + 1, last_opened: new Date().toISOString() }); } catch { /* ignore */ }
+    onOpen(p);
+  }, [onOpen, onUpdate]);
 
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
@@ -348,10 +397,46 @@ export default function MemoriesView({ pages, onOpen }) {
     return { out, linked, unlinked };
   }, [sel, model, pages]);
 
-  const recents = useMemo(
-    () => [...pages].sort((a, b) => (b.updated_date || "").localeCompare(a.updated_date || "")),
-    [pages]
-  );
+  // Group memories by author (Donna / You) then by auto-category — Discord-style
+  // collapsible, colour-coded sections — sorted and colour-filtered.
+  const grouped = useMemo(() => {
+    const cmp = (SORTS.find((s) => s.key === sortKey) || SORTS[0]).cmp;
+    const meta = pages.map((p) => ({ p, cat: categorize(p), donna: isDonna(p) }));
+    const filtered = colorFilter ? meta.filter((m) => m.cat.key === colorFilter) : meta;
+    const authors = [
+      { key: "donna", label: "Donna's memories", accent: "#67e8f9", items: filtered.filter((m) => m.donna) },
+      { key: "you", label: "Your notes", accent: "#93c5fd", items: filtered.filter((m) => !m.donna) },
+    ];
+    return authors
+      .map((a) => {
+        const byCat = new Map();
+        for (const m of a.items) {
+          if (!byCat.has(m.cat.key)) byCat.set(m.cat.key, { cat: m.cat, list: [] });
+          byCat.get(m.cat.key).list.push(m.p);
+        }
+        const cats = [...byCat.values()].sort((x, y) => y.list.length - x.list.length);
+        for (const c of cats) c.list.sort(cmp);
+        return { ...a, count: a.items.length, cats };
+      })
+      .filter((a) => a.count > 0);
+  }, [pages, sortKey, colorFilter]);
+
+  const availableCats = useMemo(() => {
+    const seen = new Map();
+    for (const p of pages) { const c = categorize(p); if (!seen.has(c.key)) seen.set(c.key, c); }
+    return [...seen.values()];
+  }, [pages]);
+
+  const toggleCollapse = (k) => setCollapsed((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleCheck = (id) => setChecked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const exitSelect = () => { setSelectMode(false); setChecked(new Set()); };
+  const massDelete = async () => {
+    const ids = [...checked];
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} memor${ids.length !== 1 ? "ies" : "y"}? You can restore them from Recently deleted.`)) return;
+    for (const id of ids) { const p = model.byId[id]; if (p) await onDelete?.(p); }
+    exitSelect();
+  };
 
   return (
     <div className="h-full flex flex-col md:flex-row overflow-hidden bg-[#141516]">
@@ -397,7 +482,7 @@ export default function MemoriesView({ pages, onOpen }) {
                   <p className="text-[10.5px] text-gray-600 mt-0.5">Edited {relTime(sel.updated_date)}</p>
                 </div>
               </div>
-              <button onClick={() => onOpen(sel)} className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/[0.14] border border-blue-500/40 text-blue-300 text-[12px] font-medium hover:bg-blue-500/25 transition-colors">
+              <button onClick={() => openMemory(sel)} className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/[0.14] border border-blue-500/40 text-blue-300 text-[12px] font-medium hover:bg-blue-500/25 transition-colors">
                 <ArrowUpRight className="h-3.5 w-3.5" /> Open note
               </button>
             </div>
@@ -407,36 +492,138 @@ export default function MemoriesView({ pages, onOpen }) {
           </>
         ) : (
           <>
-            <div className="px-4 py-3 border-b border-white/[0.05]">
-              <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">All notes</p>
+            {/* Toolbar: sort + colour filter + select mode */}
+            <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-white/[0.05] bg-[#1a1b1c] px-3 py-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Memories</span>
+              <div className="flex-1" />
+              <div className="relative" ref={sortRef}>
+                <button onClick={() => setSortOpen((o) => !o)} title="Sort" className="flex items-center gap-1 rounded-md border border-white/10 px-1.5 py-1 text-[10.5px] text-gray-400 hover:bg-white/[0.05]">
+                  <ArrowUpDown className="h-3 w-3" />
+                </button>
+                {sortOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-white/[0.12] bg-[#2d2e30] py-1 shadow-2xl">
+                    <p className="px-3 pb-1 pt-1.5 text-[9px] uppercase tracking-wider text-gray-600">Sort by</p>
+                    {SORTS.map((s) => (
+                      <button key={s.key} onClick={() => { setSortKey(s.key); setSortOpen(false); }} className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.05] ${sortKey === s.key ? "text-blue-300" : "text-gray-300"}`}>
+                        <Check className={`h-3 w-3 ${sortKey === s.key ? "opacity-100" : "opacity-0"}`} />{s.label}
+                      </button>
+                    ))}
+                    <div className="my-1 h-px bg-white/[0.08]" />
+                    <p className="px-3 pb-1 pt-0.5 text-[9px] uppercase tracking-wider text-gray-600">Filter colour</p>
+                    <button onClick={() => { setColorFilter(null); setSortOpen(false); }} className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.05] ${!colorFilter ? "text-blue-300" : "text-gray-300"}`}>
+                      <span className="h-2.5 w-2.5 rounded-full border border-white/30" /> All colours
+                    </button>
+                    {availableCats.map((c) => (
+                      <button key={c.key} onClick={() => { setColorFilter(c.key); setSortOpen(false); }} className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.05] ${colorFilter === c.key ? "text-blue-300" : "text-gray-300"}`}>
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} /> {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={() => (selectMode ? exitSelect() : setSelectMode(true))} title="Select" className={`flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10.5px] ${selectMode ? "border-blue-500/40 bg-blue-500/[0.14] text-blue-300" : "border-white/10 text-gray-400 hover:bg-white/[0.05]"}`}>
+                <CheckSquare className="h-3 w-3" />
+              </button>
             </div>
-            <div className="p-2 flex flex-col gap-0.5">
-              {recents.map((p) => {
-                const cfg = ICON_MAP[p.icon] || ICON_MAP.file;
-                const Icon = cfg.icon;
-                const deg = model.degree[p.id] || 0;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedId(p.id)}
-                    onMouseEnter={() => { hoverRef.current = p.id; }}
-                    onMouseLeave={() => { if (hoverRef.current === p.id) hoverRef.current = null; }}
-                    className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left hover:bg-white/[0.04] transition-colors"
-                  >
-                    <span className="h-2 w-2 rounded-full shrink-0" style={{ background: colorFor(p) }} />
-                    <Icon className={`h-3.5 w-3.5 shrink-0 ${cfg.color}`} />
-                    <span className="flex-1 truncate text-[13px] text-gray-200">{p.title || "Untitled"}</span>
-                    {deg > 0 && <span className="text-[10px] text-gray-600 shrink-0">{deg}</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="px-4 pb-4 pt-1 text-[10.5px] text-gray-600 leading-relaxed">
-              Link notes with <span className="text-gray-400">[[Note title]]</span> in their text to connect them here.
+
+            {selectMode && (
+              <div className="flex items-center gap-2 border-b border-blue-500/25 bg-blue-500/[0.08] px-3 py-1.5">
+                <span className="text-[11px] text-blue-200">{checked.size} selected</span>
+                <div className="flex-1" />
+                <button onClick={massDelete} disabled={checked.size === 0} className="flex items-center gap-1 rounded-md bg-rose-500/15 px-2 py-0.5 text-[11px] text-rose-300 hover:bg-rose-500/25 disabled:opacity-40">
+                  <Trash2 className="h-3 w-3" /> Delete
+                </button>
+                <button onClick={exitSelect} className="rounded p-0.5 text-gray-400 hover:bg-white/[0.06]"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            )}
+
+            <div className="p-2">
+              {grouped.length === 0 ? (
+                <p className="px-2 py-4 text-center text-[11px] text-gray-600">No memories.</p>
+              ) : (
+                grouped.map((author) => {
+                  const aCollapsed = collapsed.has(author.key);
+                  return (
+                    <div key={author.key} className="mb-1.5">
+                      {/* Author section header (Discord-style role group) */}
+                      <button onClick={() => toggleCollapse(author.key)} className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-white/[0.03]">
+                        {aCollapsed ? <ChevronRight className="h-3 w-3 text-gray-600" /> : <ChevronDown className="h-3 w-3 text-gray-600" />}
+                        <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: author.accent }}>
+                          {author.key === "donna" && <Sparkles className="h-3 w-3" />}{author.label}
+                        </span>
+                        <span className="text-[10px] text-gray-600">{author.count}</span>
+                      </button>
+                      {!aCollapsed && author.cats.map((c) => {
+                        const gk = `${author.key}:${c.cat.key}`;
+                        const cCollapsed = collapsed.has(gk);
+                        return (
+                          <div key={gk} className="ml-2">
+                            <button onClick={() => toggleCollapse(gk)} className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left hover:bg-white/[0.03]">
+                              {cCollapsed ? <ChevronRight className="h-2.5 w-2.5 text-gray-700" /> : <ChevronDown className="h-2.5 w-2.5 text-gray-700" />}
+                              <span className="h-2 w-2 rounded-full" style={{ background: c.cat.color }} />
+                              <span className="text-[11px] font-medium text-gray-400">{c.cat.label}</span>
+                              <span className="text-[9.5px] text-gray-600">{c.list.length}</span>
+                            </button>
+                            {!cCollapsed && (
+                              <div className="ml-2 flex flex-col">
+                                {c.list.map((p) => {
+                                  const isChecked = checked.has(p.id);
+                                  return (
+                                    <div
+                                      key={p.id}
+                                      onClick={() => (selectMode ? toggleCheck(p.id) : setSelectedId(p.id))}
+                                      onMouseEnter={() => { hoverRef.current = p.id; }}
+                                      onMouseLeave={() => { if (hoverRef.current === p.id) hoverRef.current = null; }}
+                                      className={`group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${isChecked ? "bg-blue-500/[0.1]" : "hover:bg-white/[0.04]"}`}
+                                    >
+                                      {selectMode && (
+                                        <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${isChecked ? "border-blue-500 bg-blue-500" : "border-white/30"}`}>
+                                          {isChecked && <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} />}
+                                        </span>
+                                      )}
+                                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: c.cat.color }} />
+                                      <span className="flex-1 truncate text-[12.5px] text-gray-300">{p.title || "Untitled"}</span>
+                                      {!selectMode && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setRowMenu({ page: p, x: Math.min(r.left, window.innerWidth - 170), y: r.bottom + 4 }); }}
+                                          title="More"
+                                          className="rounded p-0.5 text-gray-600 opacity-0 hover:bg-white/[0.06] hover:text-gray-200 group-hover:opacity-100"
+                                        >
+                                          <MoreVertical className="h-3.5 w-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </>
         )}
       </aside>
+
+      {/* Per-memory actions menu (edit / delete) */}
+      {rowMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setRowMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRowMenu(null); }} />
+          <div className="fixed z-50 w-[160px] rounded-xl border border-white/[0.1] bg-[#2a2b2d] py-1 shadow-2xl" style={{ left: rowMenu.x, top: rowMenu.y }} onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => { const p = rowMenu.page; setRowMenu(null); openMemory(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
+              <Pencil className="h-3.5 w-3.5 text-blue-400" /> Edit
+            </button>
+            <div className="my-1 h-px bg-white/[0.08]" />
+            <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onDelete?.(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-rose-300 hover:bg-rose-500/15">
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

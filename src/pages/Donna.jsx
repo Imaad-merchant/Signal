@@ -787,7 +787,7 @@ export default function Donna() {
         const cres = await base44.functions.invoke("donna", { route: "cleanup", text: raw });
         const cdata = cres && cres.data ? cres.data : cres || {};
         if (cdata.content) {
-          await base44.entities.Page.create({ title: cdata.title || "Note", type: "document", content: cdata.content }).catch(() => null);
+          await base44.entities.Page.create({ title: cdata.title || "Note", type: "document", content: cdata.content, source: "donna" }).catch(() => null);
         }
         const spoken = cdata.spoken || `Sorted — saved "${cdata.title || "your note"}".`;
         setNote(`Saved "${cdata.title || "Note"}" to your notes`);
@@ -1258,7 +1258,7 @@ export default function Donna() {
           });
           target = "insights/" + (rec?.id || "");
         } else if (a.type === "write") {
-          const rec = await base44.entities.Page.create({ title: a.title, type: "document", content: a.body });
+          const rec = await base44.entities.Page.create({ title: a.title, type: "document", content: a.body, source: "donna" });
           target = "pages/" + (rec?.id || "");
         } else if (a.type === "grade") {
           const rec = await base44.entities.Grade.create({
