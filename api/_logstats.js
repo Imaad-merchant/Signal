@@ -136,6 +136,42 @@ export function computeTopicStats(allEntries, terms, today) {
   };
 }
 
+const prevDayISO = (iso) => new Date(Date.parse(`${iso}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+
+// Habit stats from HabitLog records ({ habit_name, date, done }) — the check-in
+// data behind "gym", "no smoking", "no vaping", "stayed sober". `done: true` is
+// the day the positive outcome happened; we report the streak, this-vs-last month
+// done-days, and last time it was hit. This is exact structured data (better than
+// the free-text logs), so these numbers are authoritative.
+export function computeHabitStats(habitName, logs, today) {
+  const rows = (logs || []).filter((l) => l && l.date);
+  if (!rows.length) return { name: habitName, loggedDays: 0, empty: true };
+  const done = rows.filter((l) => l.done).map((l) => l.date).sort();
+  const all = rows.map((l) => l.date).sort();
+  const doneByMonth = bucketByMonth(done);
+  const allByMonth = bucketByMonth(all);
+  const tm = monthKey(today), lm = prevMonth(tm);
+  const lastDone = done.length ? done[done.length - 1] : null;
+  const doneSet = new Set(done);
+  let streak = 0;
+  let day = doneSet.has(today) ? today : prevDayISO(today);
+  while (doneSet.has(day)) { streak++; day = prevDayISO(day); }
+  return {
+    name: habitName,
+    loggedDays: all.length,
+    doneDays: done.length,
+    firstLogged: all[0],
+    lastDone,
+    daysSinceLastDone: lastDone ? daysBetween(lastDone, today) : null,
+    doneThisMonth: doneByMonth[tm] || 0,
+    doneLastMonth: doneByMonth[lm] || 0,
+    loggedThisMonth: allByMonth[tm] || 0,
+    loggedLastMonth: allByMonth[lm] || 0,
+    currentStreak: streak,
+    byMonthDone: lastMonths(doneByMonth, 4),
+  };
+}
+
 const STOP = new Set(
   ("the a an of my me i to for is are am do did does have has had how many much often " +
     "when where what which who whom last this that these those going go went gone been being " +

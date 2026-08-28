@@ -15,7 +15,7 @@ import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_cl
 export const config = { api: { bodyParser: { sizeLimit: "12mb" } } };
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
-import { wantsLogStats, computeLogSummary, computeTopicStats, parseLogEntries, analyticsTerms } from "./_logstats.js";
+import { wantsLogStats, computeLogSummary, computeTopicStats, computeHabitStats, parseLogEntries, analyticsTerms } from "./_logstats.js";
 
 const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "research", "ask", "none"];
 
@@ -238,18 +238,35 @@ async function loadLogAnalytics(uid, transcript, today) {
   if (!uid || !isAdminConfigured()) return null;
   try {
     const db = getAdminDb();
-    // Filter category in JS — a compound (userId + category) query needs a
-    // composite index that isn't provisioned and would throw.
-    const snap = await db.collection("pages").where("userId", "==", uid).get();
-    const logs = snap.docs
+    // Habits + their daily check-in records (the gym / no-smoking / no-vaping /
+    // sober tracking) — exact structured data, the primary source for these stats.
+    const [pageSnap, habitLogSnap] = await Promise.all([
+      db.collection("pages").where("userId", "==", uid).get(),
+      db.collection("habit_logs").where("userId", "==", uid).get(),
+    ]);
+    const habitRows = habitLogSnap.docs.map((d) => d.data());
+    const byHabit = {};
+    for (const r of habitRows) {
+      if (!r || !r.habit_name) continue;
+      (byHabit[r.habit_name] = byHabit[r.habit_name] || []).push({ date: r.date, done: !!r.done });
+    }
+    const habits = Object.keys(byHabit)
+      .map((name) => computeHabitStats(name, byHabit[name], today))
+      .filter((h) => !h.empty)
+      .sort((a, b) => b.loggedDays - a.loggedDays)
+      .slice(0, 8);
+
+    // Free-text logs (Page docs, category "Log"). Filter category in JS — a
+    // compound (userId + category) query needs a composite index that isn't
+    // provisioned and would throw.
+    const logs = pageSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((p) => String(p.category || "").toLowerCase() === "log");
-    if (!logs.length) return null;
     const summaries = logs.map((p) => computeLogSummary(p, today)).filter((s) => !s.empty).slice(0, 8);
     const allEntries = logs.flatMap((p) => parseLogEntries(p.content).map((e) => ({ ...e, log: p.title })));
     const topic = computeTopicStats(allEntries, analyticsTerms(transcript), today);
-    if (!summaries.length && !topic) return null;
-    return { logs: summaries, topic };
+    if (!habits.length && !summaries.length && !topic) return null;
+    return { habits, logs: summaries, topic };
   } catch {
     return null;
   }
@@ -311,7 +328,10 @@ RULES:
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
 - RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
 - DEEP RECALL / REFLECTION: "relevant_notes" are the notes + memories from their Obsidian vault most relevant to THIS question (retrieved semantically). For reflective or advice questions — interview prep, "how do I leverage my life/achievements", self-assessment, "based on my experience", goals, patterns — DRAW ON relevant_notes: weave in concrete specifics (real achievements, experiences, values they actually wrote) rather than generic advice, and name where it comes from when useful. If relevant_notes is empty, answer from what you do have and say you don't have much in their vault on it yet.
-- LOG STATISTICS / HABITS: "log_analytics" (when present) holds EXACT precomputed numbers from the user's logs — "logs" is a per-log summary (total entries, activeDays, firstDate, lastDate, daysSinceLast, thisMonth vs lastMonth counts, byMonth, recent examples), and "topic" is the same for the specific activity they asked about (matched across every log). When they ask how many times / how often / when they last did something / to compare months / for statistics or a trend, ANSWER STRICTLY FROM THESE NUMBERS — never estimate, round, or invent a count. Match the activity they named to the right log (or use "topic"), and give it naturally: e.g. "You last went on the 27th — 6 times this month, up from 4 in July." State the direction of change (up/down/flat) when comparing months. Then offer to break it down further (by week or month) so they can drill in. If log_analytics is absent or empty, say you don't have logs on that yet and they can start one.
+- LOG & HABIT STATISTICS: "log_analytics" (when present) holds EXACT precomputed numbers — never estimate, round, or invent a count; read the figures straight off it.
+  · "habits" is the daily check-in tracking (e.g. "Went to the gym", "No smoking", "No vaping", "Stayed sober"). For each: loggedDays, doneDays (days the outcome was hit — went to the gym / stayed clean), lastDone, daysSinceLastDone, doneThisMonth vs doneLastMonth, currentStreak, byMonthDone. THIS is the source for gym/smoking/vaping/sobriety questions — match the activity they named to the right habit ("gym" → "Went to the gym", "smoking" → "No smoking"). Give it naturally: "You've hit the gym 6 times this month, up from 4 in July — last on the 27th, and you're on a 3-day streak." For the abstinence habits, doneDays = clean days; say it that way.
+  · "logs" is per free-text log (total, activeDays, lastDate, daysSinceLast, thisMonth vs lastMonth, byMonth, recent examples); "topic" is the same for a specific activity matched across every log.
+  When they ask how many times / how often / when they last did something / to compare months / for a streak or trend, ANSWER FROM THESE. State the direction of change (up/down/flat) when comparing months, then offer to break it down further (by week or month). If log_analytics is absent or has nothing on what they asked, say you don't have that tracked yet and they can start logging it in the daily check-in.
 - GRADE QUESTIONS: when they ask about grades, answer from the "grades" context — name the course and score, and if a grade recently dropped or an assignment is missing, say so plainly. If grades is empty, say you don't have their latest yet and they can have their school check run.
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
