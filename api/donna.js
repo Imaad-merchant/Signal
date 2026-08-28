@@ -62,6 +62,11 @@ export default async function handler(req, res) {
     if (route === "capture") return await capture(auth, body, res);
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
     if (route === "list-notes") return await listNotes(auth, res);
+    if (route === "test-brief") {
+      const { sendBriefingEmail } = await import("./ingest.js");
+      const ok = await sendBriefingEmail(getAdminDb(), body.slot === "evening" ? "evening" : "morning");
+      return res.status(200).json({ sent: ok });
+    }
     if (route === "command") return await command(auth, body, res);
     if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
     if (route === "send-email") return await sendEmail(body, res);

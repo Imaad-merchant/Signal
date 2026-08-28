@@ -9,7 +9,7 @@ import webpush from "web-push";
 import nodemailer from "nodemailer";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 import { callLLM, parseJSON } from "./_llm.js";
-import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents } from "./google/_client.js";
+import { refreshAccessToken, listImportantMail, listRecentDriveFiles, listUpcomingEvents, searchDrive, exportFileText } from "./google/_client.js";
 import { syncPlaidItem } from "./plaid/_client.js";
 import { syncCalendarForUser } from "./google/_sync.js";
 
@@ -185,15 +185,131 @@ function renderBriefingEmail(slot, agenda) {
   return { subject, text, html };
 }
 
-async function sendBriefingEmail(db, slot) {
+// Pretty, email-client-safe HTML for the smart briefing (table layout, inline CSS).
+function renderSmartHtml(b, link) {
+  const esc = escapeHtml;
+  const sec = (label, items, accent) => (!items || !items.length) ? "" :
+    `<tr><td style="padding:16px 0 4px"><div style="font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${accent || "#8b95a5"}">${esc(label)}</div></td></tr>` +
+    items.map((it) => `<tr><td style="padding:5px 0"><table role="presentation" cellpadding="0" cellspacing="0"><tr><td valign="top" style="color:${accent || "#60a5fa"};padding-right:9px;font-size:14px;line-height:1.5">•</td><td style="font-size:14px;line-height:1.55;color:#dfe3ea">${esc(it)}</td></tr></table></td></tr>`).join("");
+  const sections = (b.sections || []).map((s) => sec(s.label, s.items)).join("");
+  const opps = (b.opportunities && b.opportunities.length) ? sec("Opportunities for you", b.opportunities, "#67e8f9") : "";
+  return `<div style="background:#0b0d11;padding:28px 12px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#14171d;border:1px solid #232833;border-radius:16px;overflow:hidden">
+        <tr><td style="padding:26px 30px 8px">
+          <div style="font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#5b6472">Donna</div>
+          <div style="font-size:22px;font-weight:700;color:#f3f4f6;margin-top:6px">${esc(b.greeting || "Good morning")}</div>
+          ${b.headline ? `<div style="margin-top:12px;padding:12px 14px;background:#1b2130;border:1px solid #2b3547;border-radius:10px;color:#cfe0ff;font-size:14px;line-height:1.5">${esc(b.headline)}</div>` : ""}
+        </td></tr>
+        <tr><td style="padding:2px 30px 26px">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${sections}${opps}</table>
+          <div style="margin-top:26px"><a href="${link}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;font-size:13px;font-weight:600;padding:10px 18px;border-radius:10px">Open Donna →</a></div>
+        </td></tr>
+      </table>
+      <div style="color:#3f4652;font-size:11px;margin-top:14px">Signal · your day, organised</div>
+    </td></tr></table>
+  </div>`;
+}
+function renderSmartText(b, link) {
+  const lines = [b.greeting || "Good morning", ""];
+  if (b.headline) lines.push(b.headline, "");
+  for (const s of (b.sections || [])) if (s.items && s.items.length) { lines.push(`${s.label}:`); for (const it of s.items) lines.push(`  • ${it}`); lines.push(""); }
+  if (b.opportunities && b.opportunities.length) { lines.push("Opportunities for you:"); for (const o of b.opportunities) lines.push(`  • ${o}`); lines.push(""); }
+  lines.push(`Open Donna: ${link}`);
+  return lines.join("\n");
+}
+
+// Compose a personalised, day-specific briefing with an LLM — grounded in today's
+// calendar, tasks, recent emails, what Donna's been told (notes), and the user's
+// résumé from Drive — and de-duplicated against what recent briefings covered.
+// Returns { subject, text, html } or null (caller falls back to the static email).
+async function composeSmartBriefing(db, slot) {
+  const link = `${(process.env.APP_URL || "").replace(/\/$/, "")}/Donna`;
+  const today = new Date().toISOString().slice(0, 10);
+  const clientId = process.env.GOOGLE_CLIENT_ID, clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+  let agenda = { overdue: [], dueToday: [], commitments: [] };
+  try { agenda = await gatherAgenda(db); } catch { /* empty */ }
+
+  let accessToken = null, uid = null;
+  try {
+    const snap = await db.collection("google_tokens").get();
+    const doc = snap.docs.find((d) => d.data().refresh_token);
+    if (doc) { uid = doc.id; accessToken = await refreshAccessToken({ clientId, clientSecret, refreshToken: doc.data().refresh_token }); }
+  } catch { /* no google */ }
+
+  let events = [], emails = [], resumeText = "";
+  if (accessToken) {
+    try { events = (await listUpcomingEvents(accessToken, 2)).filter((e) => (e.start || "").slice(0, 10) === today).slice(0, 10); } catch { /* ignore */ }
+    try { emails = (await listImportantMail(accessToken, 8)).map((m) => ({ from: m.from, subject: m.subject, snippet: (m.snippet || "").slice(0, 160) })); } catch { /* ignore */ }
+    try { const hits = await searchDrive(accessToken, "resume", "any", 3); if (hits && hits.length) resumeText = (await exportFileText(accessToken, hits[0].id, 6000)) || ""; } catch { /* ignore */ }
+  }
+
+  let notes = [];
+  try {
+    if (uid) {
+      const nsnap = await db.collection("notes").where("userId", "==", uid).get();
+      notes = nsnap.docs.map((d) => d.data()).sort((a, b) => (b.updated_date || "").localeCompare(a.updated_date || "")).slice(0, 20)
+        .map((n) => ({ title: n.title, gist: (n.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 200) }));
+    }
+  } catch { /* ignore */ }
+
+  const stateRef = uid ? db.collection("briefing_state").doc(uid) : null;
+  let already = [];
+  try { if (stateRef) { const s = await stateRef.get(); if (s.exists) already = s.data().recentSignatures || []; } } catch { /* ignore */ }
+
+  const system = `You write Imaad's ${slot === "evening" ? "evening" : "morning"} briefing email — a sharp, warm British chief of staff who genuinely knows him.
+Return JSON only:
+{ "subject": string, "greeting": string, "headline": string,
+  "sections": [ { "label": string, "items": [string] } ],
+  "opportunities": [string], "signatures": [string] }
+RULES:
+- Only surface what is RELEVANT and mostly NEW today. Do NOT repeat anything whose gist appears in already_covered. If little is new, keep it short and say the day's light — never pad.
+- headline: the single most important thing today (an event, a real deadline), or "" if nothing stands out.
+- sections: build from today_events, due_today, overdue, open_commitments, and emails that need action. Natural labels ("Today", "Needs a reply", "Still open"). Skip empties. Short human lines.
+- opportunities: 1-3 CONCRETE ways to further his career/goals, grounded in his resume (real skills/experience) and what he's been working on (recent_notes) — a specific volunteer program, scholarship, role, outreach, or skill. Specific to HIM, never generic filler. Omit if you have nothing real.
+- signatures: one short stable key per item/opportunity included (so tomorrow won't repeat it).
+- No markdown, no emoji. Keep the whole thing tight and skimmable.`;
+  const user = `date: ${today}
+already_covered: ${JSON.stringify(already.slice(0, 60))}
+today_events: ${JSON.stringify(events.map((e) => ({ title: e.summary, when: e.start })))}
+due_today: ${JSON.stringify(agenda.dueToday.map((t) => t.title))}
+overdue: ${JSON.stringify(agenda.overdue.map((t) => ({ t: t.title, due: t.due_date })))}
+open_commitments: ${JSON.stringify(agenda.commitments.map((c) => c.text))}
+recent_emails: ${JSON.stringify(emails)}
+recent_notes: ${JSON.stringify(notes)}
+resume: ${JSON.stringify((resumeText || "").slice(0, 4000))}
+Write the briefing.`;
+
+  let parsed;
+  try { parsed = parseJSON(await callLLM({ system, user, json: true })); } catch { return null; }
+  if (!parsed || !parsed.subject) return null;
+
+  try {
+    if (stateRef) {
+      const merged = [...(Array.isArray(parsed.signatures) ? parsed.signatures : []), ...already].slice(0, 120);
+      await stateRef.set({ recentSignatures: merged, updated_date: new Date().toISOString() }, { merge: true });
+    }
+  } catch { /* ignore */ }
+
+  return { subject: parsed.subject, text: renderSmartText(parsed, link), html: renderSmartHtml(parsed, link) };
+}
+
+export async function sendBriefingEmail(db, slot) {
   const to = process.env.NOTIFY_EMAIL || process.env.SMTP_USER;
   const host = process.env.SMTP_HOST;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   if (!to || !host || !user || !pass) return false;
-  let agenda = { overdue: [], dueToday: [], commitments: [] };
-  try { agenda = await gatherAgenda(db); } catch { /* fall back to an empty agenda */ }
-  const { subject, text, html } = renderBriefingEmail(slot, agenda);
+  // Smart, personalised briefing first; fall back to the static agenda email.
+  let payload = null;
+  try { payload = await composeSmartBriefing(db, slot); } catch { payload = null; }
+  if (!payload) {
+    let agenda = { overdue: [], dueToday: [], commitments: [] };
+    try { agenda = await gatherAgenda(db); } catch { /* empty */ }
+    payload = renderBriefingEmail(slot, agenda);
+  }
+  const { subject, text, html } = payload;
   try {
     const transport = nodemailer.createTransport({
       host, port: Number(process.env.SMTP_PORT || 587), secure: Number(process.env.SMTP_PORT || 587) === 465,

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, X, Check, Bell, Settings2, Volume2, Brain } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, X, Check, Bell, Settings2, Volume2, Brain, Mail } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import DailyBriefing from "@/components/donna/DailyBriefing";
@@ -999,6 +999,22 @@ export default function Donna() {
 
   // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
   useEffect(() => { setAnsweredQ(new Set()); answeringRef.current = null; }, [reply]);
+  const [sendingBrief, setSendingBrief] = useState(false);
+  const sendTestBriefing = async () => {
+    if (sendingBrief) return;
+    setSendingBrief(true);
+    setNote("Sending a test briefing to your email…");
+    try {
+      const r = await base44.functions.invoke("donna", { route: "test-brief" });
+      const ok = (r && r.data && r.data.sent) ?? r?.sent;
+      setNote(ok ? "Sent — check your inbox." : "Couldn't send — email isn't configured on the server.");
+    } catch {
+      setNote("Couldn't send the test briefing.");
+    } finally {
+      setSendingBrief(false);
+    }
+  };
+
   const toggleMute = () => {
     setMuted((v) => {
       const next = !v;
@@ -1610,6 +1626,17 @@ export default function Donna() {
           aria-label="Capture thoughts"
         >
           <Brain className="h-3.5 w-3.5" /> <span className="hidden xs:inline sm:inline">Thoughts</span>
+        </button>
+        {/* Send yourself a test of the smart daily briefing email. */}
+        <button
+          type="button"
+          onClick={sendTestBriefing}
+          disabled={sendingBrief}
+          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-blue-400/40 hover:text-blue-200 disabled:opacity-50"
+          title="Send yourself a test briefing email"
+          aria-label="Send test briefing"
+        >
+          {sendingBrief ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
         </button>
         {/* Mode switcher — full assistant (Donna) vs plain typed chat with the same powers. */}
         <div className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 text-[11px] backdrop-blur-sm">
