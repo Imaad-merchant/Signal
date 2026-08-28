@@ -10,6 +10,7 @@ import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import NotionSidebar from "../components/tasks/NotionSidebar";
 import DocsHome from "../components/tasks/DocsHome";
+import MemoriesView from "../components/tasks/MemoriesView";
 // Lazy-loaded: the whiteboard (+ dompurify/html2canvas) is large and only needed
 // when a whiteboard page is opened, so it stays out of the initial bundle.
 const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
@@ -765,6 +766,7 @@ export default function Tasks() {
           selectedPageId={selectedPageId}
           trashCount={trashedRoots.length}
           onSelectHome={() => { setView("home"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
+          onSelectMemories={() => { setView("memories"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
           onSelectTrash={() => { setView("trash"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
           onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); if (isMobile) setSidebarOpen(false); }}
           onCreatePage={handleCreatePage}
@@ -830,6 +832,11 @@ export default function Tasks() {
               pages={trashedRoots}
               onRestore={handleRestorePage}
               onPurge={handlePermanentDelete}
+            />
+          ) : view === "memories" ? (
+            <MemoriesView
+              pages={activePages}
+              onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
             />
           ) : view === "page" && selectedPage ? (() => {
             const pageType = selectedPage.type || "whiteboard";

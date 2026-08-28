@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Wand2, Undo2, Pencil, Palette, CornerUpLeft } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Wand2, Undo2, Pencil, Palette, CornerUpLeft, Orbit } from "lucide-react";
 
 const ICON_OPTIONS = [
   { key: "file", icon: FileText, color: "text-gray-400" },
@@ -315,6 +315,7 @@ export default function NotionSidebar({
   user,
   view,
   onSelectHome,
+  onSelectMemories,
   onSelectTrash,
   onSelectPage,
   onCreatePage,
@@ -404,6 +405,17 @@ export default function NotionSidebar({
           <Search className="h-3.5 w-3.5" />
           Search
         </button>
+        {onSelectMemories && (
+          <button
+            onClick={onSelectMemories}
+            className={`flex items-center gap-2 w-full px-2 py-1 rounded-md text-[13px] transition-colors ${
+              view === "memories" ? "bg-white/[0.06] text-gray-100" : "text-gray-400 hover:bg-white/[0.03] hover:text-gray-200"
+            }`}
+          >
+            <Orbit className="h-3.5 w-3.5" />
+            Memories
+          </button>
+        )}
         <button
           onClick={onSelectTrash}
           className={`flex items-center gap-2 w-full px-2 py-1 rounded-md text-[13px] transition-colors ${
