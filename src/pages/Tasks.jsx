@@ -199,6 +199,33 @@ export default function Tasks() {
   // the sidebar/editor; trashed pages live in the "Recently deleted" view. Each
   // trashed subtree shares a `deleted_root_id` so it restores/purges as a unit.
   const activePages = useMemo(() => pages.filter(p => !p.deleted_at), [pages]);
+
+  // Indexed Obsidian vault + captures (read-only) — shown in the Memories view.
+  const { data: vaultNotes = [] } = useQuery({
+    queryKey: ["donna-notes", user?.email],
+    queryFn: async () => {
+      const r = await base44.functions.invoke("donna", { route: "list-notes" });
+      return (r && r.data && r.data.notes) || r?.notes || [];
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  // Memories = your workspace pages + Donna's vault notes (as read-only nodes).
+  const memoryItems = useMemo(() => {
+    const vault = vaultNotes.map((n) => ({
+      id: `vault_${n.id}`,
+      title: n.title || "Untitled",
+      content: n.content || "",
+      type: "document",
+      icon: "file",
+      source: "donna",
+      folder: n.folder || "",
+      updated_date: n.updated_date || null,
+      _vault: true,
+      obsidian: n.path ? `obsidian://open?path=${encodeURIComponent(n.path)}` : null,
+    }));
+    return [...activePages, ...vault];
+  }, [activePages, vaultNotes]);
   const trashedRoots = useMemo(
     () => pages
       .filter(p => p.deleted_at && (p.deleted_root_id === p.id || !p.deleted_root_id))
@@ -844,7 +871,7 @@ export default function Tasks() {
             />
           ) : view === "memories" ? (
             <MemoriesView
-              pages={activePages}
+              pages={memoryItems}
               onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
               onDelete={handleDeletePage}
               onUpdate={handleUpdatePageById}

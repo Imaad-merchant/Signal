@@ -142,8 +142,10 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
     return () => document.removeEventListener("mousedown", h);
   }, [sortOpen]);
 
-  // Open a memory, bumping its usage counter (drives most/least-used sort).
+  // Open a memory. Vault notes (read-only) deep-link into Obsidian; workspace
+  // pages open in the editor and bump their usage counter (most/least-used sort).
   const openMemory = useCallback((p) => {
+    if (p._vault) { if (p.obsidian) { try { window.location.href = p.obsidian; } catch { /* ignore */ } } return; }
     try { onUpdate?.(p.id, { open_count: (p.open_count || 0) + 1, last_opened: new Date().toISOString() }); } catch { /* ignore */ }
     onOpen(p);
   }, [onOpen, onUpdate]);
@@ -365,7 +367,7 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
   };
   const onDoubleClick = (e) => {
     const hit = nodeAt(e.clientX, e.clientY);
-    if (hit) onOpen(model.byId[hit.id]);
+    if (hit) openMemory(model.byId[hit.id]);
   };
   const onWheel = (e) => {
     e.preventDefault();
@@ -436,7 +438,7 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
     const ids = [...checked];
     if (!ids.length) return;
     if (!window.confirm(`Delete ${ids.length} memor${ids.length !== 1 ? "ies" : "y"}? You can restore them from Recently deleted.`)) return;
-    for (const id of ids) { const p = model.byId[id]; if (p) await onDelete?.(p); }
+    for (const id of ids) { const p = model.byId[id]; if (p && !p._vault) await onDelete?.(p); }
     exitSelect();
   };
 
@@ -615,17 +617,25 @@ export default function MemoriesView({ pages, onOpen, onDelete, onUpdate }) {
       {rowMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setRowMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRowMenu(null); }} />
-          <div className="fixed z-50 w-[160px] rounded-xl border border-white/[0.1] bg-[#2a2b2d] py-1 shadow-2xl" style={{ left: rowMenu.x, top: rowMenu.y }} onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => { const p = rowMenu.page; setRowMenu(null); openMemory(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
-              <Pencil className="h-3.5 w-3.5 text-blue-400" /> Edit
-            </button>
-            <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onUpdate?.(p.id, { source: isDonna(p) ? "user" : "donna" }); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
-              <ArrowUpRight className="h-3.5 w-3.5 text-cyan-400" /> {isDonna(rowMenu.page) ? "Move to yours" : "Move to Donna's"}
-            </button>
-            <div className="my-1 h-px bg-white/[0.08]" />
-            <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onDelete?.(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-rose-300 hover:bg-rose-500/15">
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </button>
+          <div className="fixed z-50 w-[170px] rounded-xl border border-white/[0.1] bg-[#2a2b2d] py-1 shadow-2xl" style={{ left: rowMenu.x, top: rowMenu.y }} onClick={(e) => e.stopPropagation()}>
+            {rowMenu.page._vault ? (
+              <button onClick={() => { const p = rowMenu.page; setRowMenu(null); openMemory(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
+                <ArrowUpRight className="h-3.5 w-3.5 text-cyan-400" /> Open in Obsidian
+              </button>
+            ) : (
+              <>
+                <button onClick={() => { const p = rowMenu.page; setRowMenu(null); openMemory(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
+                  <Pencil className="h-3.5 w-3.5 text-blue-400" /> Edit
+                </button>
+                <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onUpdate?.(p.id, { source: isDonna(p) ? "user" : "donna" }); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-gray-200 hover:bg-white/[0.06]">
+                  <ArrowUpRight className="h-3.5 w-3.5 text-cyan-400" /> {isDonna(rowMenu.page) ? "Move to yours" : "Move to Donna's"}
+                </button>
+                <div className="my-1 h-px bg-white/[0.08]" />
+                <button onClick={() => { const p = rowMenu.page; setRowMenu(null); onDelete?.(p); }} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-rose-300 hover:bg-rose-500/15">
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </button>
+              </>
+            )}
           </div>
         </>
       )}

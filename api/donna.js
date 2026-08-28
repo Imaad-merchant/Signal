@@ -61,6 +61,7 @@ export default async function handler(req, res) {
     if (route === "log") return await logEntry(body, res);
     if (route === "capture") return await capture(auth, body, res);
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
+    if (route === "list-notes") return await listNotes(auth, res);
     if (route === "command") return await command(auth, body, res);
     if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
     if (route === "send-email") return await sendEmail(body, res);
@@ -546,6 +547,30 @@ async function semanticSearch(auth, body, res) {
     results = pool.slice(0, 5).map((c) => ({ title: c.title, folder: c.folder, path: c.path, score: 0 }));
   }
   return res.status(200).json({ results });
+}
+
+// ---- route: list-notes (the indexed Obsidian vault + captured notes) ----
+async function listNotes(auth, res) {
+  if (!isAdminConfigured()) return res.status(200).json({ notes: [] });
+  try {
+    const db = getAdminDb();
+    const snap = await db.collection("notes").where("userId", "==", auth.uid).get();
+    const notes = snap.docs.map((d) => {
+      const n = d.data() || {};
+      return {
+        id: d.id,
+        title: n.title || "Untitled",
+        folder: n.folder || "",
+        path: n.path || "",
+        source: n.source || "worker",
+        content: (n.content || "").slice(0, 4000),
+        updated_date: n.updated_date || n.modified || n.created_date || null,
+      };
+    });
+    return res.status(200).json({ notes });
+  } catch {
+    return res.status(200).json({ notes: [] });
+  }
 }
 
 // ---- route: command (queue a shell/dev command for the local worker to run) ----
