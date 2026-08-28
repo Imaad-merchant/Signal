@@ -880,6 +880,7 @@ export default function Tasks() {
               user={user}
               onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
               onCreate={() => handleCreatePage(null, "private")}
+              onImport={() => setTemplatePicker(true)}
             />
           )}
         </div>
