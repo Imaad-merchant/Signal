@@ -4,9 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, X, Check, Bell, Settings2, Volume2, Brain } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
-import StatusGrid from "@/components/donna/StatusGrid";
-import RecentActions from "@/components/donna/RecentActions";
 import DailyBriefing from "@/components/donna/DailyBriefing";
+import WidgetPanel from "@/components/donna/WidgetPanel";
 import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
@@ -126,6 +125,8 @@ export default function Donna() {
   // briefings, nudges, always-on mic, or auto-speaking. Flip back to full Donna
   // anytime. Persisted so it stays where you left it.
   const [chatMode, setChatMode] = useState(() => { try { return localStorage.getItem("assistant_mode") === "chat"; } catch { return false; } });
+  const [widgetsCollapsed, setWidgetsCollapsed] = useState(() => { try { return localStorage.getItem("donna_widgets_collapsed") === "1"; } catch { return false; } });
+  const toggleWidgets = () => setWidgetsCollapsed((v) => { const next = !v; try { localStorage.setItem("donna_widgets_collapsed", next ? "1" : "0"); } catch { /* ignore */ } return next; });
   const chatModeRef = useRef(chatMode);
   const chatScrollRef = useRef(null);
   const [showThoughts, setShowThoughts] = useState(false); // brain-dump / import panel
@@ -1572,7 +1573,7 @@ export default function Donna() {
     idle: !voice.supported
       ? "Voice needs Chrome — type below"
       : muted
-      ? "Muted — tap the mic to talk"
+      ? ""
       : "Listening — just talk, no need to say “Donna”",
     listening: "Listening…",
     processing: "On it…",
@@ -1588,8 +1589,9 @@ export default function Donna() {
   const donnaQuestions = extractQuestions(reply);
 
   return (
+    <div className="flex h-full w-full overflow-hidden">
     <div
-      className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden"
+      className="relative flex flex-1 min-w-0 flex-col items-center justify-center overflow-hidden"
       style={{ background: "radial-gradient(circle at 50% 42%, #12151c 0%, #08090c 72%)" }}
     >
       <Link to="/Dashboard" className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors" title="Back" aria-label="Back">
@@ -1677,7 +1679,7 @@ export default function Donna() {
 
       {/* Routines editor overlay. */}
       {showRoutines && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowRoutines(false)}>
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowRoutines(false)}>
           <div onClick={(e) => e.stopPropagation()}>
             <RoutinesPanel reminders={reminders} onUpdate={updateReminder} onDelete={removeReminder} />
             <p className="mt-2 max-w-xs text-center text-[11px] text-gray-500">
@@ -1689,7 +1691,7 @@ export default function Donna() {
 
       {/* Customize overlay — tabbed: Donna (persona/voice/questions/habits/nudges) + Dashboard tiles. */}
       {showCustomize && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-16 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-16 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
           <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-2">
             <div className="flex gap-1 rounded-full border border-white/10 bg-white/5 p-1 text-xs">
               <button type="button" onClick={() => setCustomizeTab("donna")} className={`rounded-full px-3 py-1 ${customizeTab === "donna" ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400"}`}>Donna</button>
@@ -1720,11 +1722,7 @@ export default function Donna() {
         </div>
       )}
 
-      {/* The status "matrix" — tiles framing the orb (reads live entities). */}
-      <StatusGrid />
-
-      {/* Recent orb actions still inside their 24h undo window. */}
-      <RecentActions />
+      {/* Status widgets + recent-action undo now live in the right WidgetPanel. */}
 
       {/* Morning look-ahead / evening habit review (speaks via the orb). Donna mode only. */}
       {!chatMode && <DailyBriefing onSpeak={speak} onActive={setBriefingActive} muted={muted} />}
@@ -1758,21 +1756,6 @@ export default function Donna() {
         <div className="flex min-h-[1.5rem] w-[min(92vw,620px)] flex-col items-center gap-0.5">
           {userLine && <p className="text-center text-xs text-gray-400">{userLine}</p>}
           {note && <p className="text-center text-[11px] text-gray-500">{note}</p>}
-          {/* Idle discoverability: a few tappable example commands. */}
-          {mode === "idle" && !reply && !note && !nudgeReady && !chatMode && (
-            <div className="mt-1 flex max-w-[min(92vw,560px)] flex-wrap justify-center gap-1.5">
-              {["What's on today?", "Remind me to email my professor at 5pm", "How much did I spend this month?", "Add dentist to my calendar Friday"].map((ex) => (
-                <button
-                  key={ex}
-                  type="button"
-                  onClick={() => handleTranscript(ex)}
-                  className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] text-gray-400 transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
-                >
-                  {ex}
-                </button>
-              ))}
-            </div>
-          )}
           {voice.micError && <p className="flex items-center justify-center gap-1 text-[11px] text-amber-400/80"><AlertTriangle className="h-3 w-3" />{voice.micError}</p>}
           {sources.length > 0 && (
             <div className="mt-0.5 flex max-w-[min(92vw,620px)] flex-wrap justify-center gap-1.5">
@@ -1934,7 +1917,7 @@ export default function Donna() {
 
       {/* Email draft — review & edit, then send. Never sent automatically. */}
       {emailDraft && (
-        <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center" onClick={() => !emailSending && setEmailDraft(null)}>
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center" onClick={() => !emailSending && setEmailDraft(null)}>
           <div
             className="w-full max-w-lg rounded-t-2xl border border-white/10 bg-[#0e1015] p-4 shadow-2xl sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
@@ -1986,6 +1969,16 @@ export default function Donna() {
             </div>
           </div>
         </div>
+      )}
+    </div>
+
+      {/* Right-hand widget panel (Donna mode only) — collapsible, edit via Customize. */}
+      {!chatMode && (
+        <WidgetPanel
+          collapsed={widgetsCollapsed}
+          onToggleCollapse={toggleWidgets}
+          onEdit={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+        />
       )}
     </div>
   );
