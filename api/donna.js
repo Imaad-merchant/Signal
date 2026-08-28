@@ -15,6 +15,7 @@ import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_cl
 export const config = { api: { bodyParser: { sizeLimit: "12mb" } } };
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
+import { wantsLogStats, computeLogSummary, computeTopicStats, parseLogEntries, analyticsTerms } from "./_logstats.js";
 
 const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "research", "ask", "none"];
 
@@ -229,6 +230,31 @@ async function retrieveRelevantNotes(uid, query) {
   }
 }
 
+// Load precomputed statistics from the user's logs (Page docs, category "Log"):
+// a per-log summary for each, plus topic stats keyed off the words in the question
+// (so "how many times did I go to the gym" counts gym entries wherever they live).
+// All counting is deterministic here; the model only narrates the finished numbers.
+async function loadLogAnalytics(uid, transcript, today) {
+  if (!uid || !isAdminConfigured()) return null;
+  try {
+    const db = getAdminDb();
+    // Filter category in JS — a compound (userId + category) query needs a
+    // composite index that isn't provisioned and would throw.
+    const snap = await db.collection("pages").where("userId", "==", uid).get();
+    const logs = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => String(p.category || "").toLowerCase() === "log");
+    if (!logs.length) return null;
+    const summaries = logs.map((p) => computeLogSummary(p, today)).filter((s) => !s.empty).slice(0, 8);
+    const allEntries = logs.flatMap((p) => parseLogEntries(p.content).map((e) => ({ ...e, log: p.title })));
+    const topic = computeTopicStats(allEntries, analyticsTerms(transcript), today);
+    if (!summaries.length && !topic) return null;
+    return { logs: summaries, topic };
+  } catch {
+    return null;
+  }
+}
+
 // Should Donna dig through the vault/memories before answering? Fire on anything
 // that reads like a question, reflection, advice, or personal recall — but skip
 // pure quick commands (remind/log/add/…) that never need the vault. Broad on
@@ -250,6 +276,12 @@ async function intent(auth, body, res) {
   // Auto-retrieval: for reflective/personal questions, pull the most relevant
   // notes + memories from the vault so Donna answers grounded in the user's life.
   const relevantNotes = wantsDeepRecall(transcript) ? await retrieveRelevantNotes(auth?.uid, transcript) : [];
+
+  // For habit/frequency/statistics questions (and reflective ones), attach exact,
+  // precomputed numbers from the user's logs so Donna cites real counts.
+  const logAnalytics = (wantsLogStats(transcript) || wantsDeepRecall(transcript))
+    ? await loadLogAnalytics(auth?.uid, transcript, today)
+    : null;
 
   const system = `${personaLine(body.prefs)}
 You are a sharp, unflappable chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
@@ -279,6 +311,7 @@ RULES:
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
 - RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
 - DEEP RECALL / REFLECTION: "relevant_notes" are the notes + memories from their Obsidian vault most relevant to THIS question (retrieved semantically). For reflective or advice questions — interview prep, "how do I leverage my life/achievements", self-assessment, "based on my experience", goals, patterns — DRAW ON relevant_notes: weave in concrete specifics (real achievements, experiences, values they actually wrote) rather than generic advice, and name where it comes from when useful. If relevant_notes is empty, answer from what you do have and say you don't have much in their vault on it yet.
+- LOG STATISTICS / HABITS: "log_analytics" (when present) holds EXACT precomputed numbers from the user's logs — "logs" is a per-log summary (total entries, activeDays, firstDate, lastDate, daysSinceLast, thisMonth vs lastMonth counts, byMonth, recent examples), and "topic" is the same for the specific activity they asked about (matched across every log). When they ask how many times / how often / when they last did something / to compare months / for statistics or a trend, ANSWER STRICTLY FROM THESE NUMBERS — never estimate, round, or invent a count. Match the activity they named to the right log (or use "topic"), and give it naturally: e.g. "You last went on the 27th — 6 times this month, up from 4 in July." State the direction of change (up/down/flat) when comparing months. Then offer to break it down further (by week or month) so they can drill in. If log_analytics is absent or empty, say you don't have logs on that yet and they can start one.
 - GRADE QUESTIONS: when they ask about grades, answer from the "grades" context — name the course and score, and if a grade recently dropped or an assignment is missing, say so plainly. If grades is empty, say you don't have their latest yet and they can have their school check run.
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
@@ -306,10 +339,11 @@ Context (JSON): ${JSON.stringify({
     upcoming_calendar: Array.isArray(context.calendar) ? context.calendar.slice(0, 30) : [],
     recent_emails: Array.isArray(context.emails) ? context.emails.slice(0, 15) : [],
     recent_notes: Array.isArray(context.recent_notes) ? context.recent_notes.slice(0, 20) : [],
+    ...(logAnalytics ? { log_analytics: logAnalytics } : {}),
     relevant_notes: relevantNotes,
     grades: Array.isArray(context.grades) ? context.grades.slice(0, 40) : [],
     domains: Array.isArray(context.domains) ? context.domains : [],
-  }).slice(0, 9000)}
+  }).slice(0, logAnalytics ? 12000 : 9000)}
 
 Parse it now.`;
 

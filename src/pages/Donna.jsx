@@ -659,11 +659,15 @@ export default function Donna() {
     }
 
     // ---- Logs: create / append / continue / read / bare-journal ----
-    const logStart = parseLogStart(t);
-    const logAppend = !logStart ? parseLogAppend(t) : null;
-    const logRead = !logStart && !logAppend ? parseLogRead(t) : null;
-    const logContinue = !logStart && !logAppend && !logRead ? parseLogContinue(t) : null;
-    const logBare = !logStart && !logAppend && !logRead && !logContinue ? parseLogBare(t) : null;
+    // A statistics/habit question ("how often…", "gym log stats", "how many times…")
+    // is NOT a log read/append — let it fall through to the intent route, which
+    // answers from precomputed log analytics.
+    const statsQ = /\b(statistics?|stats|how many times|how often|how frequently|frequency|last time i|when did i last|streak|per (week|month|day)|average|trend|how consistent|consistency)\b/i.test(t);
+    const logStart = !statsQ ? parseLogStart(t) : null;
+    const logAppend = !statsQ && !logStart ? parseLogAppend(t) : null;
+    const logRead = !statsQ && !logStart && !logAppend ? parseLogRead(t) : null;
+    const logContinue = !statsQ && !logStart && !logAppend && !logRead ? parseLogContinue(t) : null;
+    const logBare = !statsQ && !logStart && !logAppend && !logRead && !logContinue ? parseLogBare(t) : null;
     if (logRead) {
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       const r = await readLog(logRead.name);
