@@ -871,7 +871,18 @@ export default function Tasks() {
               return (
                 <>
                   {header}
-                  <DocumentView key={selectedPage.id} page={selectedPage} onSave={updatePageById} onAIVisualize={handleAIVisualize} onAIEdit={handleAIEditDoc} />
+                  <DocumentView
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    onSave={updatePageById}
+                    onAIVisualize={handleAIVisualize}
+                    onAIEdit={handleAIEditDoc}
+                    onOpenLink={(title) => {
+                      const t = (title || "").trim().toLowerCase();
+                      const pg = activePages.find((p) => (p.title || "").trim().toLowerCase() === t);
+                      if (pg) { setSelectedPageId(pg.id); setView("page"); }
+                    }}
+                  />
                 </>
               );
             }

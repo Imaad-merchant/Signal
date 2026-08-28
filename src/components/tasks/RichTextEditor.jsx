@@ -14,11 +14,45 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Highlight } from "@tiptap/extension-highlight";
+import { Extension } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
   Undo2, Redo2, Bold, Italic, Underline as UIcon, Strikethrough, Code,
   List, ListOrdered, CheckSquare, Quote, Code2, Minus, Link as LinkIcon,
   AlignLeft, AlignCenter, AlignRight, AlignJustify, ChevronDown, Highlighter, Table as TableIcon, RemoveFormatting, Sparkles
 } from "lucide-react";
+
+// Obsidian-style [[wikilinks]]: decorate them so they read as links. Click
+// handling is done with a native DOM listener on the editor (see the component)
+// for reliability — ProseMirror's handleClick is finicky on decoration spans.
+const WikiLink = Extension.create({
+  name: "wikilink",
+  addProseMirrorPlugins() {
+    const re = /\[\[([^\]\n]+)\]\]/g;
+    return [
+      new Plugin({
+        key: new PluginKey("wikilink"),
+        props: {
+          decorations(state) {
+            const decos = [];
+            state.doc.descendants((node, pos) => {
+              if (!node.isText || !node.text) return;
+              re.lastIndex = 0;
+              let m;
+              while ((m = re.exec(node.text))) {
+                const from = pos + m.index;
+                const to = from + m[0].length;
+                decos.push(Decoration.inline(from, to, { class: "wikilink", "data-title": m[1].split(/[|#]/)[0].trim() }));
+              }
+            });
+            return DecorationSet.create(state.doc, decos);
+          },
+        },
+      }),
+    ];
+  },
+});
 
 const TEXT_COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
 const HIGHLIGHT_COLORS = ["#fef08a", "#bef264", "#fda4af", "#a5f3fc", "#c4b5fd", "#fdba74"];
@@ -67,10 +101,14 @@ function RbBtn({ onClick, active, title, children, disabled }) {
   );
 }
 
-export default function RichTextEditor({ value, onChange, placeholder = "Start typing...", onAIVisualize, onAIEdit }) {
+export default function RichTextEditor({ value, onChange, placeholder = "Start typing...", onAIVisualize, onAIEdit, onOpenLink }) {
+  const onOpenLinkRef = useRef(onOpenLink);
+  useEffect(() => { onOpenLinkRef.current = onOpenLink; }, [onOpenLink]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      WikiLink,
       Underline,
       TextStyle,
       Color,
@@ -102,6 +140,23 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
       editor.commands.setContent(value || "", false);
     }
   }, [editor, value]);
+
+  // Open the target note when a [[wikilink]] is clicked (native listener — robust).
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+    const onClick = (e) => {
+      const el = e.target.closest?.(".wikilink");
+      if (el) {
+        e.preventDefault();
+        e.stopPropagation();
+        const title = el.getAttribute("data-title");
+        if (title && onOpenLinkRef.current) onOpenLinkRef.current(title);
+      }
+    };
+    dom.addEventListener("click", onClick);
+    return () => dom.removeEventListener("click", onClick);
+  }, [editor]);
 
   // Right-click context menu state
   const [ctxMenu, setCtxMenu] = useState(null);
@@ -386,6 +441,8 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
             .ProseMirror table th { background: rgba(255,255,255,0.05); font-weight: 600; }
             .ProseMirror a { color: #60a5fa; text-decoration: underline; cursor: pointer; }
             .ProseMirror mark { padding: 0.1em 0.2em; border-radius: 2px; color: #111827; }
+            .ProseMirror .wikilink { color: #a5b4fc; cursor: pointer; border-radius: 3px; padding: 0 1px; }
+            .ProseMirror .wikilink:hover { background: rgba(129,140,248,0.15); text-decoration: underline; }
           `}</style>
           <EditorContent editor={editor} />
           </div>

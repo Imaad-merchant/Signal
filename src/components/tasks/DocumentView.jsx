@@ -33,7 +33,7 @@ function legacyToHTML(s) {
   }).join("");
 }
 
-export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit }) {
+export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit, onOpenLink }) {
   const [html, setHtml] = useState(() => legacyToHTML(page.content || ""));
   const loadedRef = useRef(false);
   const mountedRef = useRef(true);
@@ -70,6 +70,7 @@ export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit }) 
       placeholder="Start writing..."
       onAIVisualize={onAIVisualize}
       onAIEdit={onAIEdit ? handleAIEdit : undefined}
+      onOpenLink={onOpenLink}
     />
   );
 }
