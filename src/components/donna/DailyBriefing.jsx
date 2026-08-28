@@ -82,7 +82,7 @@ function parseYesNo(text) {
   return null;
 }
 
-export default function DailyBriefing({ onSpeak, onActive }) {
+export default function DailyBriefing({ onSpeak, onActive, muted = false }) {
   const parts = getBriefingParts();
   const slot = parts.slot;
   const dateKey = getChicagoParts().dateKey;
@@ -105,10 +105,11 @@ export default function DailyBriefing({ onSpeak, onActive }) {
   const habitsRef = useRef([]);
   const answerRef = useRef(null); // { id, resolve }
   const recRef = useRef(null);
+  const mutedRef = useRef(muted);
   const logDateRef = useRef(dateKey); // the day answers are logged against (today, or yesterday for catch-up)
   useEffect(() => { habitsRef.current = habits; }, [habits]);
   useEffect(() => () => {
-    try { recRef.current && recRef.current.stop(); } catch { /* ignore */ }
+    try { recRef.current && recRef.current.abort(); } catch { /* ignore */ }
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* ignore */ }
   }, []);
 
@@ -159,10 +160,13 @@ export default function DailyBriefing({ onSpeak, onActive }) {
   const stopListen = () => {
     const rec = recRef.current;
     recRef.current = null;
-    if (rec) { try { rec.onend = null; rec.stop(); } catch { /* ignore */ } }
+    // abort() releases the mic at once (vs stop(), which finalizes lazily).
+    if (rec) { try { rec.onend = null; rec.onresult = null; rec.abort(); } catch { /* ignore */ } }
   };
+  // Muting must release the briefing's mic immediately.
+  useEffect(() => { mutedRef.current = muted; if (muted) stopListen(); }, [muted]);
   const startListen = (id) => {
-    if (!speechAvailable()) return; // tap-only fallback
+    if (!speechAvailable() || mutedRef.current) return; // muted or unsupported → tap-only
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
     rec.lang = "en-GB";
@@ -184,7 +188,7 @@ export default function DailyBriefing({ onSpeak, onActive }) {
     };
     rec.onerror = () => { /* onend handles restart */ };
     rec.onend = () => {
-      if (answerRef.current && answerRef.current.id === id && openRef.current) {
+      if (answerRef.current && answerRef.current.id === id && openRef.current && !mutedRef.current) {
         try { rec.start(); } catch { /* ignore */ }
       }
     };

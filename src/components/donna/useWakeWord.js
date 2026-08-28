@@ -104,7 +104,21 @@ export function useWakeWord({ enabled, active, onCommand, echoText = "", pauseMs
       runningRef.current = false;
       clearSilence();
       window.clearInterval(watchdog);
-      try { rec.onend = null; rec.stop(); } catch { /* ignore */ }
+      // Release the mic IMMEDIATELY on teardown (mute/unmount). abort() drops the
+      // session and frees the mic at once; stop() finalizes lazily and, if the
+      // session was still initializing from a just-issued start(), can be ignored —
+      // leaving an orphaned recognizer holding the mic (the lingering orange dot).
+      try {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null; // must not restart
+        rec.abort();
+      } catch { /* ignore */ }
+      // Guard the start/stop race: if start() was in flight, the abort above may be
+      // dropped. Abort again the moment it actually starts, and once more shortly
+      // after, so no initializing session survives to keep the mic open.
+      rec.onstart = () => { try { rec.abort(); } catch { /* ignore */ } };
+      setTimeout(() => { try { rec.abort(); } catch { /* ignore */ } }, 80);
     };
   }, [enabled, active, onCommand, pauseMs]);
 }

@@ -1002,8 +1002,15 @@ export default function Donna() {
     setMuted((v) => {
       const next = !v;
       try { localStorage.setItem("donna_muted", next ? "1" : "0"); } catch { /* ignore */ }
-      if (!next) primeTTS(); // unmuting is a gesture → unlock TTS + prompt mic
-      else { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } }
+      if (!next) {
+        primeTTS(); // unmuting is a gesture → unlock TTS + prompt mic
+      } else {
+        // Muting must release the mic completely — no orange dot while muted.
+        try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+        try { voice.stop(); } catch { /* ignore */ }   // release any push-to-talk capture
+        setBriefingActive(false);                        // stop the briefing's recognizer
+        setMode("idle");                                 // tears down the always-on wake word
+      }
       return next;
     });
   };
@@ -1720,7 +1727,7 @@ export default function Donna() {
       <RecentActions />
 
       {/* Morning look-ahead / evening habit review (speaks via the orb). Donna mode only. */}
-      {!chatMode && <DailyBriefing onSpeak={speak} onActive={setBriefingActive} />}
+      {!chatMode && <DailyBriefing onSpeak={speak} onActive={setBriefingActive} muted={muted} />}
 
       {/* Donna's captions ABOVE the orb; your words small BELOW it. */}
       <div className="relative z-[6] flex flex-col items-center gap-2 px-4">

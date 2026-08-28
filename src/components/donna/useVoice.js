@@ -36,7 +36,9 @@ export function useVoice({ onFinalTranscript } = {}) {
   }, []);
 
   const stop = useCallback(() => {
-    try { recRef.current?.stop(); } catch { /* ignore */ }
+    // abort() frees the mic immediately; stop() finalizes lazily and can keep the
+    // mic (orange dot) held for a moment after we asked it to stop.
+    try { recRef.current?.abort?.() ?? recRef.current?.stop(); } catch { /* ignore */ }
     cleanupAudio();
     setListening(false);
   }, [cleanupAudio]);
