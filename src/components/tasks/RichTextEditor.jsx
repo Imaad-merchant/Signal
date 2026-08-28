@@ -123,6 +123,29 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
     return () => document.removeEventListener("mousedown", h);
   }, [aiMenuOpen]);
 
+  // Document outline — headings in document order, kept live as the doc changes.
+  const [outline, setOutline] = useState([]);
+  useEffect(() => {
+    if (!editor) return;
+    const compute = () => {
+      const items = [];
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === "heading") items.push({ level: node.attrs.level || 1, text: node.textContent });
+      });
+      setOutline(items);
+    };
+    compute();
+    editor.on("update", compute);
+    return () => { editor.off("update", compute); };
+  }, [editor]);
+
+  const scrollToHeading = (i) => {
+    const root = editor?.view?.dom;
+    if (!root) return;
+    const hs = root.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    hs[i]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   if (!editor) {
     return <div className="flex-1 flex items-center justify-center text-gray-600 text-xs">Loading editor...</div>;
   }
@@ -301,9 +324,9 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
         )}
       </div>
 
-      {/* Editor body */}
+      {/* Editor body — a page on a desk, with an outline rail alongside it. */}
       <div
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto bg-[#171819]"
         onContextMenu={(e) => {
           // Only show our menu if there's a selection or click is in the editor
           if (!editor) return;
@@ -314,7 +337,27 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           setCtxMenu({ x, y });
         }}
       >
-        <div className="max-w-3xl mx-auto px-8 py-8">
+        <div className="mx-auto max-w-[1000px] px-4 md:px-8 py-8 flex gap-6 items-start">
+          {/* Outline rail */}
+          {outline.length > 0 && (
+            <nav className="hidden lg:block w-44 shrink-0 sticky top-0 self-start pt-3">
+              <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2 px-2">Outline</p>
+              <div className="flex flex-col">
+                {outline.map((h, i) => (
+                  <button
+                    key={i}
+                    onClick={() => scrollToHeading(i)}
+                    style={{ paddingLeft: 8 + (h.level - 1) * 10 }}
+                    className="text-left text-[12px] leading-snug text-gray-500 hover:text-gray-200 py-1 pr-2 truncate transition-colors"
+                  >
+                    {h.text || "Untitled"}
+                  </button>
+                ))}
+              </div>
+            </nav>
+          )}
+          {/* Sheet */}
+          <div className="flex-1 min-w-0 mx-auto max-w-[760px] rounded-xl bg-[#1e1f20] border border-white/[0.06] shadow-2xl shadow-black/40 px-8 md:px-12 py-10 mb-12">
           <style>{`
             .ProseMirror { outline: none; }
             .ProseMirror p.is-editor-empty:first-child::before {
@@ -345,6 +388,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
             .ProseMirror mark { padding: 0.1em 0.2em; border-radius: 2px; color: #111827; }
           `}</style>
           <EditorContent editor={editor} />
+          </div>
         </div>
       </div>
 
