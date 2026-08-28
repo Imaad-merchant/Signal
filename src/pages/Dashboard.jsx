@@ -6,9 +6,7 @@ import {
   addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
   addDays, isSameMonth
 } from "date-fns";
-import { Link } from "react-router-dom";
-import { createPageUrl } from "@/utils";
-import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Orbit } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, ChevronDown, CheckSquare, Sparkles, X, Folder, FolderOpen, Square } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
@@ -17,7 +15,6 @@ import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import EditTaskDialog from "../components/dashboard/EditTaskDialog";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 import { useIsMobile } from "../components/useIsMobile";
-import CheckInLauncher from "../components/donna/CheckInLauncher";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
 const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly" };
@@ -729,18 +726,6 @@ export default function Dashboard() {
                 </button>
               ))}
             </div>
-
-
-            <CheckInLauncher />
-            <Link to="/Donna" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="Donna">
-              <Orbit className="h-5 w-5" />
-            </Link>
-            <Link to={createPageUrl("Tasks")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
-              <CheckSquare className="h-5 w-5" />
-            </Link>
-            <Link to={createPageUrl("Settings")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
-              <Settings className="h-5 w-5" />
-            </Link>
           </div>
         </div>
 
