@@ -14,8 +14,44 @@ const COLLECTION_TO_ENTITY = {
 // Reverse a single logged action: delete the thing it created, then mark the log
 // undone (kept for audit rather than deleted). AgentAction.target looks like
 // "commitments/<id>". Returns { ok } or { ok:false, error }.
+// Re-create a Task from a snapshot we captured before deleting it, and re-push it
+// to Google Calendar if it had a date. Used to undo a deletion.
+async function restoreTaskFromSnapshot(s) {
+  if (!s) return { ok: false, error: "Nothing to restore" };
+  const created = await base44.entities.Task.create({
+    title: s.title || "(restored)",
+    category: s.category || null,
+    status: s.status || "not_started",
+    ...(s.due_date ? { due_date: s.due_date } : {}),
+    ...(s.notes ? { notes: s.notes } : {}),
+  });
+  if (s.due_date) {
+    // Re-add to Google Calendar so the event comes back on the calendar too.
+    try {
+      const r = await base44.functions.invoke("donna", { route: "gcal-push", title: s.title, date: s.due_date, gcalId: null });
+      const gid = (r && r.data ? r.data : r || {}).gcalId;
+      if (gid && created?.id) await base44.entities.Task.update(created.id, { gcal_id: gid }).catch(() => {});
+    } catch { /* the task is back either way; calendar re-push is best-effort */ }
+  }
+  return { ok: true, recreatedId: created?.id };
+}
+
 export async function reverseAgentAction(rec) {
   if (!rec || rec.undone) return { ok: false, error: "Already undone" };
+
+  // Deletion undo: bring the deleted item back from its snapshot (in-memory record
+  // pushed by applyActions, or an agent_actions doc whose payload carries it).
+  if (rec.kind === "delete" && rec.snapshot) {
+    try { return await restoreTaskFromSnapshot(rec.snapshot); }
+    catch (err) { return { ok: false, error: err?.message || "Restore failed" }; }
+  }
+  if (rec.action_type === "remove" && rec.payload && rec.payload.snapshot) {
+    try {
+      const out = await restoreTaskFromSnapshot(rec.payload.snapshot);
+      await base44.entities.AgentAction.update(rec.id, { undone: true, undone_at: new Date().toISOString() }).catch(() => {});
+      return out;
+    } catch (err) { return { ok: false, error: err?.message || "Restore failed" }; }
+  }
 
   // Log-entry undo: restore the document's previous content (or delete a log this
   // entry just created), rather than deleting the whole log.

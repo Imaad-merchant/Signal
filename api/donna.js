@@ -217,7 +217,7 @@ async function retrieveRelevantNotes(uid, query) {
       })
       .sort((a, b) => b.s - a.s)
       .map((x) => x.n)
-      .slice(0, 40);
+      .slice(0, 18);
     const vecs = await embed([query, ...pre.map((c) => `${c.title || ""}\n${(c.content || "").slice(0, 1500)}`)]);
     const qv = vecs[0];
     return pre
@@ -290,15 +290,20 @@ async function intent(auth, body, res) {
   const context = body.context && typeof body.context === "object" ? body.context : {};
   const today = context.today || new Date().toISOString().slice(0, 10);
 
-  // Auto-retrieval: for reflective/personal questions, pull the most relevant
-  // notes + memories from the vault so Donna answers grounded in the user's life.
-  const relevantNotes = wantsDeepRecall(transcript) ? await retrieveRelevantNotes(auth?.uid, transcript) : [];
+  // Latency guard: plain calendar / inbox / grade / task questions are answered
+  // straight from the context the client already sent — they don't need the vault
+  // embedding or the log scan, which are the slow part. Skip both for those so the
+  // common "what's on today" case goes straight to the model.
+  const scheduleQuery = /\b(calendar|schedul|agenda|meetings?|events?|appointments?|inbox|e-?mails?|\bmail\b|grades?|due|deadlines?|reminders?|upcoming|free time|availabilit)\b/i.test(transcript);
+  const wantDeep = wantsDeepRecall(transcript) && !scheduleQuery;
+  const wantStats = wantsLogStats(transcript);
 
-  // For habit/frequency/statistics questions (and reflective ones), attach exact,
-  // precomputed numbers from the user's logs so Donna cites real counts.
-  const logAnalytics = (wantsLogStats(transcript) || wantsDeepRecall(transcript))
-    ? await loadLogAnalytics(auth?.uid, transcript, today)
-    : null;
+  // Run the two retrievals concurrently (not one-after-the-other) so they overlap
+  // instead of stacking their latency before the model call.
+  const [relevantNotes, logAnalytics] = await Promise.all([
+    wantDeep ? retrieveRelevantNotes(auth?.uid, transcript) : Promise.resolve([]),
+    (wantStats || wantDeep) ? loadLogAnalytics(auth?.uid, transcript, today) : Promise.resolve(null),
+  ]);
 
   const system = `${personaLine(body.prefs)}
 You are a sharp, unflappable chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
@@ -325,6 +330,7 @@ ACTION TYPES:
 RULES:
 - ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
 - LISTS: when the user talks about a project/list ("my business list", "for the app"), use add/complete/remove with that list name. Default the list to "Business" only if they clearly mean their main venture and name none.
+- DELETION IS DANGEROUS — BE CONSERVATIVE: only emit a "remove" for an item the user EXPLICITLY and specifically named. NEVER emit removes for everything, and never turn a vague request ("delete a couple", "clear some", "get rid of those") into many removes — if they didn't name exactly which ones, emit ZERO removes and instead ask in "reply" which specific ones they mean. When in doubt, do not delete. Deleting the wrong things is far worse than asking.
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
 - RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
 - DEEP RECALL / REFLECTION: "relevant_notes" are the notes + memories from their Obsidian vault most relevant to THIS question (retrieved semantically). For reflective or advice questions — interview prep, "how do I leverage my life/achievements", self-assessment, "based on my experience", goals, patterns — DRAW ON relevant_notes: weave in concrete specifics (real achievements, experiences, values they actually wrote) rather than generic advice, and name where it comes from when useful. If relevant_notes is empty, answer from what you do have and say you don't have much in their vault on it yet.

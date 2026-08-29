@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, X, Check, Bell, Settings2, Volume2, Brain, Mail } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import DailyBriefing from "@/components/donna/DailyBriefing";
@@ -115,6 +115,10 @@ export default function Donna() {
   const [ttsSupported, setTtsSupported] = useState(true);
   const [lastActions, setLastActions] = useState([]); // undoable records from the last command
   const [undoing, setUndoing] = useState(false);
+  const [redoActions, setRedoActions] = useState([]); // actions to re-apply after an undo
+  const lastAppliedRef = useRef([]); // the last turn's actions, kept so Redo can re-run them
+  const pendingDeletionsRef = useRef(null); // bulk deletions staged for explicit confirmation
+  const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
   const [nudgeReady, setNudgeReady] = useState(false); // Donna has a follow-up to voice
   const [muted, setMuted] = useState(() => {
     try { return localStorage.getItem("donna_muted") === "1"; } catch { return false; }
@@ -340,6 +344,27 @@ export default function Donna() {
       }
       await commitLine(target, p.line);
       return;
+    }
+
+    // ---- Bulk deletion awaiting confirmation (guard against mass-wipe). ----
+    if (pendingDeletionsRef.current) {
+      const pend = pendingDeletionsRef.current;
+      const yes = /\b(yes|yeah|yep|confirm|do it|delete them|go ahead|proceed|sure)\b/i.test(t);
+      const no = /\b(no|cancel|stop|keep them|don'?t|nevermind|never mind|leave them)\b/i.test(t);
+      if (yes || no) {
+        pendingDeletionsRef.current = null; setPendingDeleteCount(0);
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        if (no) { const say = "Cancelled — I've left them all where they are."; setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return; }
+        const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+        const { count, records } = await applyActions(pend, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
+        setLastActions(records); lastAppliedRef.current = pend; setRedoActions([]);
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+        const say = count ? `Done — deleted ${count} item${count > 1 ? "s" : ""}. Tap Undo to bring them back.` : "I couldn't find those to delete.";
+        setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return;
+      }
+      // Not a clear yes/no — fall through and treat as a new request (leaves the
+      // deletions pending so they're never executed without an explicit "yes").
     }
 
     // ---- Calendar event: we asked for a missing date or category — this answers it. ----
@@ -948,8 +973,30 @@ export default function Donna() {
       }
       const researchAction = actions.find((a) => a && a.type === "research" && a.query);
       const otherActions = actions.filter((a) => a && a.type !== "email" && a.type !== "research");
+
+      // SAFETY: never let one command delete a pile of things. If it would remove
+      // more than 2 items, run everything EXCEPT the deletions and hold those for an
+      // explicit spoken confirmation — this is the guard against the "delete a couple
+      // → deleted everything" wipe.
+      const removeActions = otherActions.filter((a) => a.type === "remove");
+      if (removeActions.length > 2) {
+        const safeActions = otherActions.filter((a) => a.type !== "remove");
+        const { records } = await applyActions(safeActions, today, allTasks);
+        setLastActions(records);
+        lastAppliedRef.current = safeActions;
+        pendingDeletionsRef.current = removeActions;
+        setPendingDeleteCount(removeActions.length);
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        const warn = `Hold on — that would delete ${removeActions.length} items. Say "yes, delete them" to confirm, or "cancel" to keep them.`;
+        setHeard(t); pushTurn("you", t); setReply(warn); pushTurn("signal", warn); speak(warn);
+        setMode("idle");
+        return;
+      }
+
       const { count, records } = await applyActions(otherActions, today, allTasks);
       setLastActions(records);
+      lastAppliedRef.current = otherActions;
+      setRedoActions([]);
       if (count) {
         setNote(`${count} action${count > 1 ? "s" : ""} done`);
         queryClient.invalidateQueries({ queryKey: ["grid"] });
@@ -1298,11 +1345,32 @@ export default function Donna() {
           // Resolve which existing list item they meant, then complete/delete it.
           const match = findTask(allTasks, a.text, a.list);
           if (match?.id) {
-            if (a.type === "complete") await base44.entities.Task.update(match.id, { status: "done" });
-            else { await base44.entities.Task.delete(match.id); deleteEventFromGoogle(match.gcal_id); }
-            n++;
+            if (a.type === "complete") {
+              await base44.entities.Task.update(match.id, { status: "done" });
+              n++;
+            } else {
+              // Snapshot BEFORE deleting so the deletion can be fully undone (task
+              // re-created + re-pushed to Google Calendar).
+              const snapshot = {
+                title: match.title, category: match.category || null, status: match.status || "not_started",
+                due_date: match.due_date || null, gcal_id: match.gcal_id || null, notes: match.notes || null,
+              };
+              await base44.entities.Task.delete(match.id);
+              deleteEventFromGoogle(match.gcal_id);
+              n++;
+              const rec = { kind: "delete", snapshot };
+              try {
+                const logged = await base44.entities.AgentAction.create({
+                  action_type: "remove", target: "tasks/" + match.id, payload: { ...a, snapshot },
+                  executed_at: new Date().toISOString(),
+                  undo_deadline: new Date(Date.now() + 86400000).toISOString(),
+                });
+                if (logged?.id) rec.actionId = logged.id;
+              } catch { /* deletion still undoable via the in-memory record */ }
+              records.push(rec);
+            }
           }
-          continue; // executed in place; not part of the create-then-undo trail
+          continue; // executed in place
         } else {
           continue;
         }
@@ -1470,15 +1538,53 @@ export default function Donna() {
     });
   }
 
-  // Undo everything the last command created (within the 24h window).
+  // Undo everything the last command did — including restoring deleted events
+  // (re-created + re-pushed to Google). Stashes the actions so Redo can re-apply.
   async function undoLast() {
     if (!lastActions.length || undoing) return;
     setUndoing(true);
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     const n = await reverseMany(lastActions);
+    setRedoActions(lastAppliedRef.current || []);
     setLastActions([]);
-    setNote(n ? `Undone.` : "Nothing to undo.");
+    setNote(n ? `Undone — restored ${n} item${n > 1 ? "s" : ""}.` : "Nothing to undo.");
     setReply("");
+    setMode("idle");
+    queryClient.invalidateQueries({ queryKey: ["grid"] });
+    queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+    setUndoing(false);
+  }
+
+  // Execute the bulk deletions that were staged for confirmation.
+  async function confirmPendingDeletions() {
+    const pend = pendingDeletionsRef.current;
+    if (!pend || undoing) return;
+    pendingDeletionsRef.current = null; setPendingDeleteCount(0);
+    setUndoing(true);
+    const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+    const { count, records } = await applyActions(pend, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
+    setLastActions(records); lastAppliedRef.current = pend; setRedoActions([]);
+    queryClient.invalidateQueries({ queryKey: ["grid"] });
+    queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+    const say = count ? `Deleted ${count} item${count > 1 ? "s" : ""}. Tap Undo to bring them back.` : "I couldn't find those to delete.";
+    setNote(say); setReply(say);
+    setUndoing(false);
+  }
+  function cancelPendingDeletions() {
+    pendingDeletionsRef.current = null; setPendingDeleteCount(0);
+    setNote("Kept them — nothing deleted.");
+  }
+
+  // Redo: re-apply the actions that were just undone.
+  async function redoLast() {
+    if (!redoActions.length || undoing) return;
+    setUndoing(true);
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+    const { count, records } = await applyActions(redoActions, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
+    setLastActions(records);
+    setRedoActions([]);
+    setNote(count ? `Redone ${count} action${count > 1 ? "s" : ""}.` : "Nothing to redo.");
     setMode("idle");
     queryClient.invalidateQueries({ queryKey: ["grid"] });
     queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
@@ -1832,16 +1938,39 @@ export default function Donna() {
           Sits above the safe area and, crucially, above the orb in stacking order
           (z-10 > orb's z-6) so the Undo tap target is never eaten by the orb. */}
       <div className="absolute left-0 right-0 z-10 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
-        {lastActions.length > 0 && mode !== "processing" && (
-          <button
-            type="button"
-            onClick={undoLast}
-            disabled={undoing}
-            className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 hover:bg-amber-400/20 transition-colors disabled:opacity-50"
-          >
-            {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-            Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
-          </button>
+        {pendingDeleteCount > 0 && (
+          <div className="flex items-center gap-2 rounded-full border border-rose-400/30 bg-rose-500/10 px-3 py-1.5">
+            <AlertTriangle className="h-3.5 w-3.5 text-rose-300" />
+            <span className="text-xs text-rose-100">Delete {pendingDeleteCount} items?</span>
+            <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-full bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
+            <button type="button" onClick={cancelPendingDeletions} className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
+          </div>
+        )}
+        {(lastActions.length > 0 || redoActions.length > 0) && mode !== "processing" && (
+          <div className="flex items-center gap-2">
+            {lastActions.length > 0 && (
+              <button
+                type="button"
+                onClick={undoLast}
+                disabled={undoing}
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 hover:bg-amber-400/20 transition-colors disabled:opacity-50"
+              >
+                {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
+              </button>
+            )}
+            {redoActions.length > 0 && (
+              <button
+                type="button"
+                onClick={redoLast}
+                disabled={undoing}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-xs font-medium text-gray-300 hover:bg-white/[0.12] transition-colors disabled:opacity-50"
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+                Redo
+              </button>
+            )}
+          </div>
         )}
         <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(92vw,460px)]">
           {voice.supported && (
