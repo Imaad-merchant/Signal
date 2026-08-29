@@ -129,7 +129,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
     },
     editorProps: {
       attributes: {
-        class: "prose prose-invert prose-sm max-w-none focus:outline-none min-h-[60vh] text-gray-200",
+        class: "prose prose-invert prose-sm max-w-none focus:outline-none min-h-[calc(100vh-210px)] text-gray-200",
       },
     },
   });
@@ -379,9 +379,11 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
         )}
       </div>
 
-      {/* Editor body — a page on a desk, with an outline rail alongside it. */}
+      {/* Editor body — one continuous full-bleed surface (no paper edges), like
+          Notion. An outline rail floats alongside; clicking any empty space in the
+          writing column places the cursor at the end of the document. */}
       <div
-        className="flex-1 overflow-y-auto bg-[#171819]"
+        className="flex-1 overflow-y-auto bg-[#1a1b1c]"
         onContextMenu={(e) => {
           // Only show our menu if there's a selection or click is in the editor
           if (!editor) return;
@@ -392,7 +394,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           setCtxMenu({ x, y });
         }}
       >
-        <div className="mx-auto max-w-[1000px] px-4 md:px-8 py-8 flex gap-6 items-start">
+        <div className="mx-auto max-w-[1180px] px-6 md:px-10 lg:px-16 py-10 flex gap-10 items-start">
           {/* Outline rail */}
           {outline.length > 0 && (
             <nav className="hidden lg:block w-44 shrink-0 sticky top-0 self-start pt-3">
@@ -411,8 +413,11 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
               </div>
             </nav>
           )}
-          {/* Sheet */}
-          <div className="flex-1 min-w-0 mx-auto max-w-[760px] rounded-xl bg-[#1e1f20] border border-white/[0.06] shadow-2xl shadow-black/40 px-8 md:px-12 py-10 mb-12">
+          {/* Writing column — no card, no border, no shadow: the surface is the page. */}
+          <div
+            className="flex-1 min-w-0 max-w-[860px] mx-auto pb-24"
+            onClick={(e) => { if (e.target === e.currentTarget) editor.chain().focus("end").run(); }}
+          >
           <style>{`
             .ProseMirror { outline: none; }
             .ProseMirror p.is-editor-empty:first-child::before {
