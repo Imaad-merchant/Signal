@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
@@ -14,14 +14,59 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { Highlight } from "@tiptap/extension-highlight";
+import { FontFamily } from "@tiptap/extension-font-family";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { ResizableImage } from "./ResizableImage";
 import {
   Undo2, Redo2, Bold, Italic, Underline as UIcon, Strikethrough, Code,
   List, ListOrdered, CheckSquare, Quote, Code2, Minus, Link as LinkIcon,
-  AlignLeft, AlignCenter, AlignRight, AlignJustify, ChevronDown, Highlighter, Table as TableIcon, RemoveFormatting, Sparkles
+  AlignLeft, AlignCenter, AlignRight, AlignJustify, ChevronDown, Highlighter, Table as TableIcon, RemoveFormatting, Sparkles,
+  Image as ImageIcon, Type
 } from "lucide-react";
+
+// Font size as an attribute on the existing TextStyle mark (the v3 font-size
+// package is still prerelease, so we define the ~dozen lines ourselves).
+const FontSize = Extension.create({
+  name: "fontSize",
+  addOptions() { return { types: ["textStyle"] }; },
+  addGlobalAttributes() {
+    return [{
+      types: this.options.types,
+      attributes: {
+        fontSize: {
+          default: null,
+          parseHTML: (el) => el.style.fontSize || null,
+          renderHTML: (attrs) => (attrs.fontSize ? { style: `font-size: ${attrs.fontSize}` } : {}),
+        },
+      },
+    }];
+  },
+  addCommands() {
+    return {
+      setFontSize: (size) => ({ chain }) => chain().setMark("textStyle", { fontSize: size }).run(),
+      unsetFontSize: () => ({ chain }) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+    };
+  },
+});
+
+const FONT_FAMILIES = [
+  { label: "Default", value: "" },
+  { label: "Sans Serif", value: "ui-sans-serif, system-ui, sans-serif" },
+  { label: "Serif", value: "Georgia, 'Times New Roman', serif" },
+  { label: "Mono", value: "ui-monospace, 'SF Mono', Menlo, monospace" },
+  { label: "Inter", value: "Inter, sans-serif" },
+  { label: "Georgia", value: "Georgia, serif" },
+];
+const FONT_SIZES = ["12px", "14px", "16px", "18px", "20px", "24px", "30px", "36px"];
+
+const MARGIN_KEY = "signal_doc_margins";
+function loadMargins() {
+  try { const m = JSON.parse(localStorage.getItem(MARGIN_KEY) || ""); if (m && typeof m.left === "number") return m; } catch { /* ignore */ }
+  return { left: 96, right: 96 };
+}
+function saveMargins(m) { try { localStorage.setItem(MARGIN_KEY, JSON.stringify(m)); } catch { /* ignore */ } }
 
 // Obsidian-style [[wikilinks]]: decorate them so they read as links. Click
 // handling is done with a native DOM listener on the editor (see the component)
@@ -101,9 +146,36 @@ function RbBtn({ onClick, active, title, children, disabled }) {
   );
 }
 
-export default function RichTextEditor({ value, onChange, placeholder = "Start typing...", onAIVisualize, onAIEdit, onOpenLink }) {
+export default function RichTextEditor({ value, onChange, placeholder = "Start typing...", onAIVisualize, onAIEdit, onOpenLink, uploadImage }) {
   const onOpenLinkRef = useRef(onOpenLink);
   useEffect(() => { onOpenLinkRef.current = onOpenLink; }, [onOpenLink]);
+  const uploadRef = useRef(uploadImage);
+  useEffect(() => { uploadRef.current = uploadImage; }, [uploadImage]);
+  const fileInputRef = useRef(null);
+
+  // Upload image files to storage, then insert them at `pos` (or the caret).
+  // Paste/drop handlers below claim the event synchronously and call this async.
+  const uploadAndInsert = useCallback(async (view, files, pos) => {
+    const imgs = Array.from(files || []).filter((f) => f.type && f.type.startsWith("image/"));
+    for (const file of imgs) {
+      if (file.size > 20 * 1024 * 1024) { window.alert(`"${file.name}" is over 20MB — too large to embed.`); continue; }
+      let url = null;
+      try {
+        url = uploadRef.current ? await uploadRef.current(file) : URL.createObjectURL(file);
+      } catch (err) {
+        window.alert(`Couldn't upload "${file.name}": ${err?.message || "failed"}`);
+        continue;
+      }
+      if (!url) continue;
+      const schema = view.state.schema;
+      if (!schema.nodes.image) continue;
+      const node = schema.nodes.image.create({ src: url });
+      const at = typeof pos === "number" ? Math.min(pos, view.state.doc.content.size) : view.state.selection.from;
+      view.dispatch(view.state.tr.insert(at, node).scrollIntoView());
+    }
+  }, []);
+
+  const [margins, setMargins] = useState(loadMargins);
 
   const editor = useEditor({
     extensions: [
@@ -112,12 +184,15 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
       Underline,
       TextStyle,
       Color,
+      FontFamily,
+      FontSize,
       Highlight.configure({ multicolor: true }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Link.configure({ openOnClick: false, HTMLAttributes: { class: "text-blue-400 underline" } }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder }),
+      ResizableImage,
       Table.configure({ resizable: true }),
       TableRow,
       TableCell,
@@ -130,6 +205,29 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
     editorProps: {
       attributes: {
         class: "prose prose-invert prose-sm max-w-none focus:outline-none min-h-[calc(100vh-210px)] text-gray-200",
+      },
+      // Paste an image from the clipboard.
+      handlePaste(view, event) {
+        const files = event.clipboardData?.files;
+        if (files && files.length && Array.from(files).some((f) => f.type.startsWith("image/"))) {
+          event.preventDefault();
+          uploadAndInsert(view, files, null);
+          return true;
+        }
+        return false;
+      },
+      // Drop image files onto the page (internal content drags fall through).
+      handleDrop(view, event, _slice, moved) {
+        if (moved) return false;
+        const files = event.dataTransfer?.files;
+        if (files && files.length && Array.from(files).some((f) => f.type.startsWith("image/"))) {
+          event.preventDefault();
+          event.stopPropagation();
+          const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          uploadAndInsert(view, files, coords ? coords.pos : null);
+          return true;
+        }
+        return false;
       },
     },
   });
@@ -233,6 +331,45 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           )}
         </Dropdown>
 
+        {/* Font family */}
+        <Dropdown trigger={<span className="min-w-[52px] text-left flex items-center gap-1"><Type className="h-3 w-3" />Font</span>}>
+          {(close) => (
+            <>
+              {FONT_FAMILIES.map((f) => (
+                <button
+                  key={f.label}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { if (f.value) editor.chain().focus().setFontFamily(f.value).run(); else editor.chain().focus().unsetFontFamily().run(); close(); }}
+                  className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]"
+                  style={{ fontFamily: f.value || "inherit" }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </>
+          )}
+        </Dropdown>
+
+        {/* Font size */}
+        <Dropdown trigger={<span className="min-w-[30px] text-left">{(editor.getAttributes("textStyle").fontSize || "16px").replace("px", "")}</span>} width="min-w-[80px]">
+          {(close) => (
+            <>
+              {FONT_SIZES.map((s) => (
+                <button
+                  key={s}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { editor.chain().focus().setFontSize(s).run(); close(); }}
+                  className="block w-full text-left px-3 py-1.5 text-xs text-gray-200 hover:bg-white/[0.05]"
+                >
+                  {s.replace("px", "")}
+                </button>
+              ))}
+              <div className="border-t border-white/[0.06] my-1" />
+              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { editor.chain().focus().unsetFontSize().run(); close(); }} className="block w-full text-left px-3 py-1.5 text-[10px] text-gray-500 hover:bg-white/[0.05]">Reset</button>
+            </>
+          )}
+        </Dropdown>
+
         <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
 
         {/* Inline formatting */}
@@ -325,6 +462,17 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           <LinkIcon className="h-3.5 w-3.5" />
         </RbBtn>
 
+        {/* Image */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => { if (e.target.files?.length) uploadAndInsert(editor.view, e.target.files, null); e.target.value = ""; }}
+        />
+        <RbBtn onClick={() => fileInputRef.current?.click()} title="Insert image"><ImageIcon className="h-3.5 w-3.5" /></RbBtn>
+
         {/* Table */}
         <RbBtn onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} title="Insert table">
           <TableIcon className="h-3.5 w-3.5" />
@@ -394,30 +542,15 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           setCtxMenu({ x, y });
         }}
       >
-        <div className="mx-auto max-w-[1180px] px-6 md:px-10 lg:px-16 py-10 flex gap-10 items-start">
-          {/* Outline rail */}
-          {outline.length > 0 && (
-            <nav className="hidden lg:block w-44 shrink-0 sticky top-0 self-start pt-3">
-              <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2 px-2">Outline</p>
-              <div className="flex flex-col">
-                {outline.map((h, i) => (
-                  <button
-                    key={i}
-                    onClick={() => scrollToHeading(i)}
-                    style={{ paddingLeft: 8 + (h.level - 1) * 10 }}
-                    className="text-left text-[12px] leading-snug text-gray-500 hover:text-gray-200 py-1 pr-2 truncate transition-colors"
-                  >
-                    {h.text || "Untitled"}
-                  </button>
-                ))}
-              </div>
-            </nav>
-          )}
-          {/* Writing column — no card, no border, no shadow: the surface is the page. */}
-          <div
-            className="flex-1 min-w-0 max-w-[860px] mx-auto pb-24"
-            onClick={(e) => { if (e.target === e.currentTarget) editor.chain().focus("end").run(); }}
-          >
+        <div className="flex items-start">
+          {/* Writing column — left-anchored, full width, no card. Its own left/right
+              padding IS the page margin, set by the draggable ruler above it. */}
+          <div className="flex-1 min-w-0 pt-3 pb-24">
+            <MarginRuler margins={margins} onChange={(m) => { setMargins(m); saveMargins(m); }} />
+            <div
+              style={{ paddingLeft: margins.left, paddingRight: margins.right }}
+              onClick={(e) => { if (e.target === e.currentTarget) editor.chain().focus("end").run(); }}
+            >
           <style>{`
             .ProseMirror { outline: none; }
             .ProseMirror p.is-editor-empty:first-child::before {
@@ -448,9 +581,30 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
             .ProseMirror mark { padding: 0.1em 0.2em; border-radius: 2px; color: #111827; }
             .ProseMirror .wikilink { color: #a5b4fc; cursor: pointer; border-radius: 3px; padding: 0 1px; }
             .ProseMirror .wikilink:hover { background: rgba(129,140,248,0.15); text-decoration: underline; }
+            .ProseMirror img { max-width: 100%; height: auto; }
+            .ProseMirror .ri-wrap { user-select: none; }
           `}</style>
           <EditorContent editor={editor} />
+            </div>
           </div>
+          {/* Outline rail — moved to the right so text stays anchored to the left. */}
+          {outline.length > 0 && (
+            <nav className="hidden xl:block w-48 shrink-0 sticky top-0 self-start pt-6 pr-4">
+              <p className="text-[10px] uppercase tracking-wider text-gray-600 mb-2 px-2">Outline</p>
+              <div className="flex flex-col">
+                {outline.map((h, i) => (
+                  <button
+                    key={i}
+                    onClick={() => scrollToHeading(i)}
+                    style={{ paddingLeft: 8 + (h.level - 1) * 10 }}
+                    className="text-left text-[12px] leading-snug text-gray-500 hover:text-gray-200 py-1 pr-2 truncate transition-colors"
+                  >
+                    {h.text || "Untitled"}
+                  </button>
+                ))}
+              </div>
+            </nav>
+          )}
         </div>
       </div>
 
@@ -511,6 +665,59 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           <MenuItem onClick={() => { editor.chain().focus().selectAll().run(); setCtxMenu(null); }} label="Select all" shortcut="⌘A" />
         </div>
       )}
+    </div>
+  );
+}
+
+// A Google-Docs-style ruler: two draggable handles set the left/right page
+// margins. It lives in the same width-constrained box as the text, so the handle
+// positions line up with where the text actually starts and ends.
+function MarginRuler({ margins, onChange }) {
+  const ref = useRef(null);
+  const dragRef = useRef(null);
+
+  const start = (side) => (e) => {
+    e.preventDefault();
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragRef.current = { side, rect };
+    const onMove = (ev) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const w = d.rect.width;
+      const MIN_GAP = 120; // keep a usable text column between the two margins
+      if (d.side === "left") {
+        const left = Math.max(0, Math.min(ev.clientX - d.rect.left, w - margins.right - MIN_GAP));
+        onChange({ left: Math.round(left), right: margins.right });
+      } else {
+        const right = Math.max(0, Math.min(d.rect.right - ev.clientX, w - margins.left - MIN_GAP));
+        onChange({ left: margins.left, right: Math.round(right) });
+      }
+    };
+    const onUp = () => { dragRef.current = null; window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  return (
+    <div ref={ref} className="relative h-5 mb-1 select-none group" title="Drag to adjust margins">
+      {/* track: light where text goes, dimmed in the margins */}
+      <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-[3px] bg-white/[0.04] rounded" />
+      <div
+        className="absolute top-1/2 -translate-y-1/2 h-[3px] bg-white/[0.12] rounded"
+        style={{ left: margins.left, right: margins.right }}
+      />
+      {[["left", margins.left], ["right", margins.right]].map(([side, val]) => (
+        <div
+          key={side}
+          onPointerDown={start(side)}
+          className="absolute top-0 h-5 w-3 -ml-1.5 cursor-ew-resize flex items-center justify-center opacity-40 group-hover:opacity-100 transition-opacity"
+          style={side === "left" ? { left: val } : { right: val, marginLeft: 0, marginRight: -6 }}
+          title={`${side} margin: ${val}px`}
+        >
+          <div className="w-2 h-2 rotate-45 bg-blue-400 border border-[#0b0c0d] rounded-[2px]" />
+        </div>
+      ))}
     </div>
   );
 }
