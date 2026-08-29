@@ -1363,7 +1363,8 @@ export default function Donna() {
                 const logged = await base44.entities.AgentAction.create({
                   action_type: "remove", target: "tasks/" + match.id, payload: { ...a, snapshot },
                   executed_at: new Date().toISOString(),
-                  undo_deadline: new Date(Date.now() + 86400000).toISOString(),
+                  // Deletions stay restorable for 30 days (matches Google's Trash window).
+                  undo_deadline: new Date(Date.now() + 30 * 86400000).toISOString(),
                 });
                 if (logged?.id) rec.actionId = logged.id;
               } catch { /* deletion still undoable via the in-memory record */ }
@@ -1937,9 +1938,9 @@ export default function Donna() {
       {/* Controls: undo (when available) + mic + always-available type fallback.
           Sits above the safe area and, crucially, above the orb in stacking order
           (z-10 > orb's z-6) so the Undo tap target is never eaten by the orb. */}
-      <div className="absolute left-0 right-0 z-10 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
+      <div className="pointer-events-none absolute left-0 right-0 z-20 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
         {pendingDeleteCount > 0 && (
-          <div className="flex items-center gap-2 rounded-full border border-rose-400/30 bg-rose-500/10 px-3 py-1.5">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-rose-400/40 bg-[#1a0e12]/95 px-3 py-1.5 shadow-xl shadow-black/50 backdrop-blur-md">
             <AlertTriangle className="h-3.5 w-3.5 text-rose-300" />
             <span className="text-xs text-rose-100">Delete {pendingDeleteCount} items?</span>
             <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-full bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
@@ -1947,13 +1948,13 @@ export default function Donna() {
           </div>
         )}
         {(lastActions.length > 0 || redoActions.length > 0) && mode !== "processing" && (
-          <div className="flex items-center gap-2">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-[#0b0d11]/90 p-1 shadow-xl shadow-black/50 backdrop-blur-md">
             {lastActions.length > 0 && (
               <button
                 type="button"
                 onClick={undoLast}
                 disabled={undoing}
-                className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 hover:bg-amber-400/20 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-400/15 px-4 py-2 text-xs font-medium text-amber-100 hover:bg-amber-400/25 transition-colors disabled:opacity-50"
               >
                 {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
                 Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
@@ -1964,7 +1965,7 @@ export default function Donna() {
                 type="button"
                 onClick={redoLast}
                 disabled={undoing}
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2 text-xs font-medium text-gray-300 hover:bg-white/[0.12] transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-xs font-medium text-gray-200 hover:bg-white/[0.15] transition-colors disabled:opacity-50"
               >
                 <RotateCw className="h-3.5 w-3.5" />
                 Redo
@@ -1972,7 +1973,7 @@ export default function Donna() {
             )}
           </div>
         )}
-        <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(92vw,460px)]">
+        <form onSubmit={submitTyped} className="pointer-events-auto flex items-center gap-2 w-[min(92vw,460px)]">
           {voice.supported && (
             <button
               type="button"

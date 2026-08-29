@@ -42,7 +42,8 @@ export default function RecentActions() {
 
   const now = Date.now();
   const undoable = (Array.isArray(data) ? data : [])
-    .filter((r) => r && !r.undone && (!r.undo_deadline || new Date(r.undo_deadline).getTime() > now))
+    // Deletions live in the dedicated "Deleted by Donna" panel; keep this to creates.
+    .filter((r) => r && !r.undone && r.action_type !== "remove" && (!r.undo_deadline || new Date(r.undo_deadline).getTime() > now))
     .slice(0, 6);
 
   if (!undoable.length) return null;

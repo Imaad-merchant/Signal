@@ -2,6 +2,7 @@ import React from "react";
 import { PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
 import StatusGrid from "./StatusGrid";
 import RecentActions from "./RecentActions";
+import DeletedHistory from "./DeletedHistory";
 
 // The right-hand widget panel on the Donna screen: the status widgets (today,
 // open, grades, inbox, …) stacked vertically. Collapsible, and its widgets are
@@ -30,6 +31,7 @@ export default function WidgetPanel({ collapsed, onToggleCollapse, onEdit }) {
       </div>
       <div className="relative flex-1 overflow-y-auto p-3 pt-3">
         <RecentActions />
+        <DeletedHistory />
         <StatusGrid variant="panel" />
       </div>
     </aside>
