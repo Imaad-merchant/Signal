@@ -975,11 +975,11 @@ export default function Donna() {
       const otherActions = actions.filter((a) => a && a.type !== "email" && a.type !== "research");
 
       // SAFETY: never let one command delete a pile of things. If it would remove
-      // more than 2 items, run everything EXCEPT the deletions and hold those for an
-      // explicit spoken confirmation — this is the guard against the "delete a couple
-      // → deleted everything" wipe.
+      // MORE THAN ONE item, run everything EXCEPT the deletions and hold those for an
+      // explicit confirmation — the guard against the "delete a couple → deleted
+      // everything" wipe. A single, clearly-named delete still goes through.
       const removeActions = otherActions.filter((a) => a.type === "remove");
-      if (removeActions.length > 2) {
+      if (removeActions.length > 1) {
         const safeActions = otherActions.filter((a) => a.type !== "remove");
         const { records } = await applyActions(safeActions, today, allTasks);
         setLastActions(records);
@@ -1939,7 +1939,7 @@ export default function Donna() {
           Sits above the safe area and, crucially, above the orb in stacking order
           (z-10 > orb's z-6) so the Undo tap target is never eaten by the orb. */}
       <div className="pointer-events-none absolute left-0 right-0 z-20 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
-        {pendingDeleteCount > 0 && (
+        {pendingDeleteCount > 0 && !chatMode && (
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-rose-400/40 bg-[#1a0e12]/95 px-3 py-1.5 shadow-xl shadow-black/50 backdrop-blur-md">
             <AlertTriangle className="h-3.5 w-3.5 text-rose-300" />
             <span className="text-xs text-rose-100">Delete {pendingDeleteCount} items?</span>
@@ -1947,7 +1947,7 @@ export default function Donna() {
             <button type="button" onClick={cancelPendingDeletions} className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
           </div>
         )}
-        {(lastActions.length > 0 || redoActions.length > 0) && mode !== "processing" && (
+        {(lastActions.length > 0 || redoActions.length > 0) && mode !== "processing" && !chatMode && (
           <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-[#0b0d11]/90 p-1 shadow-xl shadow-black/50 backdrop-blur-md">
             {lastActions.length > 0 && (
               <button
@@ -2050,7 +2050,25 @@ export default function Donna() {
           </div>
 
           {note && <p className="px-4 pb-1 text-center text-[11px] text-cyan-300">{note}</p>}
+          {pendingDeleteCount > 0 && (
+            <div className="mx-3 mb-1 flex items-center gap-2 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-rose-300" />
+              <span className="flex-1 text-xs text-rose-100">Delete {pendingDeleteCount} items? This can’t be batch-undone easily.</span>
+              <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-md bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
+              <button type="button" onClick={cancelPendingDeletions} className="rounded-md bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
+            </div>
+          )}
           <form onSubmit={submitTyped} className="flex items-center gap-2 border-t border-white/10 p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+            {lastActions.length > 0 && (
+              <button type="button" onClick={undoLast} disabled={undoing} title="Undo last" aria-label="Undo last" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-400/30 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20 disabled:opacity-50">
+                {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              </button>
+            )}
+            {redoActions.length > 0 && (
+              <button type="button" onClick={redoLast} disabled={undoing} title="Redo" aria-label="Redo" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] text-gray-300 hover:bg-white/[0.12] disabled:opacity-50">
+                <RotateCw className="h-4 w-4" />
+              </button>
+            )}
             <input
               value={typed}
               onChange={(e) => setTyped(e.target.value)}

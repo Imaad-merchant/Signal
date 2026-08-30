@@ -373,7 +373,24 @@ Context (JSON): ${JSON.stringify({
 
 Parse it now.`;
 
-  const raw = await callLLM({ system, user, json: true });
+  // Don't let a provider hiccup surface as a scary raw error. Try once, retry once,
+  // then return a friendly, retryable reply (200) instead of a 500 — and never any
+  // actions, so a failed parse can't accidentally delete or create anything.
+  let raw = "";
+  try {
+    raw = await callLLM({ system, user, json: true });
+  } catch (err1) {
+    console.error("intent LLM failed (1st):", err1?.message);
+    try {
+      raw = await callLLM({ system, user, json: true });
+    } catch (err2) {
+      console.error("intent LLM failed (2nd):", err2?.message);
+      return res.status(200).json({
+        reply: "I'm having trouble reaching my brain for a second — give that another go.",
+        intent: "none", actions: [],
+      });
+    }
+  }
   const parsed = parseJSON(raw);
 
   const intentType = INTENT_VALID.includes(parsed?.intent) ? parsed.intent : "none";
