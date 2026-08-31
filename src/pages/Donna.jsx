@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import DailyBriefing from "@/components/donna/DailyBriefing";
@@ -117,6 +117,7 @@ export default function Donna() {
   const [undoing, setUndoing] = useState(false);
   const [redoActions, setRedoActions] = useState([]); // actions to re-apply after an undo
   const lastAppliedRef = useRef([]); // the last turn's actions, kept so Redo can re-run them
+  const syllabusInputRef = useRef(null); // hidden file picker for syllabus upload
   const pendingDeletionsRef = useRef(null); // bulk deletions staged for explicit confirmation
   const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
   const [nudgeReady, setNudgeReady] = useState(false); // Donna has a follow-up to voice
@@ -1631,6 +1632,61 @@ export default function Donna() {
     setUndoing(false);
   }
 
+  // Upload a syllabus (PDF or image) → the assistant reads it, auto-creates a
+  // coloured category, and calendarizes every dated assignment (mirrored to Google,
+  // fully undoable as one import).
+  async function handleSyllabusUpload(file) {
+    if (!file) return;
+    const okType = file.type === "application/pdf" || ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type);
+    if (!okType) { setNote("Upload a PDF or an image (PNG/JPG) of your syllabus."); return; }
+    if (file.size > 10 * 1024 * 1024) { setNote("That file's over 10MB — try a smaller PDF or a screenshot."); return; }
+    try {
+      setMode("processing");
+      setHeard(`Uploaded ${file.name}`); pushTurn("you", `Uploaded ${file.name}`); setReply(""); setNote("Uploading your syllabus…");
+      const up = await base44.integrations.Core.UploadFile({ file });
+      const fileUrl = up?.file_url;
+      if (!fileUrl) throw new Error("upload failed");
+      setNote("Reading your syllabus…");
+      const res = await base44.functions.invoke("donna", { route: "extract-syllabus", file_url: fileUrl, media_type: file.type });
+      const data = res && res.data ? res.data : res || {};
+      if (data.error) {
+        const msg = data.error === "pdf-unreadable"
+          ? "I couldn't read that PDF — my PDF reader isn't reachable right now. Try a screenshot of it, or paste the text."
+          : data.error === "too-large" ? "That file's too big for me to read — try a smaller PDF or a screenshot."
+            : "I couldn't read that file. Try a clearer PDF or a screenshot of the syllabus.";
+        setNote(""); setReply(msg); pushTurn("signal", msg); speak(msg); setMode("idle"); return;
+      }
+      const cat = data.category || {};
+      const catName = (String(cat.name || "").trim().slice(0, 40)) || "Course";
+      const color = /^#[0-9a-fA-F]{6}$/.test(cat.color || "") ? cat.color : "#4285f4";
+      const assignments = (Array.isArray(data.assignments) ? data.assignments : [])
+        .filter((a) => a && a.title && /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || ""));
+      if (!assignments.length) {
+        const m = "I couldn't find any assignments with due dates in that syllabus.";
+        setNote(""); setReply(m); pushTurn("signal", m); speak(m); setMode("idle"); return;
+      }
+      // Pre-create the category with the colour Donna chose, so the imported items
+      // are filed + coloured (applyActions will find it by name and reuse its key).
+      try {
+        const cats = (await base44.entities.Category.list().catch(() => [])) || [];
+        const lc = catName.toLowerCase();
+        if (!cats.some((c) => (c.label || "").toLowerCase() === lc || (c.key || "").toLowerCase() === lc)) {
+          await base44.entities.Category.create({ label: catName, color, key: lc.replace(/\s+/g, "_") + "_" + Date.now() });
+        }
+      } catch { /* the task still saves; worst case it's uncoloured */ }
+      const addActions = assignments.map((a) => ({ type: "add", list: catName, text: String(a.title).slice(0, 300), due_date: a.due_date }));
+      const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+      const { count, records } = await applyActions(addActions, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
+      setLastActions(records); lastAppliedRef.current = addActions; setRedoActions([]);
+      queryClient.invalidateQueries({ queryKey: ["grid"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+      const say = `Imported ${count} assignment${count !== 1 ? "s" : ""} into a new "${catName}" category and added them to your calendar. Tap Undo if it's not right.`;
+      setNote(""); setReply(say); pushTurn("signal", say); speak(say); setMode("idle");
+    } catch (err) {
+      setMode("idle"); setNote(err?.message || "That upload didn't work — try again.");
+    }
+  }
+
   // Send the reviewed email draft via the user's SMTP (server-side).
   async function sendEmailDraft() {
     if (!emailDraft || emailSending) return;
@@ -2014,7 +2070,25 @@ export default function Donna() {
             )}
           </div>
         )}
+        {/* Shared hidden file picker for syllabus upload (used by both input rows). */}
+        <input
+          ref={syllabusInputRef}
+          type="file"
+          accept=".pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleSyllabusUpload(f); }}
+        />
         <form onSubmit={submitTyped} className="pointer-events-auto flex items-center gap-2 w-[min(92vw,460px)]">
+          <button
+            type="button"
+            onClick={() => syllabusInputRef.current?.click()}
+            disabled={mode === "processing"}
+            title="Upload a syllabus (PDF or image) to calendarize"
+            aria-label="Upload syllabus"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] text-gray-300 hover:bg-white/[0.12] hover:text-cyan-200 transition-colors disabled:opacity-50"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           {voice.supported && (
             <button
               type="button"
@@ -2100,6 +2174,9 @@ export default function Donna() {
             </div>
           )}
           <form onSubmit={submitTyped} className="flex items-center gap-2 border-t border-white/10 p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+            <button type="button" onClick={() => syllabusInputRef.current?.click()} disabled={mode === "processing"} title="Upload a syllabus (PDF or image)" aria-label="Upload syllabus" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] text-gray-300 hover:bg-white/[0.12] hover:text-cyan-200 disabled:opacity-50">
+              <Paperclip className="h-4 w-4" />
+            </button>
             {lastActions.length > 0 && (
               <button type="button" onClick={undoLast} disabled={undoing} title="Undo last" aria-label="Undo last" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-400/30 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20 disabled:opacity-50">
                 {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}

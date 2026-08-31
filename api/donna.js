@@ -63,6 +63,7 @@ export default async function handler(req, res) {
     if (route === "capture") return await capture(auth, body, res);
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
     if (route === "list-notes") return await listNotes(auth, res);
+    if (route === "extract-syllabus") return await extractSyllabus(auth, body, res);
     if (route === "test-brief") {
       const { sendBriefingEmail } = await import("./ingest.js");
       const result = await sendBriefingEmail(getAdminDb(), body.slot === "evening" ? "evening" : "morning");
@@ -654,6 +655,91 @@ async function listNotes(auth, res) {
   } catch {
     return res.status(200).json({ notes: [] });
   }
+}
+
+// ---- route: extract-syllabus (read an uploaded syllabus PDF/image → category + dated assignments) ----
+// The generic invoke-llm endpoint never attaches the file, so this reads it directly:
+// Claude reads PDFs and images via base64 content blocks; images fall back to gpt-4o
+// vision. Returns { category:{name,color}, assignments:[{title,due_date}] } or { error }.
+async function extractSyllabus(auth, body, res) {
+  const fileUrl = String(body.file_url || "");
+  if (!fileUrl) return res.status(400).json({ error: "file_url required" });
+  const year = new Date().getFullYear();
+
+  // Fetch the uploaded file and base64-encode it (belt-and-suspenders media type:
+  // prefer what the client passed, else the response header; strip any charset).
+  let b64 = "";
+  let contentType = String(body.media_type || "").split(";")[0].trim().toLowerCase();
+  try {
+    const r = await fetch(fileUrl);
+    if (!r.ok) return res.status(200).json({ error: "fetch-failed" });
+    if (!contentType) contentType = String(r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 12 * 1024 * 1024) return res.status(200).json({ error: "too-large" });
+    b64 = buf.toString("base64");
+  } catch { return res.status(200).json({ error: "fetch-failed" }); }
+
+  const isPdf = contentType === "application/pdf" || /\.pdf(\?|$)/i.test(fileUrl);
+  const IMG = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+  const imgType = IMG.includes(contentType) ? contentType
+    : (/\.png(\?|$)/i.test(fileUrl) ? "image/png"
+      : /\.jpe?g(\?|$)/i.test(fileUrl) ? "image/jpeg"
+        : /\.webp(\?|$)/i.test(fileUrl) ? "image/webp"
+          : /\.gif(\?|$)/i.test(fileUrl) ? "image/gif" : null);
+  const isImage = !isPdf && !!imgType;
+  if (!isPdf && !isImage) return res.status(200).json({ error: "unsupported-type" });
+
+  const instructions = `You are reading a course syllabus. Extract EVERY graded item that has a DUE DATE (homework, assignments, projects, quizzes, exams, papers). Also choose ONE short category name for the course (its subject, e.g. "Music", "Econ 101") and a pleasant hex colour for it.
+Return JSON ONLY:
+{ "category": { "name": string, "color": "#RRGGBB" },
+  "assignments": [ { "title": string, "due_date": "YYYY-MM-DD" } ] }
+Resolve EVERY date to a full ISO date; infer the year from the syllabus, else use ${year}. Include ONLY items that have a real due date. Keep titles short ("HW 3", "Midterm", "Essay 1"). If it isn't a syllabus or has no dated items, return an empty assignments array.`;
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const callClaude = async () => {
+    const block = isPdf
+      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+      : { type: "image", source: { type: "base64", media_type: imgType, data: b64 } };
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
+        system: "Respond with valid JSON only. No markdown, no prose.",
+        messages: [{ role: "user", content: [block, { type: "text", text: instructions }] }],
+      }),
+    });
+    if (!resp.ok) { const errText = await resp.text(); throw new Error(`anthropic ${resp.status}: ${errText.slice(0, 200)}`); }
+    const d = await resp.json();
+    return parseJSON(d?.content?.[0]?.text || "{}");
+  };
+
+  if (anthropicKey) {
+    try { return res.status(200).json(await callClaude()); }
+    catch (e1) {
+      console.error("extract-syllabus claude (1):", e1.message);
+      try { return res.status(200).json(await callClaude()); }
+      catch (e2) { console.error("extract-syllabus claude (2):", e2.message); }
+    }
+  }
+
+  // OpenAI vision fallback — images only (chat completions can't read PDFs).
+  if (isImage && process.env.OPENAI_API_KEY) {
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+        body: JSON.stringify({
+          model: "gpt-4o", max_tokens: 4000, response_format: { type: "json_object" },
+          messages: [{ role: "user", content: [{ type: "text", text: instructions }, { type: "image_url", image_url: { url: fileUrl } }] }],
+        }),
+      });
+      if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d.choices?.[0]?.message?.content || "{}")); }
+      console.error("extract-syllabus openai:", resp.status);
+    } catch (e) { console.error("extract-syllabus openai error:", e.message); }
+  }
+
+  return res.status(200).json({ error: isPdf ? "pdf-unreadable" : "extract-failed" });
 }
 
 // ---- route: command (queue a shell/dev command for the local worker to run) ----
