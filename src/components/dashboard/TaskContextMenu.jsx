@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
-import { Trash2, Tag, Check, Edit2 } from "lucide-react";
+import { Trash2, Tag, Check, Edit2, Loader2 } from "lucide-react";
 import EditTaskDialog from "./EditTaskDialog";
+import RecurringDeleteDialog from "./RecurringDeleteDialog";
+import { findEventSeries, deleteEvents } from "./eventDelete";
 
 export default function TaskContextMenu({ task, position, onClose, onUpdated, categories = [] }) {
   const [showEdit, setShowEdit] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [adjustedPos, setAdjustedPos] = useState(position);
+  const [deleting, setDeleting] = useState(false);
+  const [series, setSeries] = useState(null); // recurring set awaiting a choice
   const menuRef = useRef();
 
   const categoryColors = Object.fromEntries(categories.map(c => [c.key, c.color]));
@@ -40,7 +44,13 @@ export default function TaskContextMenu({ task, position, onClose, onUpdated, ca
   }, [position, showCategories]);
 
   const handleDelete = async () => {
-    await base44.entities.Task.delete(task.id);
+    setDeleting(true);
+    // If this event repeats (multiple dated events share its title), ask whether to
+    // delete just this one or the whole series. Otherwise delete straight away.
+    const found = await findEventSeries(task);
+    if (found.length > 1) { setSeries(found); setDeleting(false); return; }
+    await deleteEvents([task]);
+    setDeleting(false);
     onUpdated();
     onClose();
   };
@@ -57,6 +67,17 @@ export default function TaskContextMenu({ task, position, onClose, onUpdated, ca
     left: adjustedPos.x,
     zIndex: 9999,
   };
+
+  if (series) {
+    return (
+      <RecurringDeleteDialog
+        task={task}
+        series={series}
+        onDone={() => { onUpdated(); onClose(); }}
+        onCancel={() => { setSeries(null); onClose(); }}
+      />
+    );
+  }
 
   if (showEdit) {
     return (
@@ -116,9 +137,10 @@ export default function TaskContextMenu({ task, position, onClose, onUpdated, ca
           <div className="border-t border-white/10 my-1" />
           <button
             onClick={handleDelete}
-            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors"
+            disabled={deleting}
+            className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg hover:bg-red-500/20 text-red-400 transition-colors disabled:opacity-50"
           >
-            <Trash2 className="h-3.5 w-3.5" /> Delete
+            {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Delete
           </button>
         </div>
       )}
