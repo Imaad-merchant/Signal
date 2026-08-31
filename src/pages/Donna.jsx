@@ -1306,6 +1306,9 @@ export default function Donna() {
     if (!actions.length) return { count: 0, records: [] };
     let n = 0;
     const records = [];
+    // Progress feedback for dated imports (each mirrors to Google, which takes a beat).
+    const datedTotal = actions.filter((a) => a?.type === "add" && /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "")).length;
+    let datedDone = 0;
 
     // Resolve a spoken category name (e.g. "Music") to a real Category KEY so
     // imported dated tasks get a colour and show in the sidebar. Matches an existing
@@ -1369,6 +1372,14 @@ export default function Donna() {
           }
           const rec = await base44.entities.Task.create(payload);
           target = "tasks/" + (rec?.id || "");
+          // Mirror dated items to Google Calendar; stash the event id (on the task AND
+          // in this action's payload) so Undo removes the Google event too — no orphans.
+          if (hasDate && rec?.id) {
+            datedDone++;
+            if (datedTotal > 1) setNote(`Adding to your calendar… ${datedDone}/${datedTotal}`);
+            const gid = await pushEventToGoogle(a.text, a.due_date, null);
+            if (gid) { await base44.entities.Task.update(rec.id, { gcal_id: gid }).catch(() => {}); a.gcal_id = gid; }
+          }
         } else if (a.type === "complete" || a.type === "remove") {
           // Resolve which existing list item they meant, then complete/delete it.
           const match = findTask(allTasks, a.text, a.list);

@@ -82,6 +82,13 @@ export async function reverseAgentAction(rec) {
     if (entityName && id && base44.entities[entityName]) {
       await base44.entities[entityName].delete(id);
     }
+    // If this create was mirrored to Google Calendar (dated import), remove that
+    // event too so undoing an import leaves nothing behind on Google.
+    const gcalId = rec.payload && rec.payload.gcal_id;
+    if (gcalId) {
+      try { await base44.functions.invoke("donna", { route: "gcal-delete", gcalId }); }
+      catch { /* the app task is already gone; a stray Google event is the worst case */ }
+    }
     await base44.entities.AgentAction.update(rec.id, {
       undone: true,
       undone_at: new Date().toISOString(),
