@@ -1306,6 +1306,26 @@ export default function Donna() {
     if (!actions.length) return { count: 0, records: [] };
     let n = 0;
     const records = [];
+
+    // Resolve a spoken category name (e.g. "Music") to a real Category KEY so
+    // imported dated tasks get a colour and show in the sidebar. Matches an existing
+    // category by key or label (case-insensitive); creates one if there's no match.
+    // Cached for the turn so a 20-item import does a single Category.list().
+    let catList = null;
+    const CAT_PALETTE = ["#4285f4", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
+    const resolveCategoryKey = async (name) => {
+      const label = (name || "").trim();
+      if (!label) return "work";
+      if (!catList) catList = (await base44.entities.Category.list().catch(() => [])) || [];
+      const lc = label.toLowerCase();
+      const hit = catList.find((c) => (c.key || "").toLowerCase() === lc || (c.label || "").toLowerCase() === lc);
+      if (hit?.key) return hit.key;
+      const key = lc.replace(/\s+/g, "_") + "_" + Date.now();
+      const color = CAT_PALETTE[catList.length % CAT_PALETTE.length];
+      try { const created = await base44.entities.Category.create({ label, color, key }); catList.push(created || { key, label, color }); }
+      catch { /* fall through — the task still saves and shows uncoloured */ }
+      return key;
+    };
     for (const a of actions) {
       try {
         let target = "";
@@ -1336,10 +1356,18 @@ export default function Donna() {
           });
           target = "grades/" + (rec?.id || "");
         } else if (a.type === "add") {
-          // A new item on a named to-do list = a Task tagged with the list name.
-          const rec = await base44.entities.Task.create({
-            title: a.text, category: a.list || "Business", status: "not_started",
-          });
+          // A new item on a named list = a Task tagged with the list/category. When it
+          // carries a due_date (syllabus/HW import), it's a dated calendar item: set
+          // the date and resolve the category to a real key so it's coloured + filed.
+          const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "");
+          const payload = { title: a.text, status: "not_started" };
+          if (hasDate) {
+            payload.due_date = a.due_date;
+            payload.category = await resolveCategoryKey(a.list);
+          } else {
+            payload.category = a.list || "Business";
+          }
+          const rec = await base44.entities.Task.create(payload);
           target = "tasks/" + (rec?.id || "");
         } else if (a.type === "complete" || a.type === "remove") {
           // Resolve which existing list item they meant, then complete/delete it.
@@ -1668,7 +1696,9 @@ export default function Donna() {
       // If the orb is pulsing to talk, a tap hears the nudge instead of listening.
       if (nudgeReady) { hearNudge(); return; }
       if (!voice.supported) return; // type box is the path
-      setHeard(""); setReply(""); setNote(""); setLastActions([]);
+      // NB: don't clear lastActions here — a bulk import's Undo must survive the
+      // user tapping the orb to say something else. It's replaced on the next action.
+      setHeard(""); setReply(""); setNote("");
       setMode("listening");
       voice.start();
     } else if (mode === "listening") {

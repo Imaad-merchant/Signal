@@ -316,7 +316,7 @@ Return JSON only (no markdown):
 }
 
 ACTION TYPES:
-- { "type": "add",     "list": string, "text": string }                  // add an item to a named to-do LIST (e.g. list "Business", text "hire a designer")
+- { "type": "add",     "list": string, "text": string, "due_date": "YYYY-MM-DD"|null }  // add an item to a named LIST/category; set due_date to put it on the calendar on that day
 - { "type": "complete","list": string | null, "text": string }          // mark a list item done (match by its wording)
 - { "type": "remove",  "list": string | null, "text": string }          // remove a list item
 - { "type": "remind",  "text": string, "due_on": "YYYY-MM-DD" | null }   // a time-bound commitment / to-do
@@ -330,6 +330,7 @@ ACTION TYPES:
 RULES:
 - ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
 - LISTS: when the user talks about a project/list ("my business list", "for the app"), use add/complete/remove with that list name. Default the list to "Business" only if they clearly mean their main venture and name none.
+- IMPORT / SYLLABUS: when they paste a syllabus or an assignment list and ask to file the dated items under a category ("put these hw due dates under Music"), emit ONE "add" per assignment with list=<that category, e.g. "Music">, text=<assignment name>, and due_date=<full ISO date>. Resolve every date to YYYY-MM-DD against today (${today}), inferring the year (PAST dates are fine — a mid-semester syllabus has them). Each becomes a dated calendar item under that category. If the list of items to import isn't fully visible in THIS message (e.g. they pasted it in an earlier message), don't guess — ask them to paste it again together with the instruction.
 - DELETION IS DANGEROUS — BE CONSERVATIVE: only emit a "remove" for an item the user EXPLICITLY and specifically named. NEVER emit removes for everything, and never turn a vague request ("delete a couple", "clear some", "get rid of those") into many removes — if they didn't name exactly which ones, emit ZERO removes and instead ask in "reply" which specific ones they mean. When in doubt, do not delete. Deleting the wrong things is far worse than asking.
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
 - RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
@@ -400,7 +401,7 @@ Parse it now.`;
     .filter((a) => a && typeof a === "object")
     .map((a) => {
       const type = a.type;
-      if (type === "add") return { type, list: String(a.list || "Business").slice(0, 80), text: String(a.text || "").slice(0, 300) };
+      if (type === "add") return { type, list: String(a.list || "Business").slice(0, 80), text: String(a.text || "").slice(0, 300), due_date: /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "") ? a.due_date : null };
       if (type === "complete") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remove") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remind") return { type, text: String(a.text || ""), due_on: a.due_on || null };
