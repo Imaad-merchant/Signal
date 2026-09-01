@@ -2079,10 +2079,11 @@ export default function Donna() {
           </div>
         )}
         {/* Shared hidden file picker for syllabus upload (used by both input rows). */}
+        {/* No `accept` filter: mixing extension + MIME tokens greys out PDFs in some
+            OS pickers. We validate the picked file in handleSyllabusUpload instead. */}
         <input
           ref={syllabusInputRef}
           type="file"
-          accept=".pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif"
           className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleSyllabusUpload(f); }}
         />
