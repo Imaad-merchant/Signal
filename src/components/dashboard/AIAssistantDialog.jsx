@@ -19,39 +19,56 @@ function findDuplicateTasks(tasks) {
   return dups;
 }
 
-// Tasks belonging to a named group (category key/label, or the term in the title).
-function tasksInGroup(tasks, term) {
+// Tasks belonging to a named group — matched against the category KEY, the category
+// LABEL (via the categories list), or the term appearing in the task title.
+function tasksInGroup(tasks, term, categories = []) {
   const q = norm(term);
   if (q.length < 2) return [];
+  const catKeys = new Set((categories || []).filter((c) => {
+    const k = norm(c.key), l = norm(c.label);
+    return (k && (k.includes(q) || q.includes(k))) || (l && (l.includes(q) || q.includes(l)));
+  }).map((c) => c.key));
   return (tasks || []).filter((t) => {
-    const c = norm(t.category);
-    const ti = norm(t.title);
-    return (c && (c.includes(q) || (q.includes(c) && c.length > 1))) || ti.includes(q);
+    const c = norm(t.category), ti = norm(t.title);
+    return catKeys.has(t.category) || (c && (c.includes(q) || (q.includes(c) && c.length > 1))) || ti.includes(q);
   });
 }
 
+// Words that are never a category name (verbs, articles, object nouns, fillers).
+const DEL_FILLER = new Set(
+  ("delete remove clear get rid of wipe all any my the every of for in from under to into a an and or " +
+    "please can you could would now today event events task tasks class classes assignment assignments " +
+    "homework hw calendar schedule everything them it stuff things this that these those whole entire " +
+    "thing want need make me").split(/\s+/),
+);
+
 // If `text` is a deletion command, return { tasks, label, all } to delete; else null.
-// Requires an explicit object (events/tasks/…) or "all/everything/duplicate" so it
-// doesn't hijack phrases like "clear up my week".
-const GENERIC_OBJ = new Set(["", "everything", "them", "it", "calendar", "schedule", "whole", "stuff", "things"]);
-function parseDeletion(text, tasks) {
+// Rule that matters: if the command names ANY category/course term, scope to it —
+// NEVER fall through to deleting the whole calendar when a term is present.
+function parseDeletion(text, tasks, categories = []) {
   const s = norm(text);
-  const hasVerb = /\b(delete|remove|get rid of|wipe)\b/.test(s) || /\bclear\s+(all|my|the|every)/.test(s);
+  const hasVerb = /\b(delete|remove|get rid of|wipe)\b/.test(s) || /\bclear\s+(all|my|the|every|everything)/.test(s);
   if (!hasVerb) return null;
   if (/duplicate/.test(s)) return { tasks: findDuplicateTasks(tasks), label: "duplicate events" };
 
-  // Extract the group being deleted: "delete [all|my|the|every] <term> events/tasks/…".
-  // A specific term scopes it; a generic/empty one (or a bare "everything") = the lot.
-  const m = /\b(?:delete|remove|clear|get rid of|wipe)\s+(?:(?:all|my|the|every)\s+)*([a-z0-9][a-z0-9 ]*?)?\s*(events?|tasks?|classes?|assignments?|homework|hw|calendar|schedule|everything|them|it)\b/.exec(s);
-  if (m) {
-    const term = (m[1] || "").replace(/\b(all|my|the|every|of)\b/g, "").trim();
-    if (term && !GENERIC_OBJ.has(term)) {
-      return { tasks: tasksInGroup(tasks, term), label: `"${term}" events` };
+  // Candidate category/course terms = the meaningful words left after removing fillers.
+  const terms = s.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 2 && !DEL_FILLER.has(w));
+  if (terms.length) {
+    const seen = new Set();
+    const matched = [];
+    for (const term of terms) {
+      for (const tk of tasksInGroup(tasks, term, categories)) {
+        if (!seen.has(tk.id)) { seen.add(tk.id); matched.push(tk); }
+      }
     }
-    return { tasks: (tasks || []).slice(), label: "all your events", all: true };
+    const label = `"${terms.join(" ")}" events`;
+    // Named a group → scope to it. If nothing matched, delete NOTHING (say so) —
+    // do NOT escalate to the whole calendar.
+    return { tasks: matched, label };
   }
-  // "delete everything / wipe it all" with no object noun.
-  if (/\b(everything|all of (them|it)|whole calendar)\b/.test(s)) {
+
+  // No specific term at all → only now is it "everything", and only for explicit phrasing.
+  if (/\b(everything|all (of )?(my )?(tasks|events)|whole calendar|all of (them|it))\b/.test(s)) {
     return { tasks: (tasks || []).slice(), label: "all your events", all: true };
   }
   return null;
@@ -114,7 +131,7 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
         const user = await base44.auth.me();
         currentTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date");
       } catch { /* ignore */ }
-      const del = parseDeletion(input, currentTasks);
+      const del = parseDeletion(input, currentTasks, categories);
       if (del) {
         const userText = input;
         setInput("");
