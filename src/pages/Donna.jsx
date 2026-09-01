@@ -79,6 +79,30 @@ function findTask(tasks, text, list) {
   );
 }
 
+// Does a task belong to the group the user named (a category/course like "MUSI")?
+// Matches the term against the task's category (its key is a slug of the label, e.g.
+// "music_1725…") or its title. Requires a term of 2+ chars so it can't match all.
+function matchesGroup(task, term) {
+  const q = (term || "").toLowerCase().trim();
+  if (q.length < 2 || !task) return false;
+  const cat = (task.category || "").toLowerCase();
+  const title = (task.title || "").toLowerCase();
+  return (cat && (cat.includes(q) || (q.includes(cat) && cat.length > 1))) || title.includes(q);
+}
+
+// Duplicate tasks = same title + due_date. Keeps the FIRST of each group and
+// returns the extras (optionally limited to a category/course term).
+function findDuplicates(tasks, term) {
+  const open = (tasks || []).filter((t) => t && t.status !== "done" && (!term || matchesGroup(t, term)));
+  const seen = new Set();
+  const dups = [];
+  for (const t of open) {
+    const key = `${(t.title || "").trim().toLowerCase()}|${t.due_date || ""}`;
+    if (seen.has(key)) dups.push(t); else seen.add(key);
+  }
+  return dups;
+}
+
 // Keyword-rank the worker-indexed notes for a search query (title hits weigh more).
 function rankNotes(notes, query) {
   const terms = (query || "").toLowerCase().split(/\s+/).filter((w) => w.length > 2);
@@ -120,6 +144,7 @@ export default function Donna() {
   const syllabusInputRef = useRef(null); // hidden file picker for syllabus upload
   const pendingDeletionsRef = useRef(null); // bulk deletions staged for explicit confirmation
   const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
+  const [pendingDeleteLabel, setPendingDeleteLabel] = useState("");
   const [nudgeReady, setNudgeReady] = useState(false); // Donna has a follow-up to voice
   const [muted, setMuted] = useState(() => {
     try { return localStorage.getItem("donna_muted") === "1"; } catch { return false; }
@@ -349,20 +374,13 @@ export default function Donna() {
 
     // ---- Bulk deletion awaiting confirmation (guard against mass-wipe). ----
     if (pendingDeletionsRef.current) {
-      const pend = pendingDeletionsRef.current;
       const yes = /\b(yes|yeah|yep|confirm|do it|delete them|go ahead|proceed|sure)\b/i.test(t);
       const no = /\b(no|cancel|stop|keep them|don'?t|nevermind|never mind|leave them)\b/i.test(t);
       if (yes || no) {
-        pendingDeletionsRef.current = null; setPendingDeleteCount(0);
         setHeard(t); pushTurn("you", t); setNote(""); setReply("");
-        if (no) { const say = "Cancelled — I've left them all where they are."; setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return; }
-        const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
-        const { count, records } = await applyActions(pend, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
-        setLastActions(records); lastAppliedRef.current = pend; setRedoActions([]);
-        queryClient.invalidateQueries({ queryKey: ["grid"] });
-        queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
-        const say = count ? `Done — deleted ${count} item${count > 1 ? "s" : ""}. Tap Undo to bring them back.` : "I couldn't find those to delete.";
-        setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return;
+        if (no) { cancelPendingDeletions(); const say = "Cancelled — I've left them all where they are."; setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return; }
+        await confirmPendingDeletions();
+        return;
       }
       // Not a clear yes/no — fall through and treat as a new request (leaves the
       // deletions pending so they're never executed without an explicit "yes").
@@ -975,20 +993,51 @@ export default function Donna() {
       const researchAction = actions.find((a) => a && a.type === "research" && a.query);
       const otherActions = actions.filter((a) => a && a.type !== "email" && a.type !== "research");
 
-      // SAFETY: never let one command delete a pile of things. If it would remove
-      // MORE THAN ONE item, run everything EXCEPT the deletions and hold those for an
-      // explicit confirmation — the guard against the "delete a couple → deleted
-      // everything" wipe. A single, clearly-named delete still goes through.
+      // SAFETY: resolve every bulk deletion — a category "clear", a "dedupe", or more
+      // than one "remove" — to a CONCRETE list of tasks, then ALWAYS stage it for an
+      // explicit confirmation. Nothing bulk is ever deleted without a yes. This is the
+      // guard against the "delete some → wiped the whole calendar" disaster.
+      const clearActions = otherActions.filter((a) => a.type === "clear");
+      const dedupeActions = otherActions.filter((a) => a.type === "dedupe");
       const removeActions = otherActions.filter((a) => a.type === "remove");
-      if (removeActions.length > 1) {
-        const safeActions = otherActions.filter((a) => a.type !== "remove");
+      let stagedTasks = [];
+      let stagedLabel = "";
+      if (dedupeActions.length) {
+        const term = (dedupeActions.find((a) => a.list)?.list || "").trim();
+        stagedTasks = findDuplicates(allTasks, term || null);
+        stagedLabel = term ? `duplicate "${term}" events` : "duplicate events";
+      } else if (clearActions.length) {
+        const terms = clearActions.map((a) => (a.list || "").toLowerCase().trim()).filter((x) => x.length >= 2);
+        const seen = new Set();
+        stagedTasks = (allTasks || []).filter((tk) => {
+          if (!tk || tk.status === "done" || !tk.id || seen.has(tk.id)) return false;
+          if (terms.some((term) => matchesGroup(tk, term))) { seen.add(tk.id); return true; }
+          return false;
+        });
+        stagedLabel = `"${clearActions.map((a) => a.list).filter(Boolean).join(", ")}" events`;
+      } else if (removeActions.length > 1) {
+        const seen = new Set();
+        stagedTasks = removeActions.map((a) => findTask(allTasks, a.text, a.list)).filter((tk) => {
+          if (!tk?.id || seen.has(tk.id)) return false; seen.add(tk.id); return true;
+        });
+        stagedLabel = "events";
+      }
+
+      if ((clearActions.length || dedupeActions.length) && !stagedTasks.length) {
+        // Nothing matched — say so instead of doing anything.
+        const say = dedupeActions.length ? "Good news — I don't see any duplicates to remove." : "I don't see any events under that name.";
+        setHeard(t); pushTurn("you", t); setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return;
+      }
+
+      if (stagedTasks.length) {
+        const safeActions = otherActions.filter((a) => a.type !== "remove" && a.type !== "clear" && a.type !== "dedupe");
         const { records } = await applyActions(safeActions, today, allTasks);
         setLastActions(records);
         lastAppliedRef.current = safeActions;
-        pendingDeletionsRef.current = removeActions;
-        setPendingDeleteCount(removeActions.length);
+        pendingDeletionsRef.current = { tasks: stagedTasks, label: stagedLabel };
+        setPendingDeleteCount(stagedTasks.length); setPendingDeleteLabel(stagedLabel);
         queryClient.invalidateQueries({ queryKey: ["grid"] });
-        const warn = `Hold on — that would delete ${removeActions.length} items. Say "yes, delete them" to confirm, or "cancel" to keep them.`;
+        const warn = `Hold on — that would delete ${stagedTasks.length} ${stagedLabel}. Say "yes, delete them" to confirm, or "cancel" to keep them.`;
         setHeard(t); pushTurn("you", t); setReply(warn); pushTurn("signal", warn); speak(warn);
         setMode("idle");
         return;
@@ -1364,6 +1413,11 @@ export default function Donna() {
           // carries a due_date (syllabus/HW import), it's a dated calendar item: set
           // the date and resolve the category to a real key so it's coloured + filed.
           const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "");
+          // Idempotency: if an identical dated item already exists (same title + date),
+          // don't create a second one — this stops a re-imported syllabus from doubling.
+          if (hasDate && (allTasks || []).some((tk) => tk && tk.due_date === a.due_date && (tk.title || "").trim().toLowerCase() === (a.text || "").trim().toLowerCase())) {
+            continue;
+          }
           const payload = { title: a.text, status: "not_started" };
           if (hasDate) {
             payload.due_date = a.due_date;
@@ -1597,22 +1651,54 @@ export default function Donna() {
   }
 
   // Execute the bulk deletions that were staged for confirmation.
+  // Delete a concrete list of task objects, snapshotting each first so Undo restores
+  // them (task re-created + event re-pushed to Google). Returns records for Undo.
+  async function deleteTasksWithUndo(tasks) {
+    const records = [];
+    let n = 0;
+    for (const tk of tasks || []) {
+      if (!tk?.id) continue;
+      const snapshot = {
+        title: tk.title, category: tk.category || null, status: tk.status || "not_started",
+        due_date: tk.due_date || null, gcal_id: tk.gcal_id || null, notes: tk.notes || null,
+      };
+      try {
+        await base44.entities.Task.delete(tk.id);
+        deleteEventFromGoogle(tk.gcal_id);
+        n++;
+        const rec = { kind: "delete", snapshot };
+        try {
+          const logged = await base44.entities.AgentAction.create({
+            action_type: "remove", target: "tasks/" + tk.id, payload: { snapshot },
+            executed_at: new Date().toISOString(),
+            undo_deadline: new Date(Date.now() + 30 * 86400000).toISOString(),
+          });
+          if (logged?.id) rec.actionId = logged.id;
+        } catch { /* still undoable via the in-memory record */ }
+        records.push(rec);
+      } catch { /* one failure shouldn't sink the batch */ }
+    }
+    return { n, records };
+  }
+
   async function confirmPendingDeletions() {
     const pend = pendingDeletionsRef.current;
     if (!pend || undoing) return;
-    pendingDeletionsRef.current = null; setPendingDeleteCount(0);
+    pendingDeletionsRef.current = null; setPendingDeleteCount(0); setPendingDeleteLabel("");
     setUndoing(true);
-    const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
-    const { count, records } = await applyActions(pend, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
-    setLastActions(records); lastAppliedRef.current = pend; setRedoActions([]);
+    setNote("Deleting…");
+    const { n, records } = await deleteTasksWithUndo(pend.tasks || []);
+    setLastActions(records); lastAppliedRef.current = []; setRedoActions([]);
     queryClient.invalidateQueries({ queryKey: ["grid"] });
     queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
-    const say = count ? `Deleted ${count} item${count > 1 ? "s" : ""}. Tap Undo to bring them back.` : "I couldn't find those to delete.";
-    setNote(say); setReply(say);
+    queryClient.invalidateQueries({ queryKey: ["deleted-history"] });
+    const say = n ? `Deleted ${n} event${n !== 1 ? "s" : ""}. Tap Undo to bring them back.` : "I couldn't find those to delete.";
+    setNote(""); setReply(say); pushTurn("signal", say); speak(say);
+    setMode("idle");
     setUndoing(false);
   }
   function cancelPendingDeletions() {
-    pendingDeletionsRef.current = null; setPendingDeleteCount(0);
+    pendingDeletionsRef.current = null; setPendingDeleteCount(0); setPendingDeleteLabel("");
     setNote("Kept them — nothing deleted.");
   }
 
@@ -2047,7 +2133,7 @@ export default function Donna() {
         {pendingDeleteCount > 0 && !chatMode && (
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-rose-400/40 bg-[#1a0e12]/95 px-3 py-1.5 shadow-xl shadow-black/50 backdrop-blur-md">
             <AlertTriangle className="h-3.5 w-3.5 text-rose-300" />
-            <span className="text-xs text-rose-100">Delete {pendingDeleteCount} items?</span>
+            <span className="text-xs text-rose-100">Delete {pendingDeleteCount} {pendingDeleteLabel || "items"}?</span>
             <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-full bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
             <button type="button" onClick={cancelPendingDeletions} className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
           </div>
@@ -2072,7 +2158,7 @@ export default function Donna() {
                 disabled={undoing}
                 className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-xs font-medium text-gray-200 hover:bg-white/[0.15] transition-colors disabled:opacity-50"
               >
-                <RotateCw className="h-3.5 w-3.5" />
+                {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
                 Redo
               </button>
             )}
@@ -2177,7 +2263,7 @@ export default function Donna() {
           {pendingDeleteCount > 0 && (
             <div className="mx-3 mb-1 flex items-center gap-2 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2">
               <AlertTriangle className="h-4 w-4 shrink-0 text-rose-300" />
-              <span className="flex-1 text-xs text-rose-100">Delete {pendingDeleteCount} items? This can’t be batch-undone easily.</span>
+              <span className="flex-1 text-xs text-rose-100">Delete {pendingDeleteCount} {pendingDeleteLabel || "items"}?</span>
               <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-md bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
               <button type="button" onClick={cancelPendingDeletions} className="rounded-md bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
             </div>
@@ -2193,7 +2279,7 @@ export default function Donna() {
             )}
             {redoActions.length > 0 && (
               <button type="button" onClick={redoLast} disabled={undoing} title="Redo" aria-label="Redo" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] text-gray-300 hover:bg-white/[0.12] disabled:opacity-50">
-                <RotateCw className="h-4 w-4" />
+                {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
               </button>
             )}
             <input
