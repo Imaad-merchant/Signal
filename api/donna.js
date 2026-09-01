@@ -16,6 +16,7 @@ export const config = { api: { bodyParser: { sizeLimit: "12mb" } } };
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
 import { wantsLogStats, computeLogSummary, computeTopicStats, computeHabitStats, parseLogEntries, analyticsTerms } from "./_logstats.js";
+import { extractText, getDocumentProxy } from "unpdf";
 
 const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "research", "ask", "none"];
 
@@ -696,34 +697,47 @@ Return JSON ONLY:
 Resolve EVERY date to a full ISO date; infer the year from the syllabus, else use ${year}. Include ONLY items that have a real due date. Keep titles short ("HW 3", "Midterm", "Essay 1"). If it isn't a syllabus or has no dated items, return an empty assignments array.`;
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  const callClaude = async () => {
-    const block = isPdf
-      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-      : { type: "image", source: { type: "base64", media_type: imgType, data: b64 } };
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
-        system: "Respond with valid JSON only. No markdown, no prose.",
-        messages: [{ role: "user", content: [block, { type: "text", text: instructions }] }],
-      }),
-    });
-    if (!resp.ok) { const errText = await resp.text(); throw new Error(`anthropic ${resp.status}: ${errText.slice(0, 200)}`); }
-    const d = await resp.json();
-    return parseJSON(d?.content?.[0]?.text || "{}");
-  };
+  let lastErr = "";
 
-  if (anthropicKey) {
-    try { return res.status(200).json(await callClaude()); }
-    catch (e1) {
-      console.error("extract-syllabus claude (1):", e1.message);
-      try { return res.status(200).json(await callClaude()); }
-      catch (e2) { console.error("extract-syllabus claude (2):", e2.message); }
+  // PDFs: pull the text out (works with any LLM provider, and most syllabi are
+  // text PDFs), then let the shared callLLM parse it. This is the reliable path —
+  // it doesn't depend on Anthropic being reachable.
+  if (isPdf) {
+    let text = "";
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(b64, "base64")));
+      const out = await extractText(pdf, { mergePages: true });
+      text = Array.isArray(out?.text) ? out.text.join("\n") : (out?.text || "");
+    } catch (e) { lastErr = `pdf-text: ${e.message}`; console.error("extract-syllabus pdf text:", e.message); }
+
+    if (text && text.trim().length > 40) {
+      try {
+        const raw = await callLLM({ system: "Respond with valid JSON only. No markdown, no prose.", user: `${instructions}\n\nSYLLABUS TEXT:\n"""${text.slice(0, 30000)}"""`, json: true });
+        return res.status(200).json(parseJSON(raw));
+      } catch (e) { lastErr = `llm: ${e.message}`; console.error("extract-syllabus pdf llm:", e.message); }
     }
+
+    // Text extraction found little/nothing (scanned PDF) — try Claude's native PDF
+    // reader if we have a key; otherwise ask for a screenshot.
+    if (anthropicKey) {
+      try {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
+            system: "Respond with valid JSON only. No markdown, no prose.",
+            messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }, { type: "text", text: instructions }] }],
+          }),
+        });
+        if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d?.content?.[0]?.text || "{}")); }
+        lastErr = `anthropic ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
+      } catch (e) { lastErr = `anthropic: ${e.message}`; }
+    }
+    return res.status(200).json({ error: text ? "pdf-unreadable" : "pdf-scanned", detail: lastErr.slice(0, 200) });
   }
 
-  // OpenAI vision fallback — images only (chat completions can't read PDFs).
+  // Images: gpt-4o vision (or Claude's image block if only Anthropic is configured).
   if (isImage && process.env.OPENAI_API_KEY) {
     try {
       const resp = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -735,11 +749,26 @@ Resolve EVERY date to a full ISO date; infer the year from the syllabus, else us
         }),
       });
       if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d.choices?.[0]?.message?.content || "{}")); }
-      console.error("extract-syllabus openai:", resp.status);
-    } catch (e) { console.error("extract-syllabus openai error:", e.message); }
+      lastErr = `openai ${resp.status}`;
+    } catch (e) { lastErr = `openai: ${e.message}`; }
+  }
+  if (isImage && anthropicKey) {
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
+          system: "Respond with valid JSON only. No markdown, no prose.",
+          messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: imgType, data: b64 } }, { type: "text", text: instructions }] }],
+        }),
+      });
+      if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d?.content?.[0]?.text || "{}")); }
+      lastErr = `anthropic ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
+    } catch (e) { lastErr = `anthropic: ${e.message}`; }
   }
 
-  return res.status(200).json({ error: isPdf ? "pdf-unreadable" : "extract-failed" });
+  return res.status(200).json({ error: "extract-failed", detail: lastErr.slice(0, 200) });
 }
 
 // ---- route: command (queue a shell/dev command for the local worker to run) ----

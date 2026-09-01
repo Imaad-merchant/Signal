@@ -1637,8 +1637,12 @@ export default function Donna() {
   // fully undoable as one import).
   async function handleSyllabusUpload(file) {
     if (!file) return;
-    const okType = file.type === "application/pdf" || ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type);
+    // Some browsers report an empty file.type for PDFs — accept by extension too.
+    const name = (file.name || "").toLowerCase();
+    const okType = file.type === "application/pdf" || ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)
+      || /\.(pdf|png|jpe?g|webp|gif)$/.test(name);
     if (!okType) { setNote("Upload a PDF or an image (PNG/JPG) of your syllabus."); return; }
+    const mediaType = file.type || (name.endsWith(".pdf") ? "application/pdf" : "");
     if (file.size > 10 * 1024 * 1024) { setNote("That file's over 10MB — try a smaller PDF or a screenshot."); return; }
     try {
       setMode("processing");
@@ -1647,14 +1651,18 @@ export default function Donna() {
       const fileUrl = up?.file_url;
       if (!fileUrl) throw new Error("upload failed");
       setNote("Reading your syllabus…");
-      const res = await base44.functions.invoke("donna", { route: "extract-syllabus", file_url: fileUrl, media_type: file.type });
+      const res = await base44.functions.invoke("donna", { route: "extract-syllabus", file_url: fileUrl, media_type: mediaType });
       const data = res && res.data ? res.data : res || {};
       if (data.error) {
-        const msg = data.error === "pdf-unreadable"
-          ? "I couldn't read that PDF — my PDF reader isn't reachable right now. Try a screenshot of it, or paste the text."
-          : data.error === "too-large" ? "That file's too big for me to read — try a smaller PDF or a screenshot."
-            : "I couldn't read that file. Try a clearer PDF or a screenshot of the syllabus.";
-        setNote(""); setReply(msg); pushTurn("signal", msg); speak(msg); setMode("idle"); return;
+        const msg = data.error === "pdf-scanned"
+          ? "That PDF looks scanned (no selectable text). Take a screenshot of the pages and upload that instead."
+          : data.error === "pdf-unreadable"
+            ? "I couldn't read that PDF. Try a screenshot of it, or paste the text."
+            : data.error === "too-large" ? "That file's too big for me to read — try a smaller PDF or a screenshot."
+              : "I couldn't read that file. Try a clearer PDF or a screenshot of the syllabus.";
+        setReply(msg); pushTurn("signal", msg); speak(msg);
+        setNote(data.detail ? `Reason: ${data.detail}` : "");
+        setMode("idle"); return;
       }
       const cat = data.category || {};
       const catName = (String(cat.name || "").trim().slice(0, 40)) || "Course";
