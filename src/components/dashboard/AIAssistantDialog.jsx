@@ -34,12 +34,17 @@ function tasksInGroup(tasks, term, categories = []) {
   });
 }
 
-// Words that are never a category name (verbs, articles, object nouns, fillers).
+// Words that are never a category name (verbs, articles, object nouns, fillers, and
+// common stopwords) — so "delete all the events that are under the musi category"
+// leaves only "musi".
 const DEL_FILLER = new Set(
-  ("delete remove clear get rid of wipe all any my the every of for in from under to into a an and or " +
-    "please can you could would now today event events task tasks class classes assignment assignments " +
+  ("delete remove clear get rid of wipe all any my the every of for in from under over about to into a an and or " +
+    "please can you could would should now today event events task tasks class classes assignment assignments " +
     "homework hw calendar schedule everything them it stuff things this that these those whole entire " +
-    "thing want need make me").split(/\s+/),
+    "thing want need make me are is am was were be been being have has had do does did will " +
+    "which who whom whose what when where why how category categories label labeled labelled tag tagged " +
+    "named called related associated marked only just also too very really some most more less " +
+    "put set on off up down out with without").split(/\s+/),
 );
 
 // If `text` is a deletion command, return { tasks, label, all } to delete; else null.
@@ -54,16 +59,33 @@ function parseDeletion(text, tasks, categories = []) {
   // Candidate category/course terms = the meaningful words left after removing fillers.
   const terms = s.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 2 && !DEL_FILLER.has(w));
   if (terms.length) {
-    const seen = new Set();
-    const matched = [];
+    // Prefer real CATEGORY matches (key or label contains a term) — that's exactly
+    // what "under the X category" means, and it avoids stray title-substring hits.
+    const catKeys = new Set();
     for (const term of terms) {
-      for (const tk of tasksInGroup(tasks, term, categories)) {
-        if (!seen.has(tk.id)) { seen.add(tk.id); matched.push(tk); }
+      for (const c of (categories || [])) {
+        const k = norm(c.key), l = norm(c.label);
+        if ((k && (k.includes(term) || term.includes(k))) || (l && (l.includes(term) || term.includes(l)))) catKeys.add(c.key);
       }
     }
-    const label = `"${terms.join(" ")}" events`;
+    let matched;
+    let label;
+    if (catKeys.size) {
+      matched = (tasks || []).filter((t) => catKeys.has(t.category));
+      label = `"${terms.join(" ")}" events`;
+    } else {
+      // No category matched — fall back to title/category-string contains.
+      const seen = new Set();
+      matched = [];
+      for (const term of terms) {
+        for (const tk of tasksInGroup(tasks, term, categories)) {
+          if (!seen.has(tk.id)) { seen.add(tk.id); matched.push(tk); }
+        }
+      }
+      label = `"${terms.join(" ")}" events`;
+    }
     // Named a group → scope to it. If nothing matched, delete NOTHING (say so) —
-    // do NOT escalate to the whole calendar.
+    // NEVER escalate to the whole calendar.
     return { tasks: matched, label };
   }
 
