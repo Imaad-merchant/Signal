@@ -2,13 +2,17 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import {
   AlertTriangle, ArrowDownRight, ArrowRight, ArrowUpRight, CalendarClock,
-  ChevronLeft, ChevronRight, Loader2, Minus, RefreshCw, Zap,
+  ChevronLeft, ChevronRight, Loader2, Maximize2, Minus, RefreshCw, Zap,
 } from "lucide-react";
 
 // The week-ahead risk map: every scheduled macro and micro event in the trading
 // week, scored into a day-by-day volatility profile, next to a market-derived
 // directional bias. Answers "which session is the week's risk in, and which way is
 // the tape leaning into it".
+//
+// Two sizes from one component. `compact` is the Donna widget-panel card — the
+// headline read, the day rail and what is next, sized for a ~300px rail. Full is
+// the half-screen view: filters, the bias factor breakdown, and every event.
 //
 // Colour follows the data's job: a single-hue blue ramp carries MAGNITUDE (day
 // score, event impact), and the fixed status green/red carries DIRECTION (bias) —
@@ -163,13 +167,15 @@ function DayRow({ day, active, onSelect, maxScore }) {
   );
 }
 
-function EventRow({ event }) {
+function EventRow({ event, dayPrefix = null }) {
   const [open, setOpen] = useState(false);
   const hasDetail = !!(event.reaction || event.note);
   return (
     <div className="border-b border-white/[0.06] py-2.5 last:border-0">
       <div className="flex items-start gap-2.5">
-        <span className="w-14 shrink-0 pt-0.5 text-[11px] tabular-nums text-gray-500">{clockET(event.time)}</span>
+        <span className="w-14 shrink-0 pt-0.5 text-[11px] tabular-nums text-gray-500">
+          {dayPrefix ? `${dayPrefix} ${clockET(event.time)}` : clockET(event.time)}
+        </span>
         <span
           className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
           style={{ backgroundColor: IMPACT_COLOR[event.impact] }}
@@ -253,7 +259,7 @@ const TABS = [
   { key: "micro", label: "Micro" },
 ];
 
-export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) {
+export default function WeekAheadWidget({ className = "", accent = "#f59e0b", compact = false, onExpand = null }) {
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -285,10 +291,16 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
 
   const events = useMemo(() => {
     if (!data) return [];
-    return data.events.filter(
+    const matching = data.events.filter(
       (e) => (tab === "all" || e.category === tab) && (!selectedDay || e.date === selectedDay),
     );
-  }, [data, tab, selectedDay]);
+    if (!compact) return matching;
+    // The rail card shows what is still ahead — or the tail of the week once it is
+    // all behind us, so the card is never empty on a Friday afternoon.
+    const now = Date.now();
+    const upcoming = matching.filter((e) => new Date(e.at).getTime() >= now);
+    return (upcoming.length ? upcoming : matching.slice(-3)).slice(0, 3);
+  }, [data, tab, selectedDay, compact]);
 
   const grouped = useMemo(() => {
     const map = new Map();
@@ -315,7 +327,7 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-gray-100">Week Ahead</h3>
           <p className="truncate text-[11px] text-gray-500">
-            {weekLabel ? `${weekLabel} · event risk & bias (ET)` : "Macro & micro event risk"}
+            {!weekLabel ? "Macro & micro event risk" : compact ? weekLabel : `${weekLabel} · event risk & bias (ET)`}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-1">
@@ -326,14 +338,16 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <button
-            type="button" onClick={() => setOffset(0)}
-            className={`whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
-              offset === 0 ? "text-gray-300" : "text-gray-500 hover:bg-white/5 hover:text-gray-200"
-            }`}
-          >
-            {offset === 0 ? "This week" : offset === 1 ? "Next week" : `${offset > 0 ? "+" : ""}${offset}w`}
-          </button>
+          {!compact && (
+            <button
+              type="button" onClick={() => setOffset(0)}
+              className={`whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
+                offset === 0 ? "text-gray-300" : "text-gray-500 hover:bg-white/5 hover:text-gray-200"
+              }`}
+            >
+              {offset === 0 ? "This week" : offset === 1 ? "Next week" : `${offset > 0 ? "+" : ""}${offset}w`}
+            </button>
+          )}
           <button
             type="button" onClick={() => setOffset((o) => Math.min(4, o + 1))}
             title="Next week" aria-label="Next week"
@@ -341,13 +355,24 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
           >
             <ChevronRight className="h-4 w-4" />
           </button>
-          <button
-            type="button" onClick={() => load(offset)} disabled={loading}
-            title="Refresh" aria-label="Refresh"
-            className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200 disabled:opacity-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
+          {!compact && (
+            <button
+              type="button" onClick={() => load(offset)} disabled={loading}
+              title="Refresh" aria-label="Refresh"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          )}
+          {onExpand && (
+            <button
+              type="button" onClick={onExpand}
+              title="Open full size" aria-label="Open full size"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -372,12 +397,12 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
       {data && (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Headline read */}
-          <div className="grid grid-cols-1 gap-2.5 px-4 pt-3.5 sm:grid-cols-2">
+          <div className={`grid gap-2.5 px-4 pt-3.5 ${compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
             <BiasTile bias={data.bias} />
             <VolTile vol={data.vol} market={data.market} />
           </div>
 
-          {data.bias.factors.length > 0 && (
+          {!compact && data.bias.factors.length > 0 && (
             <button
               type="button" onClick={() => setShowFactors((v) => !v)}
               className="mx-4 mt-1.5 self-start text-[11px] text-gray-500 underline-offset-2 transition-colors hover:text-gray-300 hover:underline"
@@ -430,6 +455,7 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
           </div>
 
           {/* Filters */}
+          {!compact && (
           <div className="flex items-center gap-1 px-4 pb-1 pt-4">
             {TABS.map((t) => (
               <button
@@ -450,26 +476,36 @@ export default function WeekAheadWidget({ className = "", accent = "#f59e0b" }) 
               </button>
             )}
           </div>
+          )}
 
           {/* Event list */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+          {compact && (
+            <p className="px-4 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              {selectedDay ? `${dayLong(selectedDay)}` : "Next up"}
+            </p>
+          )}
+          <div className={`px-4 pb-2 ${compact ? "" : "min-h-0 flex-1 overflow-y-auto"}`}>
             {grouped.length === 0 && (
               <p className="py-8 text-center text-xs text-gray-500">
                 Nothing scheduled in this filter — a quiet stretch is a range-trading week.
               </p>
             )}
             {grouped.map(([date, dayEvents]) => (
-              <div key={date} className="pt-3 first:pt-1">
-                <p className="sticky top-0 z-10 bg-[#111318] py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                  {dayLong(date)} {dayNum(date)} {monthShort(date)}
-                </p>
-                {dayEvents.map((e) => <EventRow key={e.id} event={e} />)}
+              <div key={date} className={compact ? "" : "pt-3 first:pt-1"}>
+                {!compact && (
+                  <p className="sticky top-0 z-10 bg-[#111318] py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    {dayLong(date)} {dayNum(date)} {monthShort(date)}
+                  </p>
+                )}
+                {dayEvents.map((e) => (
+                  <EventRow key={e.id} event={e} dayPrefix={compact ? dayShort(date) : null} />
+                ))}
               </div>
             ))}
           </div>
 
           {/* Provenance */}
-          <div className="border-t border-white/[0.06] px-4 py-2.5">
+          <div className={`border-t border-white/[0.06] px-4 py-2.5 ${compact ? "hidden" : ""}`}>
             {data.meta.marketNote && (
               <p className="mb-1 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-300/80">
                 <AlertTriangle className="mt-px h-3 w-3 shrink-0" /> {data.meta.marketNote}

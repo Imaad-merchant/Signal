@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip, SlidersHorizontal, Minimize2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import DailyBriefing from "@/components/donna/DailyBriefing";
 import WidgetPanel from "@/components/donna/WidgetPanel";
+import WeekAheadWidget from "@/components/markets/WeekAheadWidget";
 import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
@@ -156,6 +157,16 @@ export default function Donna() {
   // anytime. Persisted so it stays where you left it.
   const [chatMode, setChatMode] = useState(() => { try { return localStorage.getItem("assistant_mode") === "chat"; } catch { return false; } });
   const [widgetsCollapsed, setWidgetsCollapsed] = useState(() => { try { return localStorage.getItem("donna_widgets_collapsed") === "1"; } catch { return false; } });
+  // A large widget opened to half the screen, in place of the narrow widget rail.
+  const [expandedWidget, setExpandedWidget] = useState(() => { try { return localStorage.getItem("donna_expanded_widget") || null; } catch { return null; } });
+  const openWidget = (key) => setExpandedWidget(() => { try { localStorage.setItem("donna_expanded_widget", key); } catch { /* ignore */ } return key; });
+  // The phone tile strip has no room for a large widget, so it fires this instead.
+  useEffect(() => {
+    const onOpen = (e) => openWidget(e.detail);
+    window.addEventListener("donna-open-widget", onOpen);
+    return () => window.removeEventListener("donna-open-widget", onOpen);
+  }, []);
+  const closeWidget = () => setExpandedWidget(() => { try { localStorage.removeItem("donna_expanded_widget"); } catch { /* ignore */ } return null; });
   const toggleWidgets = () => setWidgetsCollapsed((v) => { const next = !v; try { localStorage.setItem("donna_widgets_collapsed", next ? "1" : "0"); } catch { /* ignore */ } return next; });
   const chatModeRef = useRef(chatMode);
   const chatScrollRef = useRef(null);
@@ -684,14 +695,14 @@ export default function Donna() {
       setReply(say); pushTurn("signal", say); speak(say);
       return;
     }
-    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|dashboard|from\s+my\s+dashboard)\b/i.test(t)
-      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?)\b/i.test(t);
+    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|widget|dashboard|from\s+my\s+dashboard)\b/i.test(t)
+      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?|markets?)\b/i.test(t);
     if (tileToggle) {
       const key = resolveTileKey(t);
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       let say;
       if (!key) {
-        say = "Which tile — Today, Open, Latest, Grades, Inbox, or Machine?";
+        say = "Which widget — Markets, Today, Open, Latest, Grades, Inbox, or Machine?";
       } else {
         const hide = /\b(hide|remove)\b/i.test(t);
         setTileHidden(key, hide);
@@ -2365,13 +2376,41 @@ export default function Donna() {
       )}
     </div>
 
-      {/* Right-hand widget panel (Donna mode only) — collapsible, edit via Customize. */}
-      {!chatMode && (
+      {/* Right-hand widget panel (Donna mode only) — collapsible, edit via Customize.
+          A large widget takes its place at half the screen while it is expanded. */}
+      {!chatMode && expandedWidget !== "market" && (
         <WidgetPanel
           collapsed={widgetsCollapsed}
           onToggleCollapse={toggleWidgets}
           onEdit={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+          onExpandWidget={openWidget}
         />
+      )}
+      {!chatMode && expandedWidget === "market" && (
+        <aside className="fixed inset-0 z-40 flex flex-col bg-[#0d0f13] md:static md:z-auto md:w-1/2 md:min-w-[380px] md:max-w-[780px] md:shrink-0 md:border-l md:border-white/[0.06] md:bg-[#0d0f13]/80 md:backdrop-blur-sm">
+          <div className="flex items-center gap-1 border-b border-white/[0.05] px-4 py-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Markets</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+              title="Add or remove widgets" aria-label="Edit widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
+            <button
+              type="button" onClick={closeWidget}
+              title="Back to widgets" aria-label="Back to widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 p-3">
+            <WeekAheadWidget className="h-full" />
+          </div>
+        </aside>
       )}
     </div>
   );
