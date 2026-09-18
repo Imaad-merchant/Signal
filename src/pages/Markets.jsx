@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
 import { format } from "date-fns";
-import { Loader2, Send, Bot, User } from "lucide-react";
+import { Loader2, Send, Bot, User, LineChart } from "lucide-react";
+import WeekAheadWidget from "@/components/markets/WeekAheadWidget";
 
 const accentColor = () => localStorage.getItem("pulse_secondary") || "#f59e0b";
 
@@ -165,7 +166,7 @@ SD Levels anchored to London Mean:
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -212,9 +213,23 @@ SD Levels anchored to London Mean:
         </div>
       )}
 
-      {/* Charts */}
-      {chartData.length > 0 && <PriceChart data={chartData} />}
-      {stats?.hourlyVol?.length > 0 && <VolHeatmap data={stats.hourlyVol} />}
+      {/* Week ahead (half) beside the price/volatility charts (half) */}
+      <div className="grid gap-6 lg:grid-cols-2 items-start">
+        <WeekAheadWidget className="lg:h-[78vh] lg:min-h-[640px]" accent={accent} />
+        <div className="space-y-6">
+          {chartData.length > 0 && <PriceChart data={chartData} />}
+          {stats?.hourlyVol?.length > 0 && <VolHeatmap data={stats.hourlyVol} />}
+          {chartData.length === 0 && !loading && (
+            <div className="flex h-56 flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] p-5 text-center">
+              <LineChart className="h-5 w-5 text-gray-600" />
+              <p className="text-sm text-gray-400">No price history loaded</p>
+              <p className="max-w-xs text-xs text-gray-500">
+                Enter a ticker and hit Analyze — the week-ahead map on the left works without it.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* AI Chat */}
       {stats && (
