@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip, SlidersHorizontal, Minimize2, LayoutGrid } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
 import DailyBriefing from "@/components/donna/DailyBriefing";
 import WidgetPanel from "@/components/donna/WidgetPanel";
+import WeekAheadWidget from "@/components/markets/WeekAheadWidget";
+import WidgetStack from "@/components/donna/WidgetStack";
+import { useIsMobile } from "@/components/useIsMobile";
 import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
@@ -156,6 +159,22 @@ export default function Donna() {
   // anytime. Persisted so it stays where you left it.
   const [chatMode, setChatMode] = useState(() => { try { return localStorage.getItem("assistant_mode") === "chat"; } catch { return false; } });
   const [widgetsCollapsed, setWidgetsCollapsed] = useState(() => { try { return localStorage.getItem("donna_widgets_collapsed") === "1"; } catch { return false; } });
+  // A large widget opened to half the screen, in place of the narrow widget rail.
+  // Restored only on md+, where it is a layout choice; on a phone it is a modal, and
+  // a modal should not survive a reload.
+  const [expandedWidget, setExpandedWidget] = useState(() => {
+    try {
+      if (!window.matchMedia("(min-width: 768px)").matches) return null;
+      return localStorage.getItem("donna_expanded_widget") || null;
+    } catch { return null; }
+  });
+  const openWidget = (key) => setExpandedWidget(() => { try { localStorage.setItem("donna_expanded_widget", key); } catch { /* ignore */ } return key; });
+  // Phones have no room for the rail, so the same widget stack opens as a sheet.
+  // Rendered by breakpoint rather than hidden with CSS, so the off-screen copy of a
+  // widget never mounts and fetches alongside the one you are looking at.
+  const isMobile = useIsMobile();
+  const [showWidgetSheet, setShowWidgetSheet] = useState(false);
+  const closeWidget = () => setExpandedWidget(() => { try { localStorage.removeItem("donna_expanded_widget"); } catch { /* ignore */ } return null; });
   const toggleWidgets = () => setWidgetsCollapsed((v) => { const next = !v; try { localStorage.setItem("donna_widgets_collapsed", next ? "1" : "0"); } catch { /* ignore */ } return next; });
   const chatModeRef = useRef(chatMode);
   const chatScrollRef = useRef(null);
@@ -684,14 +703,14 @@ export default function Donna() {
       setReply(say); pushTurn("signal", say); speak(say);
       return;
     }
-    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|dashboard|from\s+my\s+dashboard)\b/i.test(t)
-      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?)\b/i.test(t);
+    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|widget|dashboard|from\s+my\s+dashboard)\b/i.test(t)
+      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?|markets?)\b/i.test(t);
     if (tileToggle) {
       const key = resolveTileKey(t);
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       let say;
       if (!key) {
-        say = "Which tile — Today, Open, Latest, Grades, Inbox, or Machine?";
+        say = "Which widget — Markets, Today, Open, Latest, Grades, Inbox, or Machine?";
       } else {
         const hide = /\b(hide|remove)\b/i.test(t);
         setTileHidden(key, hide);
@@ -1920,6 +1939,18 @@ export default function Donna() {
 
       {/* Top-right controls — one flex row so they never collide on narrow screens. */}
       <div className="absolute top-3.5 right-3 z-30 flex items-center gap-1.5">
+        {/* Widgets — the rail is desktop-only, so phones open the same stack as a sheet. */}
+        {!chatMode && isMobile && (
+          <button
+            type="button"
+            onClick={() => setShowWidgetSheet(true)}
+            className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+            title="Widgets"
+            aria-label="Widgets"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </button>
+        )}
         {/* Capture thoughts — record / paste / import, organized into your notes. */}
         <button
           type="button"
@@ -2034,7 +2065,7 @@ export default function Donna() {
 
       {/* Proactive nudge: Donna asks permission to speak; tap to hear it. Donna mode only. */}
       {nudgeReady && mode === "idle" && !chatMode && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
+        <div className="absolute top-14 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 md:top-3.5">
           <button
             type="button"
             onClick={hearNudge}
@@ -2365,13 +2396,87 @@ export default function Donna() {
       )}
     </div>
 
-      {/* Right-hand widget panel (Donna mode only) — collapsible, edit via Customize. */}
-      {!chatMode && (
+      {/* Right-hand widget panel (Donna mode only) — collapsible, edit via Customize.
+          A large widget takes its place at half the screen while it is expanded. */}
+      {!chatMode && !isMobile && expandedWidget !== "market" && (
         <WidgetPanel
           collapsed={widgetsCollapsed}
           onToggleCollapse={toggleWidgets}
           onEdit={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+          onExpandWidget={openWidget}
         />
+      )}
+      {!chatMode && expandedWidget === "market" && (
+        <aside
+          className="fixed inset-0 z-[45] flex flex-col bg-[#0d0f13] md:static md:z-auto md:w-1/2 md:min-w-[380px] md:max-w-[780px] md:shrink-0 md:border-l md:border-white/[0.06] md:bg-[#0d0f13]/80 md:backdrop-blur-sm"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
+          <div className="flex items-center gap-1 border-b border-white/[0.05] px-4 py-3">
+            {/* On a phone this is the only way back, so it reads as a back arrow there. */}
+            <button
+              type="button" onClick={closeWidget}
+              title="Back to widgets" aria-label="Back to widgets"
+              className="-ml-1.5 mr-0.5 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200 md:hidden"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Markets</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+              title="Add or remove widgets" aria-label="Edit widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
+            <button
+              type="button" onClick={closeWidget}
+              title="Collapse to the widget panel" aria-label="Collapse to the widget panel"
+              className="hidden rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200 md:block"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </button>
+          </div>
+          {/* On a phone the whole card scrolls as one — stacked, its header block
+              alone would fill the screen and leave the event list no room. On md+
+              the card is pinned to the panel height and scrolls its own list.
+              The floating tab bar sits over the bottom of the screen on a phone. */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] md:overflow-hidden md:pb-3">
+            <WeekAheadWidget className="md:h-full" />
+          </div>
+        </aside>
+      )}
+
+      {/* Phones: the widget stack as a full-screen sheet, since the rail is md+. */}
+      {!chatMode && isMobile && showWidgetSheet && (
+        <div
+          className="fixed inset-0 z-40 flex flex-col bg-[#0d0f13]"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
+          <div className="flex items-center gap-1 border-b border-white/[0.05] px-4 py-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Widgets</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+              title="Add or remove widgets" aria-label="Edit widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
+            <button
+              type="button" onClick={() => setShowWidgetSheet(false)}
+              title="Close" aria-label="Close widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+4.5rem)]">
+            <WidgetStack onExpandWidget={openWidget} />
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,13 +1,11 @@
 import React from "react";
 import { PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
-import StatusGrid from "./StatusGrid";
-import RecentActions from "./RecentActions";
-import DeletedHistory from "./DeletedHistory";
+import WidgetStack from "./WidgetStack";
 
-// The right-hand widget panel on the Donna screen: the status widgets (today,
-// open, grades, inbox, …) stacked vertically. Collapsible, and its widgets are
-// managed via the dashboard section of Customize (onEdit).
-export default function WidgetPanel({ collapsed, onToggleCollapse, onEdit }) {
+// The right-hand widget panel on the Donna screen — the desktop home for the widget
+// stack. Collapsible, and its widgets are managed via the dashboard section of
+// Customize (onEdit). Phones get the same stack from the Widgets sheet instead.
+export default function WidgetPanel({ collapsed, onToggleCollapse, onEdit, onExpandWidget }) {
   if (collapsed) {
     return (
       <div className="hidden md:flex shrink-0 flex-col items-center border-l border-white/[0.06] bg-[#0d0f13]/80 px-1.5 py-3 backdrop-blur-sm">
@@ -30,9 +28,7 @@ export default function WidgetPanel({ collapsed, onToggleCollapse, onEdit }) {
         </button>
       </div>
       <div className="relative flex-1 overflow-y-auto p-3 pt-3">
-        <RecentActions />
-        <DeletedHistory />
-        <StatusGrid variant="panel" />
+        <WidgetStack onExpandWidget={onExpandWidget} />
       </div>
     </aside>
   );
