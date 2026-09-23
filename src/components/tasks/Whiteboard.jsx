@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Pencil, ZoomIn, ZoomOut, Maximize2, RotateCw } from "lucide-react";
+import { Pencil, ZoomIn, ZoomOut, Maximize2, RotateCw, FlipHorizontal, FlipVertical, Crop, ImagePlus, Check } from "lucide-react";
 import DOMPurify from "dompurify";
 import AIPromptDialog from "./AIPromptDialog";
 import { base44 } from "@/api/base44Client";
@@ -12,7 +12,6 @@ import {
   objectBounds,
   shiftObj,
   hitTest,
-  worldToScreen,
   snap,
   snapObj,
   GRID_SIZE,
@@ -564,7 +563,10 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       if (mod && e.key === "z" && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
       if (mod && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
       if (mod && e.key === "c") { e.preventDefault(); copySelection(); return; }
-      if (mod && e.key === "v") { e.preventDefault(); pasteClipboard(); return; }
+      // Only hijack Cmd/Ctrl+V for the internal object clipboard when it actually
+      // has something — otherwise let the browser's native paste event fire so a
+      // clipboard IMAGE can be dropped onto the canvas (see the paste useEffect).
+      if (mod && e.key === "v") { if (clipboardRef.current.length) { e.preventDefault(); pasteClipboard(); } return; }
       if (mod && e.key === "x") { e.preventDefault(); copySelection(); deleteSelection(); return; }
       if (mod && e.key === "d") { e.preventDefault(); duplicateSelection(); return; }
       if (mod && e.key === "a") { e.preventDefault(); setSelectedIds(objects.filter(o => !o.locked).map(o => o.id)); return; }
@@ -916,9 +918,13 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
         if (cfg.dimX) newW = Math.max(GRID_SIZE, snap(newW));
         if (cfg.dimY) newH = Math.max(GRID_SIZE, snap(newH));
       }
-      // Shift on a corner handle locks the original aspect ratio. Use the larger
-      // proposed scale on either axis so the box grows/shrinks uniformly.
-      if (ev.shiftKey && cfg.dimX && cfg.dimY && b.w > 0 && b.h > 0) {
+      // Corner handles keep aspect ratio: locked by DEFAULT for images (so pictures
+      // don't distort), and via Shift for everything else. Shift inverts it for
+      // images (hold Shift to free-stretch a picture). Uses the larger proposed
+      // scale on either axis so the box grows/shrinks uniformly.
+      const lockAspect = cfg.dimX && cfg.dimY && b.w > 0 && b.h > 0 &&
+        (obj.type === "image" ? !ev.shiftKey : ev.shiftKey);
+      if (lockAspect) {
         const scale = Math.max(newW / b.w, newH / b.h);
         newW = Math.max(8, b.w * scale);
         newH = Math.max(8, b.h * scale);
@@ -1001,6 +1007,177 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
+
+  // ─── Image paste / drag-drop ─────────────────────────────────────
+  // Load a dropped/pasted image file, downscale large ones (keeps the board's JSON
+  // under Firestore's 1MB doc limit), and return a data URL + dimensions.
+  const processImageFile = useCallback((file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200;
+        const nw = img.naturalWidth || 300, nh = img.naturalHeight || 200;
+        const scale = Math.min(1, maxDim / Math.max(nw, nh));
+        const big = typeof reader.result === "string" && reader.result.length > 700000;
+        if (scale < 1 || big) {
+          const outW = Math.max(1, Math.round(nw * scale));
+          const outH = Math.max(1, Math.round(nh * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = outW; canvas.height = outH;
+          canvas.getContext("2d").drawImage(img, 0, 0, outW, outH);
+          const isPng = /png/i.test(file.type || "");
+          resolve({ url: canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.82), w: outW, h: outH });
+        } else {
+          resolve({ url: reader.result, w: nw, h: nh });
+        }
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  }), []);
+
+  // Drop an image onto the canvas as an auto-sized box (reuses text-box rendering,
+  // so it's selectable/movable/resizable like anything else).
+  const insertImageObject = useCallback(({ url, w, h }, worldX, worldY) => {
+    const maxW = 460;
+    const dispW = Math.min(w || 300, maxW);
+    const dispH = Math.max(1, Math.round(dispW * ((h || 200) / (w || 300))));
+    let cx = worldX, cy = worldY;
+    if (cx == null || cy == null) {
+      cx = (containerSize.w / 2 - viewport.x) / viewport.zoom;
+      cy = (containerSize.h / 2 - viewport.y) / viewport.zoom;
+    }
+    const obj = {
+      id: uid(), type: "image", src: url,
+      x: cx - dispW / 2, y: cy - dispH / 2, w: dispW, h: dispH,
+      aspect: dispH / dispW, // native ratio, for aspect-locked corner resize
+    };
+    pushHistory(objectsRef.current);
+    setObjects(prev => [...prev, obj]);
+    setSelectedIds([obj.id]);
+  }, [viewport, containerSize, pushHistory]);
+
+  // Paste an image from the system clipboard onto the canvas (unless a text box is
+  // being edited, which has its own inline-image paste).
+  useEffect(() => {
+    const onPaste = (e) => {
+      if (editingTextIdRef.current) return;
+      const t = e.target;
+      const tag = (t?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || t?.isContentEditable) return;
+      const dt = e.clipboardData;
+      if (!dt) return;
+      // Prefer the DataTransferItemList (Chrome/Firefox), fall back to .files (Safari).
+      let file = null;
+      for (const it of Array.from(dt.items || [])) {
+        if (it.type && it.type.startsWith("image/")) { file = it.getAsFile(); break; }
+      }
+      if (!file) file = Array.from(dt.files || []).find((f) => f.type.startsWith("image/")) || null;
+      if (file) {
+        e.preventDefault();
+        processImageFile(file).then((r) => insertImageObject(r)).catch(() => {});
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [processImageFile, insertImageObject]);
+
+  // Drag-and-drop image files onto the canvas.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onDragOver = (e) => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } };
+    const onDrop = (e) => {
+      const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/"));
+      if (!files.length) return;
+      e.preventDefault();
+      const { x, y } = screenToWorld(e.clientX, e.clientY);
+      files.forEach((f, i) => processImageFile(f).then((r) => insertImageObject(r, x + i * 28, y + i * 28)).catch(() => {}));
+    };
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("drop", onDrop);
+    return () => { el.removeEventListener("dragover", onDragOver); el.removeEventListener("drop", onDrop); };
+  }, [screenToWorld, processImageFile, insertImageObject]);
+
+  // ─── Image editing (flip / radius / replace / crop) ──────────────
+  const [cropId, setCropId] = useState(null);
+  const replaceInputRef = useRef(null);
+  const selectedImage = selectedIds.length === 1
+    ? objects.find(o => o.id === selectedIds[0] && o.type === "image") || null
+    : null;
+  // Leave crop mode if the cropped image is no longer the (single) selection.
+  useEffect(() => { if (cropId && (!selectedImage || selectedImage.id !== cropId)) setCropId(null); }, [selectedImage, cropId]);
+
+  const updateSelectedImage = useCallback((patch) => {
+    if (!selectedImage) return;
+    pushHistory(objects);
+    setObjects(prev => prev.map(o => o.id === selectedImage.id ? { ...o, ...patch } : o));
+  }, [selectedImage, objects, pushHistory]);
+
+  const flipImage = (axis) => updateSelectedImage(axis === "h" ? { flipH: !selectedImage.flipH } : { flipV: !selectedImage.flipV });
+  // Live radius update WITHOUT a history push per tick (the slider snapshots once
+  // on pointer-down instead), so one drag is a single undo step.
+  const setImageRadiusLive = (v) => {
+    if (!selectedImage) return;
+    const r = Math.max(0, Math.round(v));
+    setObjects(prev => prev.map(o => o.id === selectedImage.id ? { ...o, radius: r } : o));
+  };
+  const resetCrop = () => updateSelectedImage({ crop: { l: 0, t: 0, r: 0, b: 0 } });
+  const onReplaceFile = (e) => {
+    const f = e.target.files?.[0];
+    if (f && selectedImage) processImageFile(f).then(({ url }) => updateSelectedImage({ src: url })).catch(() => {});
+    if (e.target) e.target.value = "";
+  };
+
+  // Drag a crop handle: moves the box edge AND the matching crop fraction, keeping
+  // the image's on-screen scale fixed (standard crop). Handle is a subset of nesw.
+  const startCropDrag = (e, handle, obj) => {
+    e.stopPropagation(); e.preventDefault?.();
+    pushHistory(objects);
+    const id = obj.id;
+    const cr0 = obj.crop || { l: 0, t: 0, r: 0, b: 0 };
+    const vw0 = Math.max(0.02, 1 - cr0.l - cr0.r), vh0 = Math.max(0.02, 1 - cr0.t - cr0.b);
+    const scaleX = obj.w / vw0, scaleY = obj.h / vh0;
+    const x0 = obj.x, y0 = obj.y, w0 = obj.w, h0 = obj.h;
+    const minSize = 24;
+    const onMove = (ev) => {
+      const p = screenToWorld(ev.clientX, ev.clientY);
+      let nx = x0, ny = y0, nw = w0, nh = h0, cl = cr0.l, ct = cr0.t, crr = cr0.r, cb = cr0.b;
+      if (handle.includes("e")) {
+        const fullRight = x0 + w0 + cr0.r * scaleX;
+        const right = Math.max(x0 + minSize, Math.min(p.x, fullRight));
+        nw = right - x0; crr = Math.max(0, cr0.r + (w0 - nw) / scaleX);
+      }
+      if (handle.includes("w")) {
+        const fullLeft = x0 - cr0.l * scaleX;
+        const left = Math.min(x0 + w0 - minSize, Math.max(p.x, fullLeft));
+        nx = left; nw = (x0 + w0) - left; cl = Math.max(0, cr0.l + (left - x0) / scaleX);
+      }
+      if (handle.includes("s")) {
+        const fullBottom = y0 + h0 + cr0.b * scaleY;
+        const bottom = Math.max(y0 + minSize, Math.min(p.y, fullBottom));
+        nh = bottom - y0; cb = Math.max(0, cr0.b + (h0 - nh) / scaleY);
+      }
+      if (handle.includes("n")) {
+        const fullTop = y0 - cr0.t * scaleY;
+        const top = Math.min(y0 + h0 - minSize, Math.max(p.y, fullTop));
+        ny = top; nh = (y0 + h0) - top; ct = Math.max(0, cr0.t + (top - y0) / scaleY);
+      }
+      setObjects(prev => prev.map(o => o.id === id ? { ...o, x: nx, y: ny, w: nw, h: nh, crop: { l: cl, t: ct, r: crr, b: cb } } : o));
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  };
 
   const handleClear = () => {
     if (objects.length === 0) return;
@@ -1293,6 +1470,48 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
             }
             return null;
           })()}
+
+          {/* Image controls — flip / corner radius / crop / replace */}
+          {selectedImage && tool === "select" && (
+            <div
+              className="flex items-center gap-1 bg-[#2a2b2d]/95 backdrop-blur border border-white/[0.08] rounded-lg px-1.5 py-1 shadow-2xl"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              <button type="button" title="Flip horizontal" onClick={() => flipImage("h")} className="p-1.5 rounded text-gray-300 hover:bg-white/10 hover:text-white">
+                <FlipHorizontal className="h-4 w-4" />
+              </button>
+              <button type="button" title="Flip vertical" onClick={() => flipImage("v")} className="p-1.5 rounded text-gray-300 hover:bg-white/10 hover:text-white">
+                <FlipVertical className="h-4 w-4" />
+              </button>
+              <div className="mx-0.5 h-4 w-px bg-white/10" />
+              <label className="flex items-center gap-1 px-1 text-[10px] text-gray-400" title="Corner radius">
+                <span>Radius</span>
+                <input
+                  type="range" min="0" max="80" step="1" value={selectedImage.radius || 0}
+                  onChange={(e) => setImageRadiusLive(Number(e.target.value))}
+                  onPointerDown={(e) => { e.stopPropagation(); pushHistory(objects); }}
+                  className="w-16 accent-blue-500"
+                />
+              </label>
+              <div className="mx-0.5 h-4 w-px bg-white/10" />
+              <button
+                type="button"
+                title={cropId === selectedImage.id ? "Finish crop" : "Crop"}
+                onClick={() => setCropId(cropId === selectedImage.id ? null : selectedImage.id)}
+                className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs ${cropId === selectedImage.id ? "bg-emerald-500/20 text-emerald-200" : "text-gray-300 hover:bg-white/10 hover:text-white"}`}
+              >
+                {cropId === selectedImage.id ? <><Check className="h-3.5 w-3.5" /> Done</> : <><Crop className="h-3.5 w-3.5" /> Crop</>}
+              </button>
+              {selectedImage.crop && (selectedImage.crop.l || selectedImage.crop.t || selectedImage.crop.r || selectedImage.crop.b) ? (
+                <button type="button" title="Reset crop" onClick={resetCrop} className="rounded px-1.5 py-1 text-[10px] text-gray-400 hover:bg-white/10 hover:text-white">Reset</button>
+              ) : null}
+              <div className="mx-0.5 h-4 w-px bg-white/10" />
+              <button type="button" title="Replace image" onClick={() => replaceInputRef.current?.click()} className="p-1.5 rounded text-gray-300 hover:bg-white/10 hover:text-white">
+                <ImagePlus className="h-4 w-4" />
+              </button>
+              <input ref={replaceInputRef} type="file" accept="image/*" className="hidden" onChange={onReplaceFile} />
+            </div>
+          )}
         </div>
 
         {/* Whiteboard right-click context menu */}
@@ -1403,6 +1622,41 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
               const objDash = strokeDashArray(o);
               const objFill = o.fill && o.fill !== "transparent" ? o.fill : (o.color + "20");
               const lockedStyle = o.locked ? { ...selStyle, opacity: 0.7 } : selStyle;
+
+              if (o.type === "image") {
+                const w = Math.max(1, o.w || 200);
+                const h = Math.max(1, o.h || 150);
+                const cr = o.crop || { l: 0, t: 0, r: 0, b: 0 };
+                const vw = Math.max(0.02, 1 - (cr.l || 0) - (cr.r || 0));
+                const vh = Math.max(0.02, 1 - (cr.t || 0) - (cr.b || 0));
+                const fullW = w / vw, fullH = h / vh;
+                const sx = o.flipH ? -1 : 1, sy = o.flipV ? -1 : 1;
+                return (
+                  <foreignObject
+                    key={o.id}
+                    x={o.x} y={o.y} width={w} height={h}
+                    transform={o.rotation ? `rotate(${o.rotation} ${o.x + w / 2} ${o.y + h / 2})` : undefined}
+                    style={{ ...lockedStyle, overflow: "visible", pointerEvents: "none" }}
+                  >
+                    <div
+                      xmlns="http://www.w3.org/1999/xhtml"
+                      style={{
+                        position: "relative", width: w, height: h, overflow: "hidden",
+                        borderRadius: `${o.radius || 0}px`, opacity: fillOpacityOf(o),
+                        transform: `scale(${sx}, ${sy})`,
+                      }}
+                    >
+                      <img
+                        src={o.src} draggable={false} alt=""
+                        style={{
+                          position: "absolute", left: -(cr.l || 0) * fullW, top: -(cr.t || 0) * fullH,
+                          width: fullW, height: fullH, maxWidth: "none", display: "block", pointerEvents: "none",
+                        }}
+                      />
+                    </div>
+                  </foreignObject>
+                );
+              }
 
               if (o.type === "rect" || o.type === "roundedRect") {
                 const x = Math.min(o.x, o.x + o.w);
@@ -1619,8 +1873,8 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
           </g>
         </svg>
 
-        {/* Resize / rotate handles for a single selected box object */}
-        {tool === "select" && !editingTextId && !drawingObject && selectedIds.length === 1 && (() => {
+        {/* Resize / rotate handles for a single selected box object (hidden while cropping) */}
+        {tool === "select" && !editingTextId && !drawingObject && selectedIds.length === 1 && cropId !== selectedIds[0] && (() => {
           const o = objects.find(ob => ob.id === selectedIds[0]);
           if (!o || !BOX_TYPES.includes(o.type) || o.locked) return null;
           const b = objectBounds(o);
@@ -1670,6 +1924,47 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                   <RotateCw className="h-3 w-3 text-blue-600" />
                 </div>
               </div>
+            </>
+          );
+        })()}
+
+        {/* Crop handles — shown while cropping the selected image. */}
+        {tool === "select" && cropId && selectedIds.length === 1 && cropId === selectedIds[0] && (() => {
+          const o = objects.find(ob => ob.id === selectedIds[0]);
+          if (!o || o.type !== "image") return null;
+          const b = objectBounds(o);
+          const oc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
+          const rot = o.rotation || 0;
+          const z = viewport.zoom;
+          const w2s = (wx, wy) => {
+            const p = rotatePt(wx, wy, oc.x, oc.y, rot);
+            return { left: p.x * z + viewport.x, top: p.y * z + viewport.y };
+          };
+          const handles = [
+            { k: "nw", x: b.x, y: b.y }, { k: "n", x: b.x + b.w / 2, y: b.y }, { k: "ne", x: b.x + b.w, y: b.y },
+            { k: "e", x: b.x + b.w, y: b.y + b.h / 2 }, { k: "se", x: b.x + b.w, y: b.y + b.h },
+            { k: "s", x: b.x + b.w / 2, y: b.y + b.h }, { k: "sw", x: b.x, y: b.y + b.h }, { k: "w", x: b.x, y: b.y + b.h / 2 },
+          ];
+          const cScr = { left: oc.x * z + viewport.x, top: oc.y * z + viewport.y };
+          const cursorFor = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
+          return (
+            <>
+              <div className="absolute pointer-events-none border-2 border-dashed border-emerald-400/90 rounded-sm" style={{
+                left: cScr.left, top: cScr.top, width: b.w * z, height: b.h * z,
+                transform: `translate(-50%,-50%) rotate(${rot}deg)`,
+              }} />
+              {handles.map(hd => {
+                const s = w2s(hd.x, hd.y);
+                return (
+                  <div key={hd.k}
+                    onPointerDown={(e) => startCropDrag(e, hd.k, o)}
+                    className="absolute z-40 flex items-center justify-center"
+                    style={{ left: s.left, top: s.top, width: 28, height: 28, transform: "translate(-50%,-50%)", cursor: cursorFor[hd.k], touchAction: "none" }}
+                  >
+                    <div className="bg-emerald-400 border border-emerald-700 shadow" style={{ width: 14, height: 14, borderRadius: 2 }} />
+                  </div>
+                );
+              })}
             </>
           );
         })()}

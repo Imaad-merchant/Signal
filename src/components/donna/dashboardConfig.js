@@ -5,8 +5,11 @@
 
 const KEY = "donna_dashboard";
 
-// The full set of tiles, in their default order. Keys must match StatusGrid.
+// The full set of widgets, in their default order. Status-tile keys must match
+// StatusGrid; PANEL_ONLY keys are large widgets the WidgetPanel renders itself
+// (StatusGrid ignores a key it has no tile for, so they simply never join the grid).
 export const ALL_TILES = [
+  { key: "market", label: "Markets" },
   { key: "today", label: "Today" },
   { key: "commitments", label: "Open" },
   { key: "signal", label: "Latest" },
@@ -14,6 +17,16 @@ export const ALL_TILES = [
   { key: "google", label: "Inbox" },
   { key: "machine", label: "Machine" },
 ];
+
+// Widgets too large for the tile grid — they live at the top of the widget panel
+// and expand to half the screen.
+export const PANEL_ONLY = ["market"];
+
+// Is a widget currently switched on? Used by the panel for its own widgets.
+export function isWidgetVisible(key, cfg) {
+  const c = cfg || loadDashCfg();
+  return !(c.hidden || []).includes(key);
+}
 
 export function loadDashCfg() {
   try {
@@ -54,6 +67,7 @@ export function resolveTileKey(text) {
   if (/\b(task|todo|to-do)\b/.test(q)) return "today";
   if (/\b(grade|gpa)\b/.test(q)) return "grades";
   if (/\b(machine|computer|worker|host)\b/.test(q)) return "machine";
+  if (/\b(market|markets|week ahead|econ|economic|volatility|vol|bias|calendar)\b/.test(q)) return "market";
   return null;
 }
 

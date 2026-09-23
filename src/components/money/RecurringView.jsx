@@ -4,6 +4,7 @@
 import React, { useMemo, useState } from "react";
 import { Plus, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { fmtMoney, yearlyCost, nextDue, relDue } from "@/components/money/money";
 import { upcomingDays, comingLater, monthKey, shiftMonth, monthLabel, daysInMonth } from "@/components/money/analytics";
 import { Avatar, Card, Empty } from "@/components/money/ui";
@@ -138,15 +139,15 @@ function AllRecurring({ subs, monthly, onChange }) {
 
   const add = async () => {
     if (!merchant.trim() || !amount) return;
-    await base44.entities.Subscription.create({ merchant: merchant.trim(), amount: Number(amount) || 0, cadence, active: true }).catch(() => {});
+    await base44.entities.Subscription.create({ merchant: merchant.trim(), amount: Number(amount) || 0, cadence, active: true }).catch(writeFailed);
     setMerchant(""); setAmount(""); setOpen(false); onChange();
   };
   const track = async (d) => {
-    await base44.entities.Subscription.create({ merchant: d.merchant, amount: d.amount, cadence: d.cadence, active: true }).catch(() => {});
+    await base44.entities.Subscription.create({ merchant: d.merchant, amount: d.amount, cadence: d.cadence, active: true }).catch(writeFailed);
     onChange();
   };
-  const cancel = async (s) => { if (s.id) { await base44.entities.Subscription.update(s.id, { active: false }).catch(() => {}); onChange(); } };
-  const reactivate = async (s) => { await base44.entities.Subscription.update(s.id, { active: true }).catch(() => {}); loadInactive(); onChange(); };
+  const cancel = async (s) => { if (s.id) { await base44.entities.Subscription.update(s.id, { active: false }).catch(writeFailed); onChange(); } };
+  const reactivate = async (s) => { await base44.entities.Subscription.update(s.id, { active: true }).catch(writeFailed); loadInactive(); onChange(); };
 
   const loadInactive = async () => {
     const all = await base44.entities.Subscription.list("-created_date", 200).catch(() => []);

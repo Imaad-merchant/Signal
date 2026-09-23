@@ -1,6 +1,6 @@
 import React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { CheckCircle2, Circle, Clock, Tag } from "lucide-react";
+import { CheckCircle2, Circle, Clock } from "lucide-react";
 
 const categoryColors = {
   work: { bg: "#4285f4", text: "#fff" },

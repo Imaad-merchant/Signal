@@ -5,15 +5,20 @@
 // routes that used to be separate files (checkin, intent, seedDomains, and the
 // Google connect/disconnect kickoff) are merged here and dispatched on `body.route`.
 // Each route keeps its original request/response shape.
-import nodemailer from "nodemailer";
 import { verifyAuth } from "./_auth.js";
 import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
-import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText } from "./google/_client.js";
+import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText, insertEvent, patchEvent, deleteEvent } from "./google/_client.js";
+import { syncCalendarForUser } from "./google/_sync.js";
 import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_client.js";
+
+// Larger body limit so the voice-recorder can POST base64 audio for transcription.
+export const config = { api: { bodyParser: { sizeLimit: "12mb" } } };
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
+import { wantsLogStats, computeLogSummary, computeTopicStats, computeHabitStats, parseLogEntries, analyticsTerms } from "./_logstats.js";
+import { extractText, getDocumentProxy } from "unpdf";
 
-const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "email", "research", "ask", "none"];
+const INTENT_VALID = ["remind", "log", "monitor", "write", "grade", "add", "complete", "remove", "clear", "dedupe", "email", "research", "ask", "none"];
 
 function summarize(value, max = 25) {
   if (Array.isArray(value)) return value.slice(0, max);
@@ -50,7 +55,7 @@ export default async function handler(req, res) {
 
   try {
     if (route === "checkin") return await checkin(body, res);
-    if (route === "intent") return await intent(body, res);
+    if (route === "intent") return await intent(auth, body, res);
     if (route === "nudge") return await nudge(body, res);
     if (route === "briefing") return await briefing(body, res);
     if (route === "research") return await research(body, res);
@@ -58,6 +63,13 @@ export default async function handler(req, res) {
     if (route === "log") return await logEntry(body, res);
     if (route === "capture") return await capture(auth, body, res);
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
+    if (route === "list-notes") return await listNotes(auth, res);
+    if (route === "extract-syllabus") return await extractSyllabus(auth, body, res);
+    if (route === "test-brief") {
+      const { sendBriefingEmail } = await import("./ingest.js");
+      const result = await sendBriefingEmail(getAdminDb(), body.slot === "evening" ? "evening" : "morning");
+      return res.status(200).json(typeof result === "object" ? result : { sent: !!result });
+    }
     if (route === "command") return await command(auth, body, res);
     if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
     if (route === "send-email") return await sendEmail(body, res);
@@ -68,6 +80,11 @@ export default async function handler(req, res) {
     if (route === "plaid-link-token") return await plaidLinkToken(auth, res);
     if (route === "plaid-exchange") return await plaidExchange(auth, body, res);
     if (route === "plaid-sync") return await plaidSync(auth, res);
+    if (route === "tts") return await ttsSpeak(auth, body, res);
+    if (route === "transcribe") return await transcribe(auth, body, res);
+    if (route === "gcal-push") return await gcalPush(auth, body, res);
+    if (route === "gcal-delete") return await gcalDelete(auth, body, res);
+    if (route === "gcal-sync") return await gcalSync(auth, res);
     return res.status(400).json({ error: "Unknown route" });
   } catch (err) {
     console.error(`Jarvis route "${route}" error:`, err);
@@ -182,12 +199,113 @@ Produce exactly one payback object now.`;
   return res.status(400).json({ error: "Unknown action (expected 'questions' or 'payback')" });
 }
 
+// Retrieve the notes/memories most RELEVANT to a question from the user's `notes`
+// store (indexed Obsidian vault + Donna's captured memories) — keyword prefilter
+// then embedding cosine rank. Best-effort: returns [] on any failure so the answer
+// never depends on it. Gated by the caller to reflective/personal questions.
+async function retrieveRelevantNotes(uid, query) {
+  if (!uid || !isAdminConfigured()) return [];
+  try {
+    const db = getAdminDb();
+    const snap = await db.collection("notes").where("userId", "==", uid).get();
+    const notes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!notes.length) return [];
+    const terms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const pre = notes
+      .map((n) => {
+        const hay = `${n.title || ""} ${n.content || ""}`.toLowerCase();
+        let s = 0; for (const t of terms) if (hay.includes(t)) s++;
+        return { n, s };
+      })
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.n)
+      .slice(0, 18);
+    const vecs = await embed([query, ...pre.map((c) => `${c.title || ""}\n${(c.content || "").slice(0, 1500)}`)]);
+    const qv = vecs[0];
+    return pre
+      .map((c, i) => ({ title: c.title || "Untitled", folder: c.folder || "", excerpt: (c.content || "").replace(/\s+/g, " ").trim().slice(0, 600), score: cosine(qv, vecs[i + 1]) }))
+      .sort((a, b) => b.score - a.score)
+      .filter((r) => r.score > 0.15)
+      .slice(0, 6);
+  } catch {
+    return [];
+  }
+}
+
+// Load precomputed statistics from the user's logs (Page docs, category "Log"):
+// a per-log summary for each, plus topic stats keyed off the words in the question
+// (so "how many times did I go to the gym" counts gym entries wherever they live).
+// All counting is deterministic here; the model only narrates the finished numbers.
+async function loadLogAnalytics(uid, transcript, today) {
+  if (!uid || !isAdminConfigured()) return null;
+  try {
+    const db = getAdminDb();
+    // Habits + their daily check-in records (the gym / no-smoking / no-vaping /
+    // sober tracking) — exact structured data, the primary source for these stats.
+    const [pageSnap, habitLogSnap] = await Promise.all([
+      db.collection("pages").where("userId", "==", uid).get(),
+      db.collection("habit_logs").where("userId", "==", uid).get(),
+    ]);
+    const habitRows = habitLogSnap.docs.map((d) => d.data());
+    const byHabit = {};
+    for (const r of habitRows) {
+      if (!r || !r.habit_name) continue;
+      (byHabit[r.habit_name] = byHabit[r.habit_name] || []).push({ date: r.date, done: !!r.done });
+    }
+    const habits = Object.keys(byHabit)
+      .map((name) => computeHabitStats(name, byHabit[name], today))
+      .filter((h) => !h.empty)
+      .sort((a, b) => b.loggedDays - a.loggedDays)
+      .slice(0, 8);
+
+    // Free-text logs (Page docs, category "Log"). Filter category in JS — a
+    // compound (userId + category) query needs a composite index that isn't
+    // provisioned and would throw.
+    const logs = pageSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((p) => String(p.category || "").toLowerCase() === "log");
+    const summaries = logs.map((p) => computeLogSummary(p, today)).filter((s) => !s.empty).slice(0, 8);
+    const allEntries = logs.flatMap((p) => parseLogEntries(p.content).map((e) => ({ ...e, log: p.title })));
+    const topic = computeTopicStats(allEntries, analyticsTerms(transcript), today);
+    if (!habits.length && !summaries.length && !topic) return null;
+    return { habits, logs: summaries, topic };
+  } catch {
+    return null;
+  }
+}
+
+// Should Donna dig through the vault/memories before answering? Fire on anything
+// that reads like a question, reflection, advice, or personal recall — but skip
+// pure quick commands (remind/log/add/…) that never need the vault. Broad on
+// purpose: recall should feel automatic.
+function wantsDeepRecall(t) {
+  if (!t) return false;
+  const s = t.toLowerCase().trim();
+  if (/^(remind me to|log |add |create |delete |remove |complete |mark |set |schedule )/.test(s) && s.length < 70) return false;
+  return /\?|\b(how|what|why|which|who|when|where|should|could|would|help|advice|prepare|prep|interview|resume|cover ?letter|apply|application|leverage|strength|weakness|achieve|accomplish|experience|background|story|goal|value|personality|passion|skill|based on|about my|my (life|work|business|goals?|notes?|memor|projects?|experience|background|classes|school)|do i|have i|did i|tell me|give me|remember|recall|summar|reflect|pattern|know about|think about|opinion|draft|write .*(for me|about)|idea|explain|describe|help me)\b/.test(s);
+}
+
 // ---- route: intent (voice command → reply + actions) ----
-async function intent(body, res) {
+async function intent(auth, body, res) {
   const transcript = typeof body.transcript === "string" ? body.transcript.trim() : "";
   if (!transcript) return res.status(400).json({ error: "Transcript required" });
   const context = body.context && typeof body.context === "object" ? body.context : {};
   const today = context.today || new Date().toISOString().slice(0, 10);
+
+  // Latency guard: plain calendar / inbox / grade / task questions are answered
+  // straight from the context the client already sent — they don't need the vault
+  // embedding or the log scan, which are the slow part. Skip both for those so the
+  // common "what's on today" case goes straight to the model.
+  const scheduleQuery = /\b(calendar|schedul|agenda|meetings?|events?|appointments?|inbox|e-?mails?|\bmail\b|grades?|due|deadlines?|reminders?|upcoming|free time|availabilit)\b/i.test(transcript);
+  const wantDeep = wantsDeepRecall(transcript) && !scheduleQuery;
+  const wantStats = wantsLogStats(transcript);
+
+  // Run the two retrievals concurrently (not one-after-the-other) so they overlap
+  // instead of stacking their latency before the model call.
+  const [relevantNotes, logAnalytics] = await Promise.all([
+    wantDeep ? retrieveRelevantNotes(auth?.uid, transcript) : Promise.resolve([]),
+    (wantStats || wantDeep) ? loadLogAnalytics(auth?.uid, transcript, today) : Promise.resolve(null),
+  ]);
 
   const system = `${personaLine(body.prefs)}
 You are a sharp, unflappable chief of staff. Your whole job: the principal talks to you freely (rambling, thinking aloud), and you ORGANISE it — turning loose speech into the right structured items — and you ANSWER questions about their world from the context provided. You speak clear, concise British English: direct, dry, never fawning, never verbose.
@@ -200,9 +318,11 @@ Return JSON only (no markdown):
 }
 
 ACTION TYPES:
-- { "type": "add",     "list": string, "text": string }                  // add an item to a named to-do LIST (e.g. list "Business", text "hire a designer")
+- { "type": "add",     "list": string, "text": string, "due_date": "YYYY-MM-DD"|null }  // add an item to a named LIST/category; set due_date to put it on the calendar on that day
 - { "type": "complete","list": string | null, "text": string }          // mark a list item done (match by its wording)
-- { "type": "remove",  "list": string | null, "text": string }          // remove a list item
+- { "type": "remove",  "list": string | null, "text": string }          // remove ONE specific list item (matched by its wording)
+- { "type": "clear",   "list": string }                                  // delete ALL items in a named category / list / course (e.g. every "MUSI" event) — the app ALWAYS asks the user to confirm before it deletes
+- { "type": "dedupe",  "list": string | null }                           // delete DUPLICATE items (same title + date), keeping one of each; list = a category to limit it to, or null for the whole calendar — always confirmed
 - { "type": "remind",  "text": string, "due_on": "YYYY-MM-DD" | null }   // a time-bound commitment / to-do
 - { "type": "log",     "text": string, "log": string | null, "domain": string | null }  // append to a running LOG document; "log" is the named log if they say one (e.g. "in my workouts log"), else null for the default journal
 - { "type": "monitor", "metric": string, "value": number | null, "note": string | null }
@@ -214,7 +334,20 @@ ACTION TYPES:
 RULES:
 - ORGANISE RAMBLING: a single message can contain several items — emit one action per distinct thing. "I need to hire a designer, order cards, and remember I liked that pricing idea" → two "add" (list "Business") + one "log".
 - LISTS: when the user talks about a project/list ("my business list", "for the app"), use add/complete/remove with that list name. Default the list to "Business" only if they clearly mean their main venture and name none.
+- IMPORT / SYLLABUS: when they paste a syllabus or an assignment list and ask to file the dated items under a category ("put these hw due dates under Music"), emit ONE "add" per assignment with list=<that category, e.g. "Music">, text=<assignment name>, and due_date=<full ISO date>. Resolve every date to YYYY-MM-DD against today (${today}), inferring the year (PAST dates are fine — a mid-semester syllabus has them). Each becomes a dated calendar item under that category. If the list of items to import isn't fully visible in THIS message (e.g. they pasted it in an earlier message), don't guess — ask them to paste it again together with the instruction.
+- DELETION IS DANGEROUS — BE CONSERVATIVE:
+  · To delete ALL items in a category / course / list ("delete all my MUSI events", "clear my music tasks", "undo all the music homework", "get rid of everything for Econ") emit ONE "clear" with list=<that category/course, e.g. "MUSI">. Do NOT emit a pile of individual "remove" actions for this — that's what caused a wipe before. The app will show the user exactly how many it matched and make them confirm.
+  · "remove" is ONLY for ONE specific item the user named by its wording. Never emit removes for everything.
+  · Never emit "clear" for the WHOLE calendar/all tasks with no category. If they say "delete everything" without naming a category, ask in "reply" which category they mean — emit no actions.
+  · If a request is vague about which items, emit ZERO delete actions and ask. Deleting the wrong things is far worse than asking.
+- DUPLICATES: "delete the duplicate events", "remove the doubles", "I have two of everything", "get rid of duplicates" → emit ONE {type:"dedupe"} (add list only if they limit it to a category). It keeps one of each and asks the user to confirm. Never turn this into removes.
 - QUESTIONS: if they're ASKING (what's on next week, what's in my inbox, what's on my business list, how am I doing, how are my grades / is my grade still good), set intent "ask", leave actions empty, and ANSWER concisely in "reply" from the context. Use upcoming_calendar for schedule questions, recent_emails for inbox, lists/commitments for to-dos, and grades for anything about school marks/classes/assignments.
+- RECALL: when they ask what they noted / logged / journaled / captured (recently or "the other day"), answer from "recent_notes" — name the note and summarise its gist. If nothing matches, say you don't see it in their recent notes.
+- DEEP RECALL / REFLECTION: "relevant_notes" are the notes + memories from their Obsidian vault most relevant to THIS question (retrieved semantically). For reflective or advice questions — interview prep, "how do I leverage my life/achievements", self-assessment, "based on my experience", goals, patterns — DRAW ON relevant_notes: weave in concrete specifics (real achievements, experiences, values they actually wrote) rather than generic advice, and name where it comes from when useful. If relevant_notes is empty, answer from what you do have and say you don't have much in their vault on it yet.
+- LOG & HABIT STATISTICS: "log_analytics" (when present) holds EXACT precomputed numbers — never estimate, round, or invent a count; read the figures straight off it.
+  · "habits" is the daily check-in tracking (e.g. "Went to the gym", "No smoking", "No vaping", "Stayed sober"). For each: loggedDays, doneDays (days the outcome was hit — went to the gym / stayed clean), lastDone, daysSinceLastDone, doneThisMonth vs doneLastMonth, currentStreak, byMonthDone. THIS is the source for gym/smoking/vaping/sobriety questions — match the activity they named to the right habit ("gym" → "Went to the gym", "smoking" → "No smoking"). Give it naturally: "You've hit the gym 6 times this month, up from 4 in July — last on the 27th, and you're on a 3-day streak." For the abstinence habits, doneDays = clean days; say it that way.
+  · "logs" is per free-text log (total, activeDays, lastDate, daysSinceLast, thisMonth vs lastMonth, byMonth, recent examples); "topic" is the same for a specific activity matched across every log.
+  When they ask how many times / how often / when they last did something / to compare months / for a streak or trend, ANSWER FROM THESE. State the direction of change (up/down/flat) when comparing months, then offer to break it down further (by week or month). If log_analytics is absent or has nothing on what they asked, say you don't have that tracked yet and they can start logging it in the daily check-in.
 - GRADE QUESTIONS: when they ask about grades, answer from the "grades" context — name the course and score, and if a grade recently dropped or an assignment is missing, say so plainly. If grades is empty, say you don't have their latest yet and they can have their school check run.
 - If the context needed to answer is empty (e.g. no upcoming_calendar or recent_emails), say so briefly and note they can connect Google — don't invent events or emails.
 - Never invent obligations the user didn't state. Resolve relative dates against today (${today}); null if none implied.
@@ -222,9 +355,17 @@ RULES:
 - LOG: when they want to record/journal something ("log that …", "log in my workouts that …", "add to my journal …"), emit ONE "log" action with the observation in "text"; if they name a specific log ("my workouts log", "the volunteering log"), put that name in "log", else leave "log" null.
 - EMAIL: if they ask to email/message someone, emit an "email" action — write a clear subject and a complete, well-phrased body in their voice. Put a real address in "to" only if they gave one; otherwise null (they'll fill it). Say in "reply" that you've drafted it for them to review and send — it is NOT sent automatically.
 - RESEARCH: if they ask you to look something up / find CURRENT external info you can't know from their data (available services, schedules, opening hours, prices, news, "what tutoring does UH offer"), emit ONE "research" action with a focused, specific web-search query (fold in the specifics they mentioned — school, classes, professor). In "reply" just say you'll look it up. Do NOT invent the facts yourself.
-- "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.`;
+- "reply" is READ ALOUD: no lists, no markdown, no emoji. Keep it short; a brief follow-up question is welcome when it helps them keep momentum.
+- CONTINUITY: "Conversation so far" (when present) is the recent back-and-forth. If your previous turn asked a follow-up question and the user now gives a SHORT answer (yes / no / sure / nah / a bare date or value), interpret it IN THAT CONTEXT — never reply "can you clarify". If they DECLINE your follow-up ("no", "that's fine", "leave it"), the item you already created stands: acknowledge briefly (e.g. "Right — no deadline then.") and emit NO actions (don't recreate it). If they ACCEPT/answer (e.g. "yes, tomorrow"), emit the action their answer implies (e.g. a "remind" with the date) for that same item.`;
 
-  const user = `The user said: "${transcript}"
+  const history = Array.isArray(body.history) ? body.history : [];
+  const convo = history
+    .slice(-8)
+    .filter((h) => h && h.text)
+    .map((h) => `${h.who === "assistant" ? "You (Donna)" : "User"}: ${String(h.text).slice(0, 300)}`)
+    .join("\n");
+
+  const user = `${convo ? `Conversation so far:\n${convo}\n\n` : ""}The user said: "${transcript}"
 
 Context (JSON): ${JSON.stringify({
     today,
@@ -233,13 +374,33 @@ Context (JSON): ${JSON.stringify({
     lists: Array.isArray(context.lists) ? context.lists.slice(0, 12) : [],
     upcoming_calendar: Array.isArray(context.calendar) ? context.calendar.slice(0, 30) : [],
     recent_emails: Array.isArray(context.emails) ? context.emails.slice(0, 15) : [],
+    recent_notes: Array.isArray(context.recent_notes) ? context.recent_notes.slice(0, 20) : [],
+    ...(logAnalytics ? { log_analytics: logAnalytics } : {}),
+    relevant_notes: relevantNotes,
     grades: Array.isArray(context.grades) ? context.grades.slice(0, 40) : [],
     domains: Array.isArray(context.domains) ? context.domains : [],
-  }).slice(0, 7000)}
+  }).slice(0, logAnalytics ? 12000 : 9000)}
 
 Parse it now.`;
 
-  const raw = await callLLM({ system, user, json: true });
+  // Don't let a provider hiccup surface as a scary raw error. Try once, retry once,
+  // then return a friendly, retryable reply (200) instead of a 500 — and never any
+  // actions, so a failed parse can't accidentally delete or create anything.
+  let raw = "";
+  try {
+    raw = await callLLM({ system, user, json: true });
+  } catch (err1) {
+    console.error("intent LLM failed (1st):", err1?.message);
+    try {
+      raw = await callLLM({ system, user, json: true });
+    } catch (err2) {
+      console.error("intent LLM failed (2nd):", err2?.message);
+      return res.status(200).json({
+        reply: "I'm having trouble reaching my brain for a second — give that another go.",
+        intent: "none", actions: [],
+      });
+    }
+  }
   const parsed = parseJSON(raw);
 
   const intentType = INTENT_VALID.includes(parsed?.intent) ? parsed.intent : "none";
@@ -249,7 +410,7 @@ Parse it now.`;
     .filter((a) => a && typeof a === "object")
     .map((a) => {
       const type = a.type;
-      if (type === "add") return { type, list: String(a.list || "Business").slice(0, 80), text: String(a.text || "").slice(0, 300) };
+      if (type === "add") return { type, list: String(a.list || "Business").slice(0, 80), text: String(a.text || "").slice(0, 300), due_date: /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "") ? a.due_date : null };
       if (type === "complete") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remove") return { type, list: a.list ? String(a.list).slice(0, 80) : null, text: String(a.text || "").slice(0, 300) };
       if (type === "remind") return { type, text: String(a.text || ""), due_on: a.due_on || null };
@@ -270,9 +431,11 @@ Parse it now.`;
         body: String(a.body || "").slice(0, 5000),
       };
       if (type === "research") return { type, query: String(a.query || "").slice(0, 400) };
+      if (type === "clear") return a.list ? { type, list: String(a.list).slice(0, 80) } : null;
+      if (type === "dedupe") return { type, list: a.list ? String(a.list).slice(0, 80) : null };
       return null;
     })
-    .filter((a) => a && (a.text || a.title || a.metric || a.query || (a.type === "grade" && a.score != null) || (a.type === "email" && a.body)));
+    .filter((a) => a && (a.text || a.title || a.metric || a.query || (a.type === "clear" && a.list) || a.type === "dedupe" || (a.type === "grade" && a.score != null) || (a.type === "email" && a.body)));
 
   return res.status(200).json({ reply, intent: intentType, actions });
 }
@@ -480,6 +643,143 @@ async function semanticSearch(auth, body, res) {
   return res.status(200).json({ results });
 }
 
+// ---- route: list-notes (the indexed Obsidian vault + captured notes) ----
+async function listNotes(auth, res) {
+  if (!isAdminConfigured()) return res.status(200).json({ notes: [] });
+  try {
+    const db = getAdminDb();
+    const snap = await db.collection("notes").where("userId", "==", auth.uid).get();
+    const notes = snap.docs.map((d) => {
+      const n = d.data() || {};
+      return {
+        id: d.id,
+        title: n.title || "Untitled",
+        folder: n.folder || "",
+        path: n.path || "",
+        source: n.source || "worker",
+        content: (n.content || "").slice(0, 4000),
+        updated_date: n.updated_date || n.modified || n.created_date || null,
+      };
+    });
+    return res.status(200).json({ notes });
+  } catch {
+    return res.status(200).json({ notes: [] });
+  }
+}
+
+// ---- route: extract-syllabus (read an uploaded syllabus PDF/image → category + dated assignments) ----
+// The generic invoke-llm endpoint never attaches the file, so this reads it directly:
+// Claude reads PDFs and images via base64 content blocks; images fall back to gpt-4o
+// vision. Returns { category:{name,color}, assignments:[{title,due_date}] } or { error }.
+async function extractSyllabus(auth, body, res) {
+  const fileUrl = String(body.file_url || "");
+  if (!fileUrl) return res.status(400).json({ error: "file_url required" });
+  const year = new Date().getFullYear();
+
+  // Fetch the uploaded file and base64-encode it (belt-and-suspenders media type:
+  // prefer what the client passed, else the response header; strip any charset).
+  let b64 = "";
+  let contentType = String(body.media_type || "").split(";")[0].trim().toLowerCase();
+  try {
+    const r = await fetch(fileUrl);
+    if (!r.ok) return res.status(200).json({ error: "fetch-failed" });
+    if (!contentType) contentType = String(r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 12 * 1024 * 1024) return res.status(200).json({ error: "too-large" });
+    b64 = buf.toString("base64");
+  } catch { return res.status(200).json({ error: "fetch-failed" }); }
+
+  const isPdf = contentType === "application/pdf" || /\.pdf(\?|$)/i.test(fileUrl);
+  const IMG = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+  const imgType = IMG.includes(contentType) ? contentType
+    : (/\.png(\?|$)/i.test(fileUrl) ? "image/png"
+      : /\.jpe?g(\?|$)/i.test(fileUrl) ? "image/jpeg"
+        : /\.webp(\?|$)/i.test(fileUrl) ? "image/webp"
+          : /\.gif(\?|$)/i.test(fileUrl) ? "image/gif" : null);
+  const isImage = !isPdf && !!imgType;
+  if (!isPdf && !isImage) return res.status(200).json({ error: "unsupported-type" });
+
+  const instructions = `You are reading a course syllabus. Extract EVERY graded item that has a DUE DATE (homework, assignments, projects, quizzes, exams, papers). Also choose ONE short category name for the course (its subject, e.g. "Music", "Econ 101") and a pleasant hex colour for it.
+Return JSON ONLY:
+{ "category": { "name": string, "color": "#RRGGBB" },
+  "assignments": [ { "title": string, "due_date": "YYYY-MM-DD" } ] }
+Resolve EVERY date to a full ISO date; infer the year from the syllabus, else use ${year}. Include ONLY items that have a real due date. Keep titles short ("HW 3", "Midterm", "Essay 1"). If it isn't a syllabus or has no dated items, return an empty assignments array.`;
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  let lastErr = "";
+
+  // PDFs: pull the text out (works with any LLM provider, and most syllabi are
+  // text PDFs), then let the shared callLLM parse it. This is the reliable path —
+  // it doesn't depend on Anthropic being reachable.
+  if (isPdf) {
+    let text = "";
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(b64, "base64")));
+      const out = await extractText(pdf, { mergePages: true });
+      text = Array.isArray(out?.text) ? out.text.join("\n") : (out?.text || "");
+    } catch (e) { lastErr = `pdf-text: ${e.message}`; console.error("extract-syllabus pdf text:", e.message); }
+
+    if (text && text.trim().length > 40) {
+      try {
+        const raw = await callLLM({ system: "Respond with valid JSON only. No markdown, no prose.", user: `${instructions}\n\nSYLLABUS TEXT:\n"""${text.slice(0, 30000)}"""`, json: true });
+        return res.status(200).json(parseJSON(raw));
+      } catch (e) { lastErr = `llm: ${e.message}`; console.error("extract-syllabus pdf llm:", e.message); }
+    }
+
+    // Text extraction found little/nothing (scanned PDF) — try Claude's native PDF
+    // reader if we have a key; otherwise ask for a screenshot.
+    if (anthropicKey) {
+      try {
+        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
+            system: "Respond with valid JSON only. No markdown, no prose.",
+            messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }, { type: "text", text: instructions }] }],
+          }),
+        });
+        if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d?.content?.[0]?.text || "{}")); }
+        lastErr = `anthropic ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
+      } catch (e) { lastErr = `anthropic: ${e.message}`; }
+    }
+    return res.status(200).json({ error: text ? "pdf-unreadable" : "pdf-scanned", detail: lastErr.slice(0, 200) });
+  }
+
+  // Images: gpt-4o vision (or Claude's image block if only Anthropic is configured).
+  if (isImage && process.env.OPENAI_API_KEY) {
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+        body: JSON.stringify({
+          model: "gpt-4o", max_tokens: 4000, response_format: { type: "json_object" },
+          messages: [{ role: "user", content: [{ type: "text", text: instructions }, { type: "image_url", image_url: { url: fileUrl } }] }],
+        }),
+      });
+      if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d.choices?.[0]?.message?.content || "{}")); }
+      lastErr = `openai ${resp.status}`;
+    } catch (e) { lastErr = `openai: ${e.message}`; }
+  }
+  if (isImage && anthropicKey) {
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
+          system: "Respond with valid JSON only. No markdown, no prose.",
+          messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: imgType, data: b64 } }, { type: "text", text: instructions }] }],
+        }),
+      });
+      if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d?.content?.[0]?.text || "{}")); }
+      lastErr = `anthropic ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
+    } catch (e) { lastErr = `anthropic: ${e.message}`; }
+  }
+
+  return res.status(200).json({ error: "extract-failed", detail: lastErr.slice(0, 200) });
+}
+
 // ---- route: command (queue a shell/dev command for the local worker to run) ----
 async function command(auth, body, res) {
   const text = typeof body.text === "string" ? body.text.trim() : "";
@@ -665,6 +965,84 @@ Content: ${(text || "(could not read the content)").slice(0, 6000)}`;
   }
 }
 
+// ---- Server-side TTS (OpenAI) — reliable audio the browser plays via <audio>,
+//      sidestepping the flaky Web Speech API. Returns base64 MP3. ----
+async function ttsSpeak(auth, body, res) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return res.status(503).json({ error: "TTS not configured (no OPENAI_API_KEY)" });
+  const text = String(body.text || "").trim().slice(0, 1200);
+  if (!text) return res.status(400).json({ error: "text required" });
+  // Map the user's voice prefs to an OpenAI voice. "fable" reads British-ish.
+  const voice = body.voice === "male" ? "onyx" : body.british ? "fable" : "nova";
+  try {
+    const r = await fetch("https://api.openai.com/v1/audio/speech", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "tts-1", voice, input: text, response_format: "mp3" }),
+    });
+    if (!r.ok) { const t = await r.text(); return res.status(502).json({ error: `TTS ${r.status}: ${t.slice(0, 200)}` }); }
+    const buf = Buffer.from(await r.arrayBuffer());
+    return res.status(200).json({ audio: buf.toString("base64"), mime: "audio/mpeg" });
+  } catch (err) {
+    return res.status(502).json({ error: err.message || "TTS failed" });
+  }
+}
+
+// ---- Two-way Google Calendar sync. App events (Tasks with a due_date) push to
+//      Google on create/move/delete; a pull sync mirrors Google back into tasks. ----
+async function gcalPush(auth, body, res) {
+  const accessToken = await getAccessTokenForUid(auth.uid);
+  if (!accessToken) return res.status(200).json({ ok: false, error: "no-google" });
+  const title = String(body.title || "").trim();
+  const date = String(body.date || "").trim();
+  if (!title || !date) return res.status(400).json({ error: "title and date required" });
+  try {
+    if (body.gcalId) { await patchEvent(accessToken, body.gcalId, { title, date }); return res.status(200).json({ ok: true, gcalId: body.gcalId }); }
+    const id = await insertEvent(accessToken, { title, date });
+    return res.status(200).json({ ok: true, gcalId: id });
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err.message || "Calendar push failed" });
+  }
+}
+
+async function gcalDelete(auth, body, res) {
+  const accessToken = await getAccessTokenForUid(auth.uid);
+  if (!accessToken) return res.status(200).json({ ok: false, error: "no-google" });
+  if (!body.gcalId) return res.status(400).json({ error: "gcalId required" });
+  try { await deleteEvent(accessToken, body.gcalId); return res.status(200).json({ ok: true }); }
+  catch (err) { return res.status(502).json({ ok: false, error: err.message || "Calendar delete failed" }); }
+}
+
+async function gcalSync(auth, res) {
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
+  const r = await syncCalendarForUser(getAdminDb(), auth.uid);
+  return res.status(200).json({ ok: !r.error, ...r });
+}
+
+// ---- Speech-to-text (OpenAI Whisper) — transcribe a recorded voice memo. ----
+async function transcribe(auth, body, res) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return res.status(503).json({ error: "Transcription not configured (no OPENAI_API_KEY)" });
+  const b64 = String(body.audio || "");
+  if (!b64) return res.status(400).json({ error: "audio required" });
+  try {
+    const buf = Buffer.from(b64, "base64");
+    const form = new FormData();
+    form.append("file", new Blob([buf], { type: body.mime || "audio/webm" }), "memo.webm");
+    form.append("model", "whisper-1");
+    const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    if (!r.ok) { const t = await r.text(); return res.status(502).json({ error: `Transcribe ${r.status}: ${t.slice(0, 200)}` }); }
+    const data = await r.json();
+    return res.status(200).json({ text: data.text || "" });
+  } catch (err) {
+    return res.status(502).json({ error: err.message || "Transcription failed" });
+  }
+}
+
 // ---- Plaid: connect banks + sync accounts/transactions into the Money tab. ----
 // Access tokens live ONLY in the server-only `plaid_items` collection (Admin SDK).
 async function plaidLinkToken(auth, res) {
@@ -756,6 +1134,9 @@ async function sendEmail(body, res) {
     return res.status(503).json({ error: "Email sending not configured (set SMTP_HOST / SMTP_USER / SMTP_PASS)" });
   }
 
+  // Loaded on demand so the ~every-other request (tts, transcribe, intent…) that
+  // never sends email doesn't pay nodemailer's import cost at cold start.
+  const { default: nodemailer } = await import("nodemailer");
   const transport = nodemailer.createTransport({
     host,
     port,

@@ -1,6 +1,6 @@
 import React from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { format, subDays, startOfWeek, addDays } from "date-fns";
+import { format, startOfWeek, addDays } from "date-fns";
 
 export default function WeeklyBreakdown({ focusSessions }) {
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });

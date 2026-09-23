@@ -45,11 +45,11 @@ export default function Focus() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="flex items-center gap-3 mb-8">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-500 transition-colors">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-xl hover:bg-white/10 text-gray-500 transition-colors">
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="flex-1 text-center pr-9">
-          <h1 className="text-2xl font-bold text-gray-900">Focus Mode</h1>
+          <h1 className="text-2xl font-bold text-gray-100">Focus Mode</h1>
           <p className="text-sm text-gray-400 mt-0.5">Deep work, no distractions</p>
         </div>
       </div>
@@ -61,11 +61,11 @@ export default function Focus() {
           className="text-center py-20"
         >
           <div className="text-5xl mb-4">🎉</div>
-          <h2 className="text-xl font-bold text-gray-900">Session Complete!</h2>
+          <h2 className="text-xl font-bold text-gray-100">Session Complete!</h2>
           <p className="text-sm text-gray-400 mt-1">Great focus. Keep it going.</p>
         </motion.div>
       ) : (
-        <div className="rounded-2xl border border-gray-100 bg-white p-8">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8">
           <FocusTimer
             task={activeTask}
             onComplete={handleComplete}
@@ -76,17 +76,17 @@ export default function Focus() {
 
       {/* Quick select task */}
       {!activeTask && !showComplete && tasks.length > 0 && (
-        <div className="mt-6 rounded-2xl border border-gray-100 bg-white p-5">
+        <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
           <p className="text-xs font-medium text-gray-500 mb-3">Or pick a task to focus on:</p>
           <div className="space-y-1.5">
             {tasks.map((t) => (
               <button
                 key={t.id}
                 onClick={() => setActiveTask(t)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gray-50 text-left transition-colors"
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 text-left transition-colors"
               >
                 <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-                <span className="text-sm text-gray-700 truncate">{t.title}</span>
+                <span className="text-sm text-gray-300 truncate">{t.title}</span>
               </button>
             ))}
           </div>
@@ -94,9 +94,9 @@ export default function Focus() {
       )}
 
       {/* Today's sessions */}
-      <div className="mt-6 rounded-2xl border border-gray-100 bg-white p-5">
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-gray-900">Today's Sessions</h3>
+          <h3 className="text-sm font-semibold text-gray-100">Today's Sessions</h3>
           <span className="text-xs text-amber-600 font-medium">{totalFocusToday}m total</span>
         </div>
         <div className="space-y-2">
@@ -104,9 +104,9 @@ export default function Focus() {
             <p className="text-sm text-gray-400 text-center py-4">No sessions yet today</p>
           )}
           {todaySessions.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50">
+            <div key={s.id} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-white/[0.03]">
               <Clock className="h-3.5 w-3.5 text-gray-400" />
-              <span className="text-sm text-gray-700 flex-1 truncate">{s.task_title || "Free focus"}</span>
+              <span className="text-sm text-gray-300 flex-1 truncate">{s.task_title || "Free focus"}</span>
               <span className="text-xs font-medium text-gray-500">{s.duration_minutes}m</span>
               <span className="text-xs text-gray-400">{format(new Date(s.created_date), "h:mm a")}</span>
             </div>

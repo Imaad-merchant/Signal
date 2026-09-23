@@ -1,9 +1,10 @@
 import React, { useState, useRef } from "react";
-import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, ListTodo, Unlink, FilePlus2, FileDown, FileUp } from "lucide-react";
+import { Check, ArrowLeft, Trash2, AlertTriangle, Calendar, Loader2, CheckCircle2, Download, Upload, Unlink, FilePlus2, FileDown } from "lucide-react";
 import ImportActivitiesDialog from "../components/dashboard/ImportActivitiesDialog";
 import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
+import SetupChecklist from "../components/SetupChecklist";
 
 
 
@@ -195,7 +196,7 @@ export default function Settings() {
     const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Pulse//Calendar//EN',
+      'PRODID:-//Signal//Calendar//EN',
     ];
     for (const task of withDates) {
       const d = task.due_date.replace(/-/g, '');
@@ -264,7 +265,7 @@ export default function Settings() {
 
       const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-      let html = `<!DOCTYPE html><html><head><title>Pulse Calendar Export</title><style>
+      let html = `<!DOCTYPE html><html><head><title>Signal Calendar Export</title><style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; color: #1a1a1a; background: #fff; }
         h1 { font-size: 24px; margin-bottom: 4px; }
@@ -280,7 +281,7 @@ export default function Settings() {
         .summary { margin-top: 32px; padding-top: 16px; border-top: 2px solid #e5e7eb; font-size: 13px; color: #666; }
         @media print { body { padding: 20px; } }
       </style></head><body>
-        <h1>Pulse Calendar</h1>
+        <h1>Signal Calendar</h1>
         <p class="subtitle">Exported on ${dateStr} · ${tasks.length} tasks</p>`;
 
       for (const [date, dateTasks] of Object.entries(grouped)) {
@@ -340,9 +341,11 @@ export default function Settings() {
         </button>
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Settings</h1>
-          <p className="text-sm text-gray-500 mt-1">Customize your Pulse experience</p>
+          <p className="text-sm text-gray-500 mt-1">Customize your Signal experience</p>
         </div>
       </div>
+
+      <SetupChecklist />
 
       {/* Import & Export */}
       <Section title="Import & Export">
@@ -468,7 +471,7 @@ export default function Settings() {
         </div>
         <div className="flex items-center justify-between text-sm min-h-[44px]">
           <span className="text-gray-400">App</span>
-          <span className="text-gray-500 font-semibold">Pulse</span>
+          <span className="text-gray-500 font-semibold">Signal</span>
         </div>
       </Section>
 

@@ -7,6 +7,7 @@
 import React, { useMemo, useState } from "react";
 import { Plus, Trash2, PiggyBank } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { CATEGORIES, fmtMoney } from "@/components/money/money";
 import { monthKey, monthLabel, spendingWithDelta, totalsForMonth } from "@/components/money/analytics";
 import { Card, catMeta, Empty, MonthPager, Ring } from "@/components/money/ui";
@@ -110,8 +111,8 @@ const isEarningsCategory = (c) => c === "Income";
 const budgetedSet = (budgets) => new Set(budgets.map((b) => b.category));
 
 function BudgetTable({ title, rows, empty, onChange, children = null }) {
-  const update = async (b, amt) => { await base44.entities.Budget.update(b.id, { amount: Number(amt) || 0 }).catch(() => {}); onChange(); };
-  const del = async (b) => { await base44.entities.Budget.delete(b.id).catch(() => {}); onChange(); };
+  const update = async (b, amt) => { await base44.entities.Budget.update(b.id, { amount: Number(amt) || 0 }).catch(writeFailed); onChange(); };
+  const del = async (b) => { await base44.entities.Budget.delete(b.id).catch(writeFailed); onChange(); };
 
   return (
     <Card title={title}>
@@ -161,7 +162,7 @@ function AddBudget({ available, onDone, onCancel }) {
   const [amount, setAmount] = useState("");
   const add = async () => {
     if (!cat || !amount) return;
-    await base44.entities.Budget.create({ category: cat, amount: Number(amount) || 0 }).catch(() => {});
+    await base44.entities.Budget.create({ category: cat, amount: Number(amount) || 0 }).catch(writeFailed);
     onDone();
   };
   return (

@@ -9,6 +9,7 @@
 import React, { useMemo, useState } from "react";
 import { Plus, Trash2, Target, PiggyBank, ChevronDown, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { fmtMoney, savedFor, paceFor, contributionsOf } from "@/components/money/money";
 import { Card, Empty, Ring, StatRow } from "@/components/money/ui";
 
@@ -112,14 +113,14 @@ function GoalCard({ goal, onChange }) {
     await base44.entities.Goal.update(goal.id, {
       saved: saved + amt,
       contributions: [...contributionsOf(goal), { date: todayIso(), amount: amt }],
-    }).catch(() => {});
+    }).catch(writeFailed);
     setBusy(""); setAmount("");
     onChange();
   };
 
   const remove = async () => {
     setBusy("del");
-    await base44.entities.Goal.delete(goal.id).catch(() => {});
+    await base44.entities.Goal.delete(goal.id).catch(writeFailed);
     setBusy("");
     onChange();
   };
@@ -234,7 +235,7 @@ function GoalForm({ onDone, onCancel }) {
       target_date: date || null,
       kind,
       contributions: [],
-    }).catch(() => {});
+    }).catch(writeFailed);
     setBusy(false);
     onDone();
   };

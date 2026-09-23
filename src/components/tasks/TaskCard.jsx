@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, Circle, Clock, ArrowUpCircle, Calendar, MoreHorizontal, Trash2, Play, ChevronRight, Plus, ListChecks } from "lucide-react";
-import { format } from "date-fns";
+import { CheckCircle2, Circle, Clock, ArrowUpCircle, MoreHorizontal, Trash2, Play, ChevronRight, Plus, ListChecks } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,

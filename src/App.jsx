@@ -2,11 +2,18 @@ import { Toaster } from "@/components/ui/toaster"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
 import { pagesConfig } from './pages.config'
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from 'react-router-dom';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import Login from './pages/Login';
-import Donna from './pages/Donna';
+
+// Legacy /cowork deep links (push notifications, Google OAuth callback, briefing
+// emails) now redirect to the canonical /Donna route, preserving any query (e.g.
+// ?google=connected).
+const CoworkRedirect = () => {
+  const loc = useLocation();
+  return <Navigate to={`/Donna${loc.search}`} replace />;
+};
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -49,7 +56,7 @@ const AuthenticatedApp = () => {
           }
         />
       ))}
-      <Route path="/cowork" element={<LayoutWrapper currentPageName="Donna"><Donna /></LayoutWrapper>} />
+      <Route path="/cowork" element={<CoworkRedirect />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
   );

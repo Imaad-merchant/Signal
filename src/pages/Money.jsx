@@ -2,9 +2,9 @@
 // switched from MoneyNav. The shell owns the shared queries and derived totals so
 // every view reads from one cached copy of accounts/transactions/subs/budgets.
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Wallet, Landmark, RefreshCw, Loader2 } from "lucide-react";
+import { Wallet, Landmark, RefreshCw, Loader2, ArrowLeft } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { detectSubscriptions, monthlyCost, normMerchant } from "@/components/money/money";
 import { monthKey, spendingWithDelta, totalsForMonth, shiftMonth } from "@/components/money/analytics";
@@ -62,6 +62,7 @@ function useMoneyView() {
 
 export default function Money() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["money"] }); };
   const [view, setView] = useMoneyView();
 
@@ -77,6 +78,9 @@ export default function Money() {
   // the money collections — server writes succeed via Admin, client reads deny).
   const loadError = accountsQ.error || txQ.error || subsQ.error;
   const permDenied = loadError && /permission|insufficient|PERMISSION_DENIED/i.test(String(loadError?.message || loadError));
+  // Ported from #97: while the first read is in flight every total is 0, which
+  // is indistinguishable from a real $0.00. Show a skeleton until it lands.
+  const initialLoading = (accountsQ.isLoading || txQ.isLoading) && !loadError;
 
   const accounts = useMemo(() => (Array.isArray(accountsQ.data) ? accountsQ.data : []), [accountsQ.data]);
   const transactions = useMemo(() => (Array.isArray(txQ.data) ? txQ.data : []), [txQ.data]);
@@ -141,6 +145,13 @@ export default function Money() {
         {/* Top bar */}
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e6e8ec] bg-white px-4 py-3 md:px-8">
           <h1 className="flex items-center gap-2 text-[17px] font-semibold">
+            <button
+              onClick={() => navigate(-1)}
+              aria-label="Back"
+              className="-ml-1 rounded-full p-1 text-[#8b929c] hover:bg-[#f2f4f7] hover:text-[#16191d]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
             <Wallet className="h-4 w-4 text-[#d81b48] md:hidden" />
             {viewLabel(view)}
           </h1>
@@ -168,6 +179,8 @@ export default function Money() {
               </div>
             )}
 
+            {initialLoading ? <MoneySkeleton /> : (
+              <>
             {view === "overview" && <Overview data={data} onGoToView={setView} />}
             {view === "recurring" && <RecurringView data={data} onChange={invalidate} />}
             {view === "spending" && <SpendingView data={data} onChange={invalidate} />}
@@ -177,8 +190,34 @@ export default function Money() {
             {view === "goals" && <GoalsView data={data} onChange={invalidate} />}
             {view === "credit" && <CreditView data={data} onChange={invalidate} />}
             {view === "settings" && <SettingsView data={data} onChange={invalidate} />}
+              </>
+            )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// First-read placeholder: the same two-column shape every view uses, so the
+// layout doesn't jump when the real content arrives.
+function MoneySkeleton() {
+  return (
+    <div className="grid animate-pulse grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="rounded-2xl border border-[#e6e8ec] bg-white p-4">
+          <div className="h-3 w-24 rounded bg-[#eef0f3]" />
+          <div className="mt-2 h-8 w-40 rounded bg-[#eef0f3]" />
+          <div className="mt-4 h-36 rounded bg-[#f5f6f8]" />
+        </div>
+        <div className="rounded-2xl border border-[#e6e8ec] bg-white p-4">
+          <div className="h-3 w-32 rounded bg-[#eef0f3]" />
+          {[0, 1, 2, 3].map((i) => <div key={i} className="mt-3 h-8 rounded bg-[#f5f6f8]" />)}
+        </div>
+      </div>
+      <div className="rounded-2xl border border-[#e6e8ec] bg-white p-4">
+        <div className="h-3 w-20 rounded bg-[#eef0f3]" />
+        {[0, 1, 2].map((i) => <div key={i} className="mt-3 h-8 rounded bg-[#f5f6f8]" />)}
       </div>
     </div>
   );

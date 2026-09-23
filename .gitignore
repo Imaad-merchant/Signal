@@ -36,3 +36,4 @@ dist-ssr
 # Local worker secrets — never commit real credentials
 worker/config.json
 worker/config.json.enc
+base44/.app.jsonc

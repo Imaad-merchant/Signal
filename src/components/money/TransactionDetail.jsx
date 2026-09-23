@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import { X, Receipt, Ban, Split, Wand2, Trash2, Loader2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { CATEGORIES, fmtMoney } from "@/components/money/money";
 import { suggestRuleMatch, transactionsMatching } from "@/components/money/rules";
 import { catMeta } from "@/components/money/ui";
@@ -24,7 +25,7 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
 
   const patch = async (data) => {
     setBusy("save");
-    await base44.entities.Transaction.update(tx.id, data).catch(() => {});
+    await base44.entities.Transaction.update(tx.id, data).catch(writeFailed);
     setBusy("");
     onChange();
   };
@@ -37,7 +38,7 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
   const addRule = async () => {
     setBusy("rule"); setRuleMsg("");
     const rule = { match: suggestRuleMatch(tx.merchant), category, scope: "contains" };
-    await base44.entities.CategoryRule.create(rule).catch(() => {});
+    await base44.entities.CategoryRule.create(rule).catch(writeFailed);
     const affected = transactionsMatching(rule, transactions).length;
     setRuleMsg(`Rule saved — ${affected} transaction${affected === 1 ? "" : "s"} match “${rule.match}”.`);
     setBusy("");
@@ -59,15 +60,15 @@ export default function TransactionDetail({ tx, category, transactions = [], onC
       category: splitCategory,
       account_id: tx.account_id || null,
       split_of: tx.id,
-    }).catch(() => {});
-    await base44.entities.Transaction.update(tx.id, { amount: sign * (whole - part) }).catch(() => {});
+    }).catch(writeFailed);
+    await base44.entities.Transaction.update(tx.id, { amount: sign * (whole - part) }).catch(writeFailed);
     setBusy(""); setSplitOpen(false); setSplitAmount("");
     onChange(); onClose();
   };
 
   const del = async () => {
     setBusy("del");
-    await base44.entities.Transaction.delete(tx.id).catch(() => {});
+    await base44.entities.Transaction.delete(tx.id).catch(writeFailed);
     setBusy(""); onChange(); onClose();
   };
 

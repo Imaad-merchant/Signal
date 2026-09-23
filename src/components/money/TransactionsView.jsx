@@ -3,6 +3,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Plus, Upload, Trash2, Ban, Loader2, CheckSquare, Square } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { CATEGORIES, categorize, fmtMoney, parseTransactionsCsv } from "@/components/money/money";
 import { resolveCategory } from "@/components/money/rules";
 import Filters, { applyFilters, emptyFilters } from "@/components/money/Filters";
@@ -41,7 +42,7 @@ export default function TransactionsView({ data, onChange = () => {} }) {
 
   const bulk = async (patch) => {
     setBusy("bulk");
-    for (const id of selected) await base44.entities.Transaction.update(id, patch).catch(() => {});
+    for (const id of selected) await base44.entities.Transaction.update(id, patch).catch(writeFailed);
     setBusy(""); setSelected(new Set()); onChange();
   };
   const bulkDelete = async () => {
@@ -49,7 +50,7 @@ export default function TransactionsView({ data, onChange = () => {} }) {
     for (const id of selected) {
       const t = transactions.find((x) => x.id === id);
       if (t?.source === "plaid") continue; // linked rows come back on the next sync
-      await base44.entities.Transaction.delete(id).catch(() => {});
+      await base44.entities.Transaction.delete(id).catch(writeFailed);
     }
     setBusy(""); setSelected(new Set()); onChange();
   };
@@ -155,7 +156,7 @@ function AddAndImport({ accounts, onChange, setMsg }) {
     const amt = Number(amount);
     await base44.entities.Transaction.create({
       date, merchant: merchant.trim(), amount: amt, category: cat || categorize(merchant, amt), account_id: accounts[0]?.id || null,
-    }).catch(() => {});
+    }).catch(writeFailed);
     setMerchant(""); setAmount(""); setCat(""); setAdding(false); onChange();
   };
 

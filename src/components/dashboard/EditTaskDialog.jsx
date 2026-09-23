@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { X, Check, Loader2 } from "lucide-react";
+import RecurringDeleteDialog from "./RecurringDeleteDialog";
+import { findEventSeries, deleteEvents } from "./eventDelete";
 
 const PRIORITIES = ["low", "medium", "high"];
 const STATUSES = ["todo", "in_progress", "done"];
@@ -17,6 +19,8 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
     estimated_minutes: task.estimated_minutes || "",
   });
   const [saveStatus, setSaveStatus] = useState("idle"); // idle | saving | saved
+  const [deleting, setDeleting] = useState(false);
+  const [series, setSeries] = useState(null); // recurring set awaiting a choice
   const debounceRef = useRef(null);
   const isFirstRender = useRef(true);
 
@@ -44,10 +48,26 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
   }, [form]);
 
   const handleDelete = async () => {
-    await base44.entities.Task.delete(task.id);
+    setDeleting(true);
+    // Recurring event? Offer this-one-vs-all. Otherwise delete straight away.
+    const found = await findEventSeries(task);
+    if (found.length > 1) { setSeries(found); setDeleting(false); return; }
+    await deleteEvents([task]);
+    setDeleting(false);
     onUpdated();
     onClose();
   };
+
+  if (series) {
+    return (
+      <RecurringDeleteDialog
+        task={task}
+        series={series}
+        onDone={() => { onUpdated(); onClose(); }}
+        onCancel={() => setSeries(null)}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/60" onMouseDown={onClose}>
@@ -166,9 +186,10 @@ export default function EditTaskDialog({ task, categories, onClose, onUpdated })
         <div className="flex items-center justify-between gap-3 pt-1">
           <button
             onClick={handleDelete}
-            className="text-sm text-red-400 hover:text-red-300 transition-colors px-3 py-2.5 rounded-lg hover:bg-red-500/10"
+            disabled={deleting}
+            className="flex items-center gap-1.5 text-sm text-red-400 hover:text-red-300 transition-colors px-3 py-2.5 rounded-lg hover:bg-red-500/10 disabled:opacity-50"
           >
-            Delete
+            {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Delete
           </button>
           <button
             onClick={onClose}

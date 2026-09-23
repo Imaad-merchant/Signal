@@ -155,7 +155,7 @@ export async function appendToLog(name, line, dateKey) {
     // workspace — NOT a whiteboard.
     page = await base44.entities.Page.create({
       title, type: "document", category: LOG_CATEGORY, content: nextContent,
-      parent_id: null, section: "private", status: "not_started",
+      parent_id: null, section: "private", status: "not_started", source: "donna",
     });
   }
   return { page, created, prevContent, title };

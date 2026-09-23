@@ -9,6 +9,7 @@ import React, { useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { Plus, Trash2, Loader2, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { SCORE_MIN as MIN, SCORE_MAX as MAX, BANDS, bandFor } from "@/components/money/money";
 import { Card, Empty, StatRow } from "@/components/money/ui";
 
@@ -111,14 +112,14 @@ export default function CreditView({ data, onChange = () => {} }) {
     const v = Number(score);
     if (!Number.isFinite(v) || v < MIN || v > MAX) return;
     setBusy("add");
-    await base44.entities.CreditScore.create({ date: todayIso(), score: v, source: "manual" }).catch(() => {});
+    await base44.entities.CreditScore.create({ date: todayIso(), score: v, source: "manual" }).catch(writeFailed);
     setBusy(""); setScore("");
     onChange();
   };
 
   const remove = async (id) => {
     setBusy(id);
-    await base44.entities.CreditScore.delete(id).catch(() => {});
+    await base44.entities.CreditScore.delete(id).catch(writeFailed);
     setBusy("");
     onChange();
   };

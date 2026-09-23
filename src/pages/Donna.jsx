@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Mic, MicOff, Square, Send, AlertTriangle, RotateCcw, X, Check, Bell, LayoutGrid, Settings2 } from "lucide-react";
+import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip, SlidersHorizontal, Minimize2, LayoutGrid } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import Orb from "@/components/donna/Orb";
-import StatusGrid from "@/components/donna/StatusGrid";
-import RecentActions from "@/components/donna/RecentActions";
 import DailyBriefing from "@/components/donna/DailyBriefing";
+import WidgetPanel from "@/components/donna/WidgetPanel";
+import WeekAheadWidget from "@/components/markets/WeekAheadWidget";
+import WidgetStack from "@/components/donna/WidgetStack";
+import { useIsMobile } from "@/components/useIsMobile";
 import SpokenCaption from "@/components/donna/SpokenCaption";
 import RoutinesPanel from "@/components/donna/RoutinesPanel";
 import CustomizePanel from "@/components/donna/CustomizePanel";
 import CustomizeDonnaPanel from "@/components/donna/CustomizeDonnaPanel";
+import ThoughtsPanel from "@/components/donna/ThoughtsPanel";
 import { resolveTileKey, setTileHidden, ALL_TILES } from "@/components/donna/dashboardConfig";
 import {
   loadPrefs, onPrefsChange, patchPrefs, personaPrefsForServer,
@@ -18,10 +21,11 @@ import {
   parsePersonaTweak, parseNudgeTweak, addCheckinQuestion, removeCheckinQuestionByText,
 } from "@/components/donna/settings";
 import { useVoice } from "@/components/donna/useVoice";
-import { useWakeWord, wakeSupported } from "@/components/donna/useWakeWord";
+import { useWakeWord } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
 import { parseMoneyQuery, answerMoneyQuery } from "@/components/money/voice";
+import { parseEventCommand, parseEventEdit, parseDate, friendlyDate, pickUnusedColor, slugify, DEFAULT_CATEGORY_COLORS } from "@/components/donna/calendar";
 import {
   loadReminders, saveReminders, newId, parseReminderCreate, parseReminderCancel,
   parseDelivery, matchReminder, everyLabel, deliveryLabel,
@@ -48,12 +52,19 @@ const MALE_RE = /male|daniel|arthur|oliver|james|george|fred|gordon|rishi|alex/i
 // Pick a TTS voice honouring the user's prefs: accent (British vs any English) and
 // preferred voice gender. Falls back gracefully to any English voice.
 function pickVoice(voices, prefer = "female", british = true) {
-  const pool = british ? voices.filter((v) => /en[-_]GB/i.test(v.lang)) : voices.filter((v) => /^en/i.test(v.lang));
-  const base = pool.length ? pool : voices.filter((v) => /^en/i.test(v.lang));
-  let hit = null;
-  if (prefer === "female") hit = base.find((v) => FEMALE_RE.test(v.name) && !MALE_RE.test(v.name));
-  else if (prefer === "male") hit = base.find((v) => MALE_RE.test(v.name));
-  return hit || base[0] || voices.find((v) => /^en/i.test(v.lang)) || null;
+  const en = voices.filter((v) => /^en/i.test(v.lang));
+  const gb = en.filter((v) => /en[-_]GB/i.test(v.lang));
+  const pool = british && gb.length ? gb : en;
+  const rank = (list) => {
+    if (!list.length) return null;
+    let hit = null;
+    if (prefer === "female") hit = list.find((v) => FEMALE_RE.test(v.name) && !MALE_RE.test(v.name));
+    else if (prefer === "male") hit = list.find((v) => MALE_RE.test(v.name));
+    return hit || list[0] || null;
+  };
+  // Prefer a LOCAL voice — Chrome's remote "Google …" voices are network-backed and
+  // often produce no audio (esp. in a PWA), so a local voice is far more reliable.
+  return rank(pool.filter((v) => v.localService)) || rank(pool) || rank(en) || null;
 }
 
 // Best-effort match of a spoken item ("the logo") to an existing open task,
@@ -69,6 +80,30 @@ function findTask(tasks, text, list) {
     pool.find((t) => (t.title || "").length > 2 && q.includes((t.title || "").toLowerCase())) ||
     null
   );
+}
+
+// Does a task belong to the group the user named (a category/course like "MUSI")?
+// Matches the term against the task's category (its key is a slug of the label, e.g.
+// "music_1725…") or its title. Requires a term of 2+ chars so it can't match all.
+function matchesGroup(task, term) {
+  const q = (term || "").toLowerCase().trim();
+  if (q.length < 2 || !task) return false;
+  const cat = (task.category || "").toLowerCase();
+  const title = (task.title || "").toLowerCase();
+  return (cat && (cat.includes(q) || (q.includes(cat) && cat.length > 1))) || title.includes(q);
+}
+
+// Duplicate tasks = same title + due_date. Keeps the FIRST of each group and
+// returns the extras (optionally limited to a category/course term).
+function findDuplicates(tasks, term) {
+  const open = (tasks || []).filter((t) => t && t.status !== "done" && (!term || matchesGroup(t, term)));
+  const seen = new Set();
+  const dups = [];
+  for (const t of open) {
+    const key = `${(t.title || "").trim().toLowerCase()}|${t.due_date || ""}`;
+    if (seen.has(key)) dups.push(t); else seen.add(key);
+  }
+  return dups;
 }
 
 // Keyword-rank the worker-indexed notes for a search query (title hits weigh more).
@@ -107,16 +142,50 @@ export default function Donna() {
   const [ttsSupported, setTtsSupported] = useState(true);
   const [lastActions, setLastActions] = useState([]); // undoable records from the last command
   const [undoing, setUndoing] = useState(false);
+  const [redoActions, setRedoActions] = useState([]); // actions to re-apply after an undo
+  const lastAppliedRef = useRef([]); // the last turn's actions, kept so Redo can re-run them
+  const syllabusInputRef = useRef(null); // hidden file picker for syllabus upload
+  const pendingDeletionsRef = useRef(null); // bulk deletions staged for explicit confirmation
+  const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
+  const [pendingDeleteLabel, setPendingDeleteLabel] = useState("");
   const [nudgeReady, setNudgeReady] = useState(false); // Donna has a follow-up to voice
   const [muted, setMuted] = useState(() => {
     try { return localStorage.getItem("donna_muted") === "1"; } catch { return false; }
   });
   const [turns, setTurns] = useState([]); // captioned conversation history (both sides)
+  // Chat mode: a plain typed chat with all of Donna's powers (logging, memory,
+  // tasks, Google, money, research) but none of the proactive behaviour — no
+  // briefings, nudges, always-on mic, or auto-speaking. Flip back to full Donna
+  // anytime. Persisted so it stays where you left it.
+  const [chatMode, setChatMode] = useState(() => { try { return localStorage.getItem("assistant_mode") === "chat"; } catch { return false; } });
+  const [widgetsCollapsed, setWidgetsCollapsed] = useState(() => { try { return localStorage.getItem("donna_widgets_collapsed") === "1"; } catch { return false; } });
+  // A large widget opened to half the screen, in place of the narrow widget rail.
+  // Restored only on md+, where it is a layout choice; on a phone it is a modal, and
+  // a modal should not survive a reload.
+  const [expandedWidget, setExpandedWidget] = useState(() => {
+    try {
+      if (!window.matchMedia("(min-width: 768px)").matches) return null;
+      return localStorage.getItem("donna_expanded_widget") || null;
+    } catch { return null; }
+  });
+  const openWidget = (key) => setExpandedWidget(() => { try { localStorage.setItem("donna_expanded_widget", key); } catch { /* ignore */ } return key; });
+  // Phones have no room for the rail, so the same widget stack opens as a sheet.
+  // Rendered by breakpoint rather than hidden with CSS, so the off-screen copy of a
+  // widget never mounts and fetches alongside the one you are looking at.
+  const isMobile = useIsMobile();
+  const [showWidgetSheet, setShowWidgetSheet] = useState(false);
+  const closeWidget = () => setExpandedWidget(() => { try { localStorage.removeItem("donna_expanded_widget"); } catch { /* ignore */ } return null; });
+  const toggleWidgets = () => setWidgetsCollapsed((v) => { const next = !v; try { localStorage.setItem("donna_widgets_collapsed", next ? "1" : "0"); } catch { /* ignore */ } return next; });
+  const chatModeRef = useRef(chatMode);
+  const chatScrollRef = useRef(null);
+  const [showThoughts, setShowThoughts] = useState(false); // brain-dump / import panel
   const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body } pending confirm+send
   const [emailSending, setEmailSending] = useState(false);
   const [sources, setSources] = useState([]); // web-research source links for the last answer
   const [answeredQ, setAnsweredQ] = useState(() => new Set()); // questions answered in the right-side box
   const answeringRef = useRef(null); // the question currently being answered
+  const ttsAudioRef = useRef(null); // shared <audio> for reliable server-side TTS
+  const serverTtsOkRef = useRef(true); // false once server TTS proves unavailable
   const [spoken, setSpoken] = useState({ text: "", idx: 0 }); // caption text + karaoke cursor
   const turnId = useRef(0);
   const transcriptRef = useRef(null);
@@ -129,7 +198,8 @@ export default function Donna() {
   const [pendingReminder, setPendingReminder] = useState(null); // awaiting a delivery choice
   const pendingReminderRef = useRef(null);
   const [orbAlert, setOrbAlert] = useState(false); // orb-delivery glow
-  const [reminderToast, setReminderToast] = useState(""); // on-screen reminder banner
+  const [reminderToast, setReminderToast] = useState(null); // { title, id } — on-screen reminder banner
+  const lastReminderRef = useRef(null); // { id, title, at } — the reminder that just fired, so "skip/done" deletes it
   const [showRoutines, setShowRoutines] = useState(false); // routines editor panel
   const [showCustomize, setShowCustomize] = useState(false); // customize overlay (tabbed)
   const [customizeTab, setCustomizeTab] = useState("donna"); // "donna" | "dashboard"
@@ -141,6 +211,10 @@ export default function Donna() {
   const [pendingLog, setPendingLogState] = useState(null); // awaiting "which log?" answer
   const pendingLogRef = useRef(null);
   const setPendingLog = useCallback((v) => { pendingLogRef.current = v; setPendingLogState(v); }, []);
+  const turnsRef = useRef([]); // live conversation history for multi-turn context
+  const pendingEventRef = useRef(null); // awaiting a date/category for a calendar event
+  const pendingNudgeRef = useRef(null); // { commitments, say, at } — a just-voiced nudge, so "skip/no" can dismiss it
+  const setPendingEvent = useCallback((v) => { pendingEventRef.current = v; }, []);
   const lastEmailRef = useRef(null); // { from, subject } of the last email read (for replies)
   const emailDraftRef = useRef(null); // mirror so a voice "send it" can act on the staged draft
   useEffect(() => { emailDraftRef.current = emailDraft; }, [emailDraft]);
@@ -170,6 +244,8 @@ export default function Donna() {
   const deliverRef = useRef(null);
   deliverRef.current = (r) => {
     const title = r.title;
+    // Remember which reminder just fired so "skip / done / get rid of it" can delete it.
+    lastReminderRef.current = { id: r.id, title, at: Date.now() };
     pushTurn("signal", `Reminder — ${title}.`);
     if (r.delivery === "voice" && !muted) {
       speak(`Time to ${title}.`);
@@ -181,8 +257,8 @@ export default function Donna() {
     }
     // Always show the banner for orb/text (and as the fallback when voice is muted)
     // so it's clear what the reminder is.
-    setReminderToast(title);
-    window.setTimeout(() => setReminderToast((c) => (c === title ? "" : c)), 30000);
+    setReminderToast({ title, id: r.id });
+    window.setTimeout(() => setReminderToast((c) => (c && c.id === r.id ? null : c)), 30000);
   };
 
   // Fire due reminders while the page is open (checks every 15s).
@@ -207,16 +283,36 @@ export default function Donna() {
   }, []);
 
   // Append a caption turn ("you" or "signal") to the running transcript.
+  // Persist chat/Donna mode; switching stops the mic + any speech so the two modes
+  // never fight over audio.
+  useEffect(() => {
+    chatModeRef.current = chatMode;
+    try { localStorage.setItem("assistant_mode", chatMode ? "chat" : "donna"); } catch { /* ignore */ }
+    // Clear the shared status line so a note from one mode (e.g. the voice-test
+    // result) doesn't bleed into the other after switching.
+    setNote(""); setReply(""); setSpoken({ text: "", idx: 0 });
+    if (chatMode) {
+      try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+      try { if (ttsAudioRef.current) { ttsAudioRef.current.pause(); } } catch { /* ignore */ }
+      try { voice.stop(); } catch { /* ignore */ }
+      setMode("idle"); setNudgeReady(false);
+    }
+  }, [chatMode]);
+
   const pushTurn = useCallback((who, text) => {
     const v = (text || "").trim();
     if (!v) return;
-    setTurns((prev) => [...prev.slice(-19), { id: ++turnId.current, who, text: v }]);
+    setTurns((prev) => {
+      const next = [...prev.slice(-49), { id: ++turnId.current, who, text: v }];
+      turnsRef.current = next; // keep a live copy for multi-turn context
+      return next;
+    });
   }, []);
 
   // Handle a finished transcript (from voice or the type box).
   const handleTranscript = useCallback(async (text) => {
     const t = (text || "").trim();
-    if (!t) { setMode("idle"); return; }
+    if (!t) { setMode("idle"); if (!chatModeRef.current) setNote("Didn't catch that — tap the orb and try again."); return; }
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt any current speech */ }
 
     // ---- Logging helpers (Page-backed logs; entries condensed by the server `log`
@@ -295,6 +391,86 @@ export default function Donna() {
       return;
     }
 
+    // ---- Bulk deletion awaiting confirmation (guard against mass-wipe). ----
+    if (pendingDeletionsRef.current) {
+      const yes = /\b(yes|yeah|yep|confirm|do it|delete them|go ahead|proceed|sure)\b/i.test(t);
+      const no = /\b(no|cancel|stop|keep them|don'?t|nevermind|never mind|leave them)\b/i.test(t);
+      if (yes || no) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        if (no) { cancelPendingDeletions(); const say = "Cancelled — I've left them all where they are."; setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return; }
+        await confirmPendingDeletions();
+        return;
+      }
+      // Not a clear yes/no — fall through and treat as a new request (leaves the
+      // deletions pending so they're never executed without an explicit "yes").
+    }
+
+    // ---- Calendar event: we asked for a missing date or category — this answers it. ----
+    if (pendingEventRef.current) {
+      const p = pendingEventRef.current; setPendingEvent(null);
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+      if (p.op === "move") {
+        const dm = parseDate(t, new Date());
+        if (!dm) { setPendingEvent(p); const say = `I didn't catch a date — say something like "the 6th" or "next Monday".`; setReply(say); pushTurn("signal", say); speak(say); return; }
+        await base44.entities.Task.update(p.id, { due_date: dm.date }).catch(() => {});
+        pushEventToGoogle(p.title, dm.date, p.gcalId).then((gid) => { if (gid && !p.gcalId) base44.entities.Task.update(p.id, { gcal_id: gid }).catch(() => {}); });
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        const say = `Moved "${p.title}" to ${friendlyDate(dm.date)}.`;
+        setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+      if (p.need === "date") {
+        const dm = parseDate(t, new Date());
+        if (!dm) { setPendingEvent(p); const say = `I didn't catch a date — say something like "August 4th" or "next Monday".`; setReply(say); pushTurn("signal", say); speak(say); return; }
+        const next = { title: p.title, date: dm.date, category: p.category || null };
+        if (!next.category) { setPendingEvent({ ...next, need: "category" }); const say = `Got it — ${friendlyDate(next.date)}. What category should "${next.title}" go under? Say a name, or "none".`; setReply(say); pushTurn("signal", say); speak(say); return; }
+        await createCalendarEvent(next); return;
+      }
+      if (p.need === "category") {
+        const said = t.trim().toLowerCase();
+        let category = null;
+        if (!/^(no|none|no category|skip|nope|without|no thanks|don'?t)\b/.test(said)) {
+          category = t.trim().replace(/^(under\s+|the\s+|category\s+|a\s+new\s+|call\s+it\s+|put\s+it\s+under\s+)/i, "").replace(/\s+category$/i, "").trim() || null;
+        }
+        await createCalendarEvent({ title: p.title, date: p.date, category }); return;
+      }
+    }
+
+    // ---- A nudge was just voiced — "skip / no / cancel / not doing that" DISMISSES
+    //      the underlying commitment for good (not just a 6h quiet). ----
+    if (pendingNudgeRef.current && (Date.now() - pendingNudgeRef.current.at < 5 * 60 * 1000)) {
+      const nudge = pendingNudgeRef.current;
+      const isDismiss = /\b(skip|cancel|no|nope|nah|drop it|forget (it|that|about)|never ?mind|not (doing|interested)|we'?re not|don'?t (do|want)|dismiss|stop (bringing|reminding)|remove (it|that)|get rid|leave it)\b/i.test(t) || /^(no|nah|nope|skip|pass)\b/i.test(t.trim());
+      if (isDismiss) {
+        pendingNudgeRef.current = null;
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        const target = pickCommitment(nudge.commitments || [], t, nudge.say);
+        try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 7 * 24 * 3600 * 1000)); } catch { /* ignore */ }
+        if (target?.id) {
+          await base44.entities.Commitment.update(target.id, { status: "dismissed" }).catch(() => {});
+          const say = `Done — I've dropped that and won't bring it up again.`;
+          setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        const say = (nudge.commitments || []).length > 1 ? `Alright — which one should I drop? Say a word or two from it.` : `Alright, I'll leave it.`;
+        setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+      pendingNudgeRef.current = null; // engaging, not dismissing → continue normally
+    }
+
+    // ---- A reminder just fired — "skip / done / get rid of it / stop" deletes that
+    //      recurring routine so it stops nagging (not just closes the banner). ----
+    if (lastReminderRef.current && (Date.now() - lastReminderRef.current.at < 4 * 60 * 1000)) {
+      const lr = lastReminderRef.current;
+      const isDismiss = /\b(skip( it| that)?|get\s+rid\s+of\s+(it|that|this|the reminder)|delete\s+(it|that|this|the reminder)|stop\s*(it|that|reminding( me)?)?|cancel\s+(it|that|the reminder)|remove\s+(it|that)|did\s+it|already\s+(did|done|handled)|handled( it)?|drop it|forget it|nix it)\b/i.test(t) || /^(skip|done|stop)\b/i.test(t.trim());
+      if (isDismiss) {
+        lastReminderRef.current = null;
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        removeReminder(lr.id);
+        setReminderToast((c) => (c && c.id === lr.id ? null : c));
+        const say = `Done — I've stopped reminding you to ${lr.title}.`;
+        setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+    }
+
     // ---- Recurring reminders ("routines"), handled locally before the server route. ----
     // 1) We just asked HOW to deliver a reminder — this utterance is the answer.
     if (pendingReminderRef.current) {
@@ -325,13 +501,96 @@ export default function Donna() {
     // 3) "stop reminding me [to X]" / "delete the reminder"
     const rx = parseReminderCancel(t);
     if (rx) {
-      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       const target = matchReminder(remindersRef.current, rx.title);
+      if (target) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        removeReminder(target.id);
+        const say = `Stopped reminding you to ${target.title}.`;
+        setReply(say); pushTurn("signal", say); speak(say);
+        return;
+      }
+      // No matching routine — maybe they mean a standing commitment
+      // ("stop reminding me about the shared list"). Try to dismiss that.
+      const commitsRaw = await base44.entities.Commitment.filter({ status: "open" }).catch(() => []);
+      const commits = (Array.isArray(commitsRaw) ? commitsRaw : []).map((c) => ({ id: c.id, text: c.text }));
+      const commit = pickCommitment(commits, `${rx.title || ""} ${t}`, "", false);
+      setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       let say;
-      if (target) { removeReminder(target.id); say = `Stopped reminding you to ${target.title}.`; }
-      else say = "You don't have a reminder like that set.";
+      if (commit?.id) {
+        await base44.entities.Commitment.update(commit.id, { status: "dismissed" }).catch(() => {});
+        try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 7 * 24 * 3600 * 1000)); } catch { /* ignore */ }
+        say = `Done — I've dropped "${commit.text}" and won't bring it up again.`;
+      } else {
+        say = "You don't have a reminder like that set.";
+      }
       setReply(say); pushTurn("signal", say); speak(say);
       return;
+    }
+
+    // ---- Reschedule / delete a calendar event ("move X to <date>", "delete X"). ----
+    {
+      const edit = parseEventEdit(t);
+      if (edit) {
+        const tasksRaw = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+        const match = findTask(Array.isArray(tasksRaw) ? tasksRaw : [], edit.title);
+        if (match?.id) {
+          setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+          if (edit.op === "delete") {
+            await base44.entities.Task.delete(match.id).catch(() => {});
+            deleteEventFromGoogle(match.gcal_id);
+            queryClient.invalidateQueries({ queryKey: ["grid"] });
+            const say = `Deleted "${match.title}" from your calendar.`;
+            setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
+          }
+          if (!edit.date) {
+            setPendingEvent({ op: "move", id: match.id, title: match.title, gcalId: match.gcal_id, need: "date" });
+            const say = `What date should I move "${match.title}" to?`;
+            setReply(say); pushTurn("signal", say); speak(say); return;
+          }
+          await base44.entities.Task.update(match.id, { due_date: edit.date }).catch(() => {});
+          pushEventToGoogle(match.title, edit.date, match.gcal_id).then((gid) => { if (gid && !match.gcal_id) base44.entities.Task.update(match.id, { gcal_id: gid }).catch(() => {}); });
+          queryClient.invalidateQueries({ queryKey: ["grid"] });
+          const say = `Moved "${match.title}" to ${friendlyDate(edit.date)}.`;
+          setNote(say); setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        // No matching event — fall through to other handlers / the LLM.
+      }
+    }
+
+    // ---- Cancel a standing commitment ("forget the Emiliano list", "stop reminding
+    //      me about X"). Marks it dismissed so nudges/briefings stop surfacing it. ----
+    if (/\b(forget|cancel|drop|scrap|stop\s+(reminding\s+me|bringing\s+up)|get\s+rid\s+of|don'?t\s+remind\s+me)\b/i.test(t)) {
+      const commitsRaw = await base44.entities.Commitment.filter({ status: "open" }).catch(() => []);
+      const commits = (Array.isArray(commitsRaw) ? commitsRaw : []).map((c) => ({ id: c.id, text: c.text }));
+      const target = pickCommitment(commits, t, "", false); // require a keyword match — never guess
+      if (target?.id) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        await base44.entities.Commitment.update(target.id, { status: "dismissed" }).catch(() => {});
+        try { localStorage.setItem("jarvis_nudge_until", String(Date.now() + 7 * 24 * 3600 * 1000)); } catch { /* ignore */ }
+        const say = `Done — I've dropped "${target.text}" and won't bring it up again.`;
+        setReply(say); pushTurn("signal", say); speak(say); return;
+      }
+      // No matching commitment — fall through (might be a task delete / the LLM).
+    }
+
+    // ---- Calendar events: "add … to my calendar [on <date>] [under <category>]".
+    //      Missing date/category → ask; new category → created with an unused colour. ----
+    {
+      const ev = parseEventCommand(t);
+      if (ev && ev.title) {
+        setHeard(t); pushTurn("you", t); setNote(""); setReply("");
+        if (!ev.date) {
+          setPendingEvent({ title: ev.title, category: ev.category || null, need: "date" });
+          const say = `Sure — what date should I put "${ev.title}" on?`;
+          setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        if (!ev.category) {
+          setPendingEvent({ title: ev.title, date: ev.date, need: "category" });
+          const say = `Adding "${ev.title}" on ${friendlyDate(ev.date)}. What category should it go under? Say a name, or "none".`;
+          setReply(say); pushTurn("signal", say); speak(say); return;
+        }
+        await createCalendarEvent(ev); return;
+      }
     }
 
     // ---- Connect / reconnect Google (works even when the inbox already has signals) ----
@@ -444,14 +703,14 @@ export default function Donna() {
       setReply(say); pushTurn("signal", say); speak(say);
       return;
     }
-    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|dashboard|from\s+my\s+dashboard)\b/i.test(t)
-      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?)\b/i.test(t);
+    const tileToggle = /\b(hide|remove|show|add|bring\s+back|unhide)\b.*\b(tile|card|widget|dashboard|from\s+my\s+dashboard)\b/i.test(t)
+      || /\b(hide|show|unhide)\s+(the\s+|my\s+)?(today|open|latest|grades?|inbox|email|mail|machine|computer|tasks?|markets?)\b/i.test(t);
     if (tileToggle) {
       const key = resolveTileKey(t);
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       let say;
       if (!key) {
-        say = "Which tile — Today, Open, Latest, Grades, Inbox, or Machine?";
+        say = "Which widget — Markets, Today, Open, Latest, Grades, Inbox, or Machine?";
       } else {
         const hide = /\b(hide|remove)\b/i.test(t);
         setTileHidden(key, hide);
@@ -463,11 +722,15 @@ export default function Donna() {
     }
 
     // ---- Logs: create / append / continue / read / bare-journal ----
-    const logStart = parseLogStart(t);
-    const logAppend = !logStart ? parseLogAppend(t) : null;
-    const logRead = !logStart && !logAppend ? parseLogRead(t) : null;
-    const logContinue = !logStart && !logAppend && !logRead ? parseLogContinue(t) : null;
-    const logBare = !logStart && !logAppend && !logRead && !logContinue ? parseLogBare(t) : null;
+    // A statistics/habit question ("how often…", "gym log stats", "how many times…")
+    // is NOT a log read/append — let it fall through to the intent route, which
+    // answers from precomputed log analytics.
+    const statsQ = /\b(statistics?|stats|how many times|how often|how frequently|frequency|last time i|when did i last|streak|per (week|month|day)|average|trend|how consistent|consistency)\b/i.test(t);
+    const logStart = !statsQ ? parseLogStart(t) : null;
+    const logAppend = !statsQ && !logStart ? parseLogAppend(t) : null;
+    const logRead = !statsQ && !logStart && !logAppend ? parseLogRead(t) : null;
+    const logContinue = !statsQ && !logStart && !logAppend && !logRead ? parseLogContinue(t) : null;
+    const logBare = !statsQ && !logStart && !logAppend && !logRead && !logContinue ? parseLogBare(t) : null;
     if (logRead) {
       setHeard(t); pushTurn("you", t); setNote(""); setReply("");
       const r = await readLog(logRead.name);
@@ -591,7 +854,7 @@ export default function Donna() {
         const cres = await base44.functions.invoke("donna", { route: "cleanup", text: raw });
         const cdata = cres && cres.data ? cres.data : cres || {};
         if (cdata.content) {
-          await base44.entities.Page.create({ title: cdata.title || "Note", type: "document", content: cdata.content }).catch(() => null);
+          await base44.entities.Page.create({ title: cdata.title || "Note", type: "document", content: cdata.content, source: "donna" }).catch(() => null);
         }
         const spoken = cdata.spoken || `Sorted — saved "${cdata.title || "your note"}".`;
         setNote(`Saved "${cdata.title || "Note"}" to your notes`);
@@ -670,13 +933,19 @@ export default function Donna() {
         }
       }
 
-      const [commitments, tasksRaw, domains, signalsRaw, gradesRaw] = await Promise.all([
+      const [commitments, tasksRaw, domains, signalsRaw, gradesRaw, pagesRaw] = await Promise.all([
         base44.entities.Commitment.filter({ status: "open" }).catch(() => []),
         base44.entities.Task.list("-created_date").catch(() => []),
         base44.entities.Domain.list("sort_order").catch(() => []),
         base44.entities.Signal.list("-created_date", 80).catch(() => []),
         base44.entities.Grade.list("-updated_date", 60).catch(() => []),
+        base44.entities.Page.list("-updated_date", 25).catch(() => []),
       ]);
+      // Recent notes/logs so Donna can recall what was captured earlier (not just this chat).
+      const recentNotes = (Array.isArray(pagesRaw) ? pagesRaw : []).slice(0, 20).map((p) => ({
+        title: p.title || "Note",
+        snippet: String(p.content || "").replace(/\s+/g, " ").slice(0, 180),
+      }));
       const today = todayKey();
       const allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
       const todayTasks = allTasks
@@ -716,6 +985,9 @@ export default function Donna() {
         route: "intent",
         transcript: t,
         prefs: personaPrefsForServer(prefsRef.current),
+        // Recent conversation (excluding this very message) so follow-ups like
+        // "no" after "add a deadline?" resolve in context instead of resetting.
+        history: (turnsRef.current || []).filter((x) => x.text !== t).slice(-8).map((x) => ({ who: x.who === "you" ? "user" : "assistant", text: x.text })),
         context: {
           today,
           commitments: (Array.isArray(commitments) ? commitments : []).map((c) => ({ text: c.text, due_on: c.due_on })),
@@ -724,6 +996,7 @@ export default function Donna() {
           calendar,
           emails,
           grades,
+          recent_notes: recentNotes,
           domains: Array.isArray(domains) ? domains : [],
         },
       });
@@ -738,8 +1011,61 @@ export default function Donna() {
       }
       const researchAction = actions.find((a) => a && a.type === "research" && a.query);
       const otherActions = actions.filter((a) => a && a.type !== "email" && a.type !== "research");
+
+      // SAFETY: resolve every bulk deletion — a category "clear", a "dedupe", or more
+      // than one "remove" — to a CONCRETE list of tasks, then ALWAYS stage it for an
+      // explicit confirmation. Nothing bulk is ever deleted without a yes. This is the
+      // guard against the "delete some → wiped the whole calendar" disaster.
+      const clearActions = otherActions.filter((a) => a.type === "clear");
+      const dedupeActions = otherActions.filter((a) => a.type === "dedupe");
+      const removeActions = otherActions.filter((a) => a.type === "remove");
+      let stagedTasks = [];
+      let stagedLabel = "";
+      if (dedupeActions.length) {
+        const term = (dedupeActions.find((a) => a.list)?.list || "").trim();
+        stagedTasks = findDuplicates(allTasks, term || null);
+        stagedLabel = term ? `duplicate "${term}" events` : "duplicate events";
+      } else if (clearActions.length) {
+        const terms = clearActions.map((a) => (a.list || "").toLowerCase().trim()).filter((x) => x.length >= 2);
+        const seen = new Set();
+        stagedTasks = (allTasks || []).filter((tk) => {
+          if (!tk || tk.status === "done" || !tk.id || seen.has(tk.id)) return false;
+          if (terms.some((term) => matchesGroup(tk, term))) { seen.add(tk.id); return true; }
+          return false;
+        });
+        stagedLabel = `"${clearActions.map((a) => a.list).filter(Boolean).join(", ")}" events`;
+      } else if (removeActions.length > 1) {
+        const seen = new Set();
+        stagedTasks = removeActions.map((a) => findTask(allTasks, a.text, a.list)).filter((tk) => {
+          if (!tk?.id || seen.has(tk.id)) return false; seen.add(tk.id); return true;
+        });
+        stagedLabel = "events";
+      }
+
+      if ((clearActions.length || dedupeActions.length) && !stagedTasks.length) {
+        // Nothing matched — say so instead of doing anything.
+        const say = dedupeActions.length ? "Good news — I don't see any duplicates to remove." : "I don't see any events under that name.";
+        setHeard(t); pushTurn("you", t); setReply(say); pushTurn("signal", say); speak(say); setMode("idle"); return;
+      }
+
+      if (stagedTasks.length) {
+        const safeActions = otherActions.filter((a) => a.type !== "remove" && a.type !== "clear" && a.type !== "dedupe");
+        const { records } = await applyActions(safeActions, today, allTasks);
+        setLastActions(records);
+        lastAppliedRef.current = safeActions;
+        pendingDeletionsRef.current = { tasks: stagedTasks, label: stagedLabel };
+        setPendingDeleteCount(stagedTasks.length); setPendingDeleteLabel(stagedLabel);
+        queryClient.invalidateQueries({ queryKey: ["grid"] });
+        const warn = `Hold on — that would delete ${stagedTasks.length} ${stagedLabel}. Say "yes, delete them" to confirm, or "cancel" to keep them.`;
+        setHeard(t); pushTurn("you", t); setReply(warn); pushTurn("signal", warn); speak(warn);
+        setMode("idle");
+        return;
+      }
+
       const { count, records } = await applyActions(otherActions, today, allTasks);
       setLastActions(records);
+      lastAppliedRef.current = otherActions;
+      setRedoActions([]);
       if (count) {
         setNote(`${count} action${count > 1 ? "s" : ""} done`);
         queryClient.invalidateQueries({ queryKey: ["grid"] });
@@ -777,12 +1103,15 @@ export default function Donna() {
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
 
-  // Always listening (unless muted) — no wake word: anything you say is a command,
-  // including while Donna is speaking (barge-in). Pause only while a command is
-  // being captured/handled so we don't re-trigger mid-thought.
+  // Always listening (unless muted) — no wake word: anything you say is a command.
+  // The mic pauses whenever Donna isn't idle: while a command is being captured or
+  // handled (so we don't re-trigger mid-thought) AND while she's speaking. Pausing
+  // during speech is essential on phones — an open mic holds the audio session and
+  // her reply comes out inaudible, and it also stops the recognizer from mishearing
+  // her own voice and cutting her off. To interrupt her, tap the orb.
   useWakeWord({
-    enabled: !muted,
-    active: mode === "listening" || mode === "processing" || briefingActive,
+    enabled: !muted && !chatMode,
+    active: mode !== "idle" || briefingActive,
     onCommand: handleTranscript,
     echoText: spoken.text,   // ignore her own audio echoing back through the mic
     pauseMs: prefs.nudges?.pauseMs || 1500,
@@ -790,12 +1119,36 @@ export default function Donna() {
 
   // A fresh reply from Donna = a fresh set of questions → clear the answered marks.
   useEffect(() => { setAnsweredQ(new Set()); answeringRef.current = null; }, [reply]);
+  const [sendingBrief, setSendingBrief] = useState(false);
+  const sendTestBriefing = async () => {
+    if (sendingBrief) return;
+    setSendingBrief(true);
+    setNote("Sending a test briefing to your email…");
+    try {
+      const r = await base44.functions.invoke("donna", { route: "test-brief" });
+      const d = (r && r.data) || r || {};
+      if (d.sent) setNote(`Sent (${d.mode || "?"}${d.mode === "static" && d.reason ? ` — ${d.reason}` : ""}) — check your inbox.`);
+      else setNote(`Couldn't send${d.reason ? ` — ${d.reason}` : " — email not configured"}.`);
+    } catch {
+      setNote("Couldn't send the test briefing.");
+    } finally {
+      setSendingBrief(false);
+    }
+  };
+
   const toggleMute = () => {
     setMuted((v) => {
       const next = !v;
       try { localStorage.setItem("donna_muted", next ? "1" : "0"); } catch { /* ignore */ }
-      if (!next) primeTTS(); // unmuting is a gesture → unlock TTS + prompt mic
-      else { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } }
+      if (!next) {
+        primeTTS(); // unmuting is a gesture → unlock TTS + prompt mic
+      } else {
+        // Muting must release the mic completely — no orange dot while muted.
+        try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+        try { voice.stop(); } catch { /* ignore */ }   // release any push-to-talk capture
+        setBriefingActive(false);                        // stop the briefing's recognizer
+        setMode("idle");                                 // tears down the always-on wake word
+      }
       return next;
     });
   };
@@ -826,11 +1179,50 @@ export default function Donna() {
     window.speechSynthesis.getVoices();
     const onVoices = () => window.speechSynthesis.getVoices();
     window.speechSynthesis.addEventListener?.("voiceschanged", onVoices);
+
+    // Mobile browsers block speech until a user gesture has unlocked audio. Prime it
+    // once on the first tap/keypress anywhere so replies (which fire asynchronously,
+    // outside a gesture) are audible from then on.
+    const unlock = () => {
+      try {
+        window.speechSynthesis.resume();
+        const u = new SpeechSynthesisUtterance(" ");
+        u.volume = 0;
+        window.speechSynthesis.speak(u);
+      } catch { /* ignore */ }
+      // Prime the <audio> element so server-TTS replies can autoplay later.
+      try {
+        const a = ttsAudioRef.current || (ttsAudioRef.current = new Audio());
+        a.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAgD4AAIA+AAABAAgAZGF0YQAAAAA=";
+        a.play().then(() => { a.pause(); a.currentTime = 0; }).catch(() => {});
+      } catch { /* ignore */ }
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+
+    // Resume pump — Chrome's synth silently wedges (pauses) after idle/long text;
+    // nudging resume() when it's mid-speech but paused keeps audio flowing.
+    const pump = window.setInterval(() => {
+      try { const s = window.speechSynthesis; if (s && s.speaking && s.paused) s.resume(); } catch { /* ignore */ }
+    }, 3000);
+
     return () => {
       window.speechSynthesis.removeEventListener?.("voiceschanged", onVoices);
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.clearInterval(pump);
       try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
     };
   }, []);
+
+  // Keep the chat transcript pinned to the newest message.
+  useEffect(() => {
+    if (!chatMode) return;
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, chatMode, mode]);
 
   // Decide (once, on load) whether Signal has something worth asking about — i.e.
   // there are open commitments or open list items — and it hasn't nudged recently.
@@ -838,6 +1230,7 @@ export default function Donna() {
     let cancelled = false;
     (async () => {
       try {
+        if (chatModeRef.current) return; // chat mode is never proactive
         const until = Number(localStorage.getItem("jarvis_nudge_until") || 0);
         if (Date.now() < until) return;
         if (briefingPending()) return; // let the daily briefing own the alert first
@@ -894,13 +1287,86 @@ export default function Donna() {
       });
       const data = res && res.data ? res.data : res || {};
       const say = data.say ? String(data.say) : "";
-      if (say) { setReply(say); pushTurn("signal", say); speak(say); }
-      else setMode("idle");
+      if (say) {
+        // Remember what this nudge was about so a "skip/no/cancel" reply can
+        // actually dismiss the underlying commitment (not just quiet it 6h).
+        pendingNudgeRef.current = { commitments: (Array.isArray(commits) ? commits : []).map((c) => ({ id: c.id, text: c.text })), say, at: Date.now() };
+        setReply(say); pushTurn("signal", say); speak(say);
+      } else setMode("idle");
     } catch {
       setMode("idle");
       setNote("Couldn't reach the server — try again.");
     }
   };
+
+  // Choose which open commitment a dismissal refers to: keywords from the user's
+  // reply first, then the nudge's own wording, then the sole candidate.
+  const pickCommitment = (candidates, replyText, sayText, allowSingle = true) => {
+    const words = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length > 3);
+    const stop = new Set(["skip", "cancel", "forget", "about", "that", "this", "stop", "reminding", "bringing", "remind", "dont", "don", "want", "doing", "never", "mind", "drop", "them", "with", "make", "share", "shared", "list"]);
+    const overlap = (text, keys) => keys.filter((w) => !stop.has(w) && String(text || "").toLowerCase().includes(w)).length;
+    let best = null, bestScore = 0;
+    for (const c of candidates) {
+      const s = overlap(c.text, words(replyText)) * 2 + overlap(c.text, words(sayText));
+      if (s > bestScore) { bestScore = s; best = c; }
+    }
+    if (best && bestScore > 0) return best;
+    return allowSingle && candidates.length === 1 ? candidates[0] : null;
+  };
+
+  // ---- Create a calendar event (a dated Task), auto-creating its category with an
+  //      unused colour when it's new. Speaks a confirmation and offers Undo. ----
+  // Mirror a calendar event to Google (create or update); returns the event id or null.
+  const pushEventToGoogle = async (title, date, gcalId) => {
+    try {
+      const res = await base44.functions.invoke("donna", { route: "gcal-push", title, date, gcalId: gcalId || null });
+      const d = (res && res.data) ? res.data : res || {};
+      return d.ok ? (d.gcalId || null) : null;
+    } catch { return null; }
+  };
+  const deleteEventFromGoogle = (gcalId) => {
+    if (!gcalId) return;
+    base44.functions.invoke("donna", { route: "gcal-delete", gcalId }).catch(() => {});
+  };
+
+  async function createCalendarEvent({ title, date, category }) {
+    setMode("processing");
+    try {
+      let catKey = null, catLabel = null, madeNew = false;
+      if (category) {
+        const catsRaw = await base44.entities.Category.list().catch(() => []);
+        const cats = Array.isArray(catsRaw) ? catsRaw : [];
+        const key = slugify(category);
+        const existing = cats.find((c) => (c.label || "").toLowerCase() === category.toLowerCase() || (c.key || "") === key);
+        if (existing) { catKey = existing.key || key; catLabel = existing.label || category; }
+        else {
+          catKey = key; catLabel = category; madeNew = true;
+          const color = pickUnusedColor([...cats.map((c) => c.color), ...DEFAULT_CATEGORY_COLORS]);
+          await base44.entities.Category.create({ label: category, key: catKey, color }).catch(() => {});
+        }
+      }
+      const rec = await base44.entities.Task.create({ title, due_date: date, category: catKey || "work", status: "not_started" });
+      // Mirror to Google Calendar (best-effort); store the event id for later edits/sync.
+      pushEventToGoogle(title, date, null).then((gid) => { if (gid && rec?.id) base44.entities.Task.update(rec.id, { gcal_id: gid }).catch(() => {}); });
+      try {
+        const logged = await base44.entities.AgentAction.create({
+          action_type: "add", target: "tasks/" + (rec?.id || ""),
+          payload: { title, due_date: date, category: catKey },
+          executed_at: new Date().toISOString(),
+          undo_deadline: new Date(Date.now() + 86400000).toISOString(),
+        });
+        if (logged?.id) setLastActions([logged]);
+      } catch { /* undo logging is best-effort */ }
+      queryClient.invalidateQueries({ queryKey: ["grid"] });
+      const catPart = catLabel ? ` under ${catLabel}${madeNew ? " (new category)" : ""}` : "";
+      const say = `Added "${title}" on ${friendlyDate(date)}${catPart}.`;
+      setNote(say); setReply(say); pushTurn("signal", say); speak(say);
+    } catch {
+      setMode("idle");
+      const say = "I couldn't add that to your calendar — try again.";
+      setReply(say); pushTurn("signal", say); speak(say);
+    }
+  }
 
   // ---- create the entities the intent asked for, logging each to AgentAction ----
   // Returns { count, records } where records are the AgentAction docs (with id +
@@ -909,6 +1375,29 @@ export default function Donna() {
     if (!actions.length) return { count: 0, records: [] };
     let n = 0;
     const records = [];
+    // Progress feedback for dated imports (each mirrors to Google, which takes a beat).
+    const datedTotal = actions.filter((a) => a?.type === "add" && /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "")).length;
+    let datedDone = 0;
+
+    // Resolve a spoken category name (e.g. "Music") to a real Category KEY so
+    // imported dated tasks get a colour and show in the sidebar. Matches an existing
+    // category by key or label (case-insensitive); creates one if there's no match.
+    // Cached for the turn so a 20-item import does a single Category.list().
+    let catList = null;
+    const CAT_PALETTE = ["#4285f4", "#a855f7", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16"];
+    const resolveCategoryKey = async (name) => {
+      const label = (name || "").trim();
+      if (!label) return "work";
+      if (!catList) catList = (await base44.entities.Category.list().catch(() => [])) || [];
+      const lc = label.toLowerCase();
+      const hit = catList.find((c) => (c.key || "").toLowerCase() === lc || (c.label || "").toLowerCase() === lc);
+      if (hit?.key) return hit.key;
+      const key = lc.replace(/\s+/g, "_") + "_" + Date.now();
+      const color = CAT_PALETTE[catList.length % CAT_PALETTE.length];
+      try { const created = await base44.entities.Category.create({ label, color, key }); catList.push(created || { key, label, color }); }
+      catch { /* fall through — the task still saves and shows uncoloured */ }
+      return key;
+    };
     for (const a of actions) {
       try {
         let target = "";
@@ -929,7 +1418,7 @@ export default function Donna() {
           });
           target = "insights/" + (rec?.id || "");
         } else if (a.type === "write") {
-          const rec = await base44.entities.Page.create({ title: a.title, type: "document", content: a.body });
+          const rec = await base44.entities.Page.create({ title: a.title, type: "document", content: a.body, source: "donna" });
           target = "pages/" + (rec?.id || "");
         } else if (a.type === "grade") {
           const rec = await base44.entities.Grade.create({
@@ -939,20 +1428,63 @@ export default function Donna() {
           });
           target = "grades/" + (rec?.id || "");
         } else if (a.type === "add") {
-          // A new item on a named to-do list = a Task tagged with the list name.
-          const rec = await base44.entities.Task.create({
-            title: a.text, category: a.list || "Business", status: "not_started",
-          });
+          // A new item on a named list = a Task tagged with the list/category. When it
+          // carries a due_date (syllabus/HW import), it's a dated calendar item: set
+          // the date and resolve the category to a real key so it's coloured + filed.
+          const hasDate = /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || "");
+          // Idempotency: if an identical dated item already exists (same title + date),
+          // don't create a second one — this stops a re-imported syllabus from doubling.
+          if (hasDate && (allTasks || []).some((tk) => tk && tk.due_date === a.due_date && (tk.title || "").trim().toLowerCase() === (a.text || "").trim().toLowerCase())) {
+            continue;
+          }
+          const payload = { title: a.text, status: "not_started" };
+          if (hasDate) {
+            payload.due_date = a.due_date;
+            payload.category = await resolveCategoryKey(a.list);
+          } else {
+            payload.category = a.list || "Business";
+          }
+          const rec = await base44.entities.Task.create(payload);
           target = "tasks/" + (rec?.id || "");
+          // Mirror dated items to Google Calendar; stash the event id (on the task AND
+          // in this action's payload) so Undo removes the Google event too — no orphans.
+          if (hasDate && rec?.id) {
+            datedDone++;
+            if (datedTotal > 1) setNote(`Adding to your calendar… ${datedDone}/${datedTotal}`);
+            const gid = await pushEventToGoogle(a.text, a.due_date, null);
+            if (gid) { await base44.entities.Task.update(rec.id, { gcal_id: gid }).catch(() => {}); a.gcal_id = gid; }
+          }
         } else if (a.type === "complete" || a.type === "remove") {
           // Resolve which existing list item they meant, then complete/delete it.
           const match = findTask(allTasks, a.text, a.list);
           if (match?.id) {
-            if (a.type === "complete") await base44.entities.Task.update(match.id, { status: "done" });
-            else await base44.entities.Task.delete(match.id);
-            n++;
+            if (a.type === "complete") {
+              await base44.entities.Task.update(match.id, { status: "done" });
+              n++;
+            } else {
+              // Snapshot BEFORE deleting so the deletion can be fully undone (task
+              // re-created + re-pushed to Google Calendar).
+              const snapshot = {
+                title: match.title, category: match.category || null, status: match.status || "not_started",
+                due_date: match.due_date || null, gcal_id: match.gcal_id || null, notes: match.notes || null,
+              };
+              await base44.entities.Task.delete(match.id);
+              deleteEventFromGoogle(match.gcal_id);
+              n++;
+              const rec = { kind: "delete", snapshot };
+              try {
+                const logged = await base44.entities.AgentAction.create({
+                  action_type: "remove", target: "tasks/" + match.id, payload: { ...a, snapshot },
+                  executed_at: new Date().toISOString(),
+                  // Deletions stay restorable for 30 days (matches Google's Trash window).
+                  undo_deadline: new Date(Date.now() + 30 * 86400000).toISOString(),
+                });
+                if (logged?.id) rec.actionId = logged.id;
+              } catch { /* deletion still undoable via the in-memory record */ }
+              records.push(rec);
+            }
           }
-          continue; // executed in place; not part of the create-then-undo trail
+          continue; // executed in place
         } else {
           continue;
         }
@@ -973,9 +1505,68 @@ export default function Donna() {
     return { count: n, records };
   }
 
-  // ---- British TTS reply. Returns a Promise that resolves when speech ends, so
-  //      callers (e.g. the evening review) can speak lines in sequence. ----
+  // ---- Speak a reply. Prefers reliable server-side TTS (OpenAI → <audio>), which
+  //      sidesteps the flaky Web Speech API; falls back to the browser engine only
+  //      if the server route is unavailable. Returns a Promise that resolves when
+  //      speech ends, so callers (e.g. the evening review) can sequence lines. ----
   function speak(text) {
+    if (!text) { setMode("idle"); return Promise.resolve(); }
+    // Chat mode is text-only — the reply is already shown in the transcript.
+    if (chatModeRef.current) { setMode("idle"); return Promise.resolve(); }
+    if (!serverTtsOkRef.current) return browserSpeak(text);
+    return serverSpeak(text).then((played) => (played ? undefined : browserSpeak(text)));
+  }
+
+  // Fetch MP3 from the server and play it through a shared <audio> element. Resolves
+  // true if it actually played, false to fall back to the browser engine.
+  async function serverSpeak(text) {
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt browser TTS */ }
+    let data;
+    try {
+      const res = await base44.functions.invoke("donna", {
+        route: "tts", text,
+        voice: prefsRef.current.voice?.prefer || "female",
+        british: prefsRef.current.persona?.british !== false,
+      });
+      data = (res && res.data) ? res.data : res || {};
+    } catch { serverTtsOkRef.current = false; return false; }
+    if (!data || !data.audio) { if (data && data.error) serverTtsOkRef.current = false; return false; }
+
+    const audio = ttsAudioRef.current || (ttsAudioRef.current = new Audio());
+    audio.src = `data:${data.mime || "audio/mpeg"};base64,${data.audio}`;
+    audio.volume = 1;
+
+    setSpoken({ text, idx: 0 });
+    setMode("speaking"); voice.amplitudeRef.current = 1;
+    const startTs = Date.now();
+    const rate = Number(prefsRef.current.voice?.rate) || 1;
+    const timer = window.setInterval(() => {
+      const est = Math.min(text.length, (Date.now() - startTs) * 0.016 * rate * 60 / 60);
+      setSpoken((s) => (s.text === text ? { ...s, idx: Math.max(s.idx, est) } : s));
+    }, 80);
+
+    let played = true;
+    await new Promise((res) => {
+      let settled = false;
+      const done = () => { if (settled) return; settled = true; res(); };
+      audio.onended = done;
+      audio.onerror = () => { played = false; done(); };
+      audio.play().then(() => {}).catch(() => { played = false; done(); });
+      // Safety timeout in case events never fire.
+      window.setTimeout(() => { if (!settled) { played = audio.currentTime > 0; done(); } }, Math.max(4000, text.length * 90));
+    });
+
+    window.clearInterval(timer);
+    if (played) {
+      setSpoken((s) => (s.text === text ? { ...s, idx: text.length } : s));
+      window.setTimeout(() => setSpoken((s) => (s.text === text ? { text: "", idx: 0 } : s)), 800);
+    }
+    setMode("idle"); voice.amplitudeRef.current = 0;
+    return played;
+  }
+
+  // ---- Browser Web Speech fallback. Returns a Promise that resolves when speech ends. ----
+  function browserSpeak(text) {
     return new Promise((resolve) => {
       if (!ttsSupported || !text) { setMode("idle"); resolve(); return; }
       try {
@@ -1005,9 +1596,14 @@ export default function Donna() {
         };
         const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
         const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
+        // Chrome pauses the synth mid-utterance after ~15s; nudge it to keep talking.
+        let keepAlive = window.setInterval(() => {
+          try { if (synth.speaking && !synth.paused) synth.resume(); } catch { /* ignore */ }
+        }, 4000);
+        const stopKeepAlive = () => { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } };
         const finish = () => {
           if (done) return; done = true;
-          clearWatchdog(); stopTimer();
+          clearWatchdog(); stopTimer(); stopKeepAlive();
           setMode("idle"); voice.amplitudeRef.current = 0;
           resolve();
         };
@@ -1056,19 +1652,152 @@ export default function Donna() {
     });
   }
 
-  // Undo everything the last command created (within the 24h window).
+  // Undo everything the last command did — including restoring deleted events
+  // (re-created + re-pushed to Google). Stashes the actions so Redo can re-apply.
   async function undoLast() {
     if (!lastActions.length || undoing) return;
     setUndoing(true);
     try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     const n = await reverseMany(lastActions);
+    setRedoActions(lastAppliedRef.current || []);
     setLastActions([]);
-    setNote(n ? `Undone.` : "Nothing to undo.");
+    setNote(n ? `Undone — restored ${n} item${n > 1 ? "s" : ""}.` : "Nothing to undo.");
     setReply("");
     setMode("idle");
     queryClient.invalidateQueries({ queryKey: ["grid"] });
     queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
     setUndoing(false);
+  }
+
+  // Execute the bulk deletions that were staged for confirmation.
+  // Delete a concrete list of task objects, snapshotting each first so Undo restores
+  // them (task re-created + event re-pushed to Google). Returns records for Undo.
+  async function deleteTasksWithUndo(tasks) {
+    const records = [];
+    let n = 0;
+    for (const tk of tasks || []) {
+      if (!tk?.id) continue;
+      const snapshot = {
+        title: tk.title, category: tk.category || null, status: tk.status || "not_started",
+        due_date: tk.due_date || null, gcal_id: tk.gcal_id || null, notes: tk.notes || null,
+      };
+      try {
+        await base44.entities.Task.delete(tk.id);
+        deleteEventFromGoogle(tk.gcal_id);
+        n++;
+        const rec = { kind: "delete", snapshot };
+        try {
+          const logged = await base44.entities.AgentAction.create({
+            action_type: "remove", target: "tasks/" + tk.id, payload: { snapshot },
+            executed_at: new Date().toISOString(),
+            undo_deadline: new Date(Date.now() + 30 * 86400000).toISOString(),
+          });
+          if (logged?.id) rec.actionId = logged.id;
+        } catch { /* still undoable via the in-memory record */ }
+        records.push(rec);
+      } catch { /* one failure shouldn't sink the batch */ }
+    }
+    return { n, records };
+  }
+
+  async function confirmPendingDeletions() {
+    const pend = pendingDeletionsRef.current;
+    if (!pend || undoing) return;
+    pendingDeletionsRef.current = null; setPendingDeleteCount(0); setPendingDeleteLabel("");
+    setUndoing(true);
+    setNote("Deleting…");
+    const { n, records } = await deleteTasksWithUndo(pend.tasks || []);
+    setLastActions(records); lastAppliedRef.current = []; setRedoActions([]);
+    queryClient.invalidateQueries({ queryKey: ["grid"] });
+    queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+    queryClient.invalidateQueries({ queryKey: ["deleted-history"] });
+    const say = n ? `Deleted ${n} event${n !== 1 ? "s" : ""}. Tap Undo to bring them back.` : "I couldn't find those to delete.";
+    setNote(""); setReply(say); pushTurn("signal", say); speak(say);
+    setMode("idle");
+    setUndoing(false);
+  }
+  function cancelPendingDeletions() {
+    pendingDeletionsRef.current = null; setPendingDeleteCount(0); setPendingDeleteLabel("");
+    setNote("Kept them — nothing deleted.");
+  }
+
+  // Redo: re-apply the actions that were just undone.
+  async function redoLast() {
+    if (!redoActions.length || undoing) return;
+    setUndoing(true);
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+    const { count, records } = await applyActions(redoActions, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
+    setLastActions(records);
+    setRedoActions([]);
+    setNote(count ? `Redone ${count} action${count > 1 ? "s" : ""}.` : "Nothing to redo.");
+    setMode("idle");
+    queryClient.invalidateQueries({ queryKey: ["grid"] });
+    queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+    setUndoing(false);
+  }
+
+  // Upload a syllabus (PDF or image) → the assistant reads it, auto-creates a
+  // coloured category, and calendarizes every dated assignment (mirrored to Google,
+  // fully undoable as one import).
+  async function handleSyllabusUpload(file) {
+    if (!file) return;
+    // Some browsers report an empty file.type for PDFs — accept by extension too.
+    const name = (file.name || "").toLowerCase();
+    const okType = file.type === "application/pdf" || ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)
+      || /\.(pdf|png|jpe?g|webp|gif)$/.test(name);
+    if (!okType) { setNote("Upload a PDF or an image (PNG/JPG) of your syllabus."); return; }
+    const mediaType = file.type || (name.endsWith(".pdf") ? "application/pdf" : "");
+    if (file.size > 10 * 1024 * 1024) { setNote("That file's over 10MB — try a smaller PDF or a screenshot."); return; }
+    try {
+      setMode("processing");
+      setHeard(`Uploaded ${file.name}`); pushTurn("you", `Uploaded ${file.name}`); setReply(""); setNote("Uploading your syllabus…");
+      const up = await base44.integrations.Core.UploadFile({ file });
+      const fileUrl = up?.file_url;
+      if (!fileUrl) throw new Error("upload failed");
+      setNote("Reading your syllabus…");
+      const res = await base44.functions.invoke("donna", { route: "extract-syllabus", file_url: fileUrl, media_type: mediaType });
+      const data = res && res.data ? res.data : res || {};
+      if (data.error) {
+        const msg = data.error === "pdf-scanned"
+          ? "That PDF looks scanned (no selectable text). Take a screenshot of the pages and upload that instead."
+          : data.error === "pdf-unreadable"
+            ? "I couldn't read that PDF. Try a screenshot of it, or paste the text."
+            : data.error === "too-large" ? "That file's too big for me to read — try a smaller PDF or a screenshot."
+              : "I couldn't read that file. Try a clearer PDF or a screenshot of the syllabus.";
+        setReply(msg); pushTurn("signal", msg); speak(msg);
+        setNote(data.detail ? `Reason: ${data.detail}` : "");
+        setMode("idle"); return;
+      }
+      const cat = data.category || {};
+      const catName = (String(cat.name || "").trim().slice(0, 40)) || "Course";
+      const color = /^#[0-9a-fA-F]{6}$/.test(cat.color || "") ? cat.color : "#4285f4";
+      const assignments = (Array.isArray(data.assignments) ? data.assignments : [])
+        .filter((a) => a && a.title && /^\d{4}-\d{2}-\d{2}$/.test(a.due_date || ""));
+      if (!assignments.length) {
+        const m = "I couldn't find any assignments with due dates in that syllabus.";
+        setNote(""); setReply(m); pushTurn("signal", m); speak(m); setMode("idle"); return;
+      }
+      // Pre-create the category with the colour Donna chose, so the imported items
+      // are filed + coloured (applyActions will find it by name and reuse its key).
+      try {
+        const cats = (await base44.entities.Category.list().catch(() => [])) || [];
+        const lc = catName.toLowerCase();
+        if (!cats.some((c) => (c.label || "").toLowerCase() === lc || (c.key || "").toLowerCase() === lc)) {
+          await base44.entities.Category.create({ label: catName, color, key: lc.replace(/\s+/g, "_") + "_" + Date.now() });
+        }
+      } catch { /* the task still saves; worst case it's uncoloured */ }
+      const addActions = assignments.map((a) => ({ type: "add", list: catName, text: String(a.title).slice(0, 300), due_date: a.due_date }));
+      const allTasksNow = await base44.entities.Task.list("-created_date", 500).catch(() => []);
+      const { count, records } = await applyActions(addActions, todayKey(), Array.isArray(allTasksNow) ? allTasksNow : []);
+      setLastActions(records); lastAppliedRef.current = addActions; setRedoActions([]);
+      queryClient.invalidateQueries({ queryKey: ["grid"] });
+      queryClient.invalidateQueries({ queryKey: ["recent-actions"] });
+      const say = `Imported ${count} assignment${count !== 1 ? "s" : ""} into a new "${catName}" category and added them to your calendar. Tap Undo if it's not right.`;
+      setNote(""); setReply(say); pushTurn("signal", say); speak(say); setMode("idle");
+    } catch (err) {
+      setMode("idle"); setNote(err?.message || "That upload didn't work — try again.");
+    }
   }
 
   // Send the reviewed email draft via the user's SMTP (server-side).
@@ -1119,6 +1848,16 @@ export default function Donna() {
     try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(" ")); } catch { /* ignore */ }
   }
 
+  // Gesture-driven voice check — exercises the real speak() path (server audio first,
+  // browser engine fallback) so the test matches actual replies.
+  function testVoice() {
+    serverTtsOkRef.current = true; // give server TTS another shot on an explicit test
+    setNote("Testing voice…");
+    speak("Voice test. If you can hear this, I'm working.").then(() => {
+      setNote("Voice test done. If you heard nothing, make sure the browser tab isn't muted (right-click the tab → Unmute site) and the system volume/output device is up.");
+    });
+  }
+
   // Tap a question in the "To answer" box → answer it by voice (or the type box);
   // the next thing you say/type checks it off.
   const answerQuestion = (q) => {
@@ -1137,7 +1876,9 @@ export default function Donna() {
       // If the orb is pulsing to talk, a tap hears the nudge instead of listening.
       if (nudgeReady) { hearNudge(); return; }
       if (!voice.supported) return; // type box is the path
-      setHeard(""); setReply(""); setNote(""); setLastActions([]);
+      // NB: don't clear lastActions here — a bulk import's Undo must survive the
+      // user tapping the orb to say something else. It's replaced on the next action.
+      setHeard(""); setReply(""); setNote("");
       setMode("listening");
       voice.start();
     } else if (mode === "listening") {
@@ -1170,7 +1911,7 @@ export default function Donna() {
     idle: !voice.supported
       ? "Voice needs Chrome — type below"
       : muted
-      ? "Muted — tap the mic to talk"
+      ? ""
       : "Listening — just talk, no need to say “Donna”",
     listening: "Listening…",
     processing: "On it…",
@@ -1186,14 +1927,71 @@ export default function Donna() {
   const donnaQuestions = extractQuestions(reply);
 
   return (
+    <div className="flex h-full w-full overflow-hidden">
     <div
-      className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden"
+      className="relative flex flex-1 min-w-0 flex-col items-center justify-center overflow-hidden"
       style={{ background: "radial-gradient(circle at 50% 42%, #12151c 0%, #08090c 72%)" }}
     >
       <Link to="/Dashboard" className="absolute top-4 left-4 z-10 p-2 rounded-full text-gray-400 hover:text-gray-100 hover:bg-white/5 transition-colors" title="Back" aria-label="Back">
         <ArrowLeft className="h-5 w-5" />
       </Link>
-      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">Donna</h1>
+      <h1 className="absolute top-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-[0.35em] text-gray-500 uppercase">{chatMode ? "Chat" : "Donna"}</h1>
+
+      {/* Top-right controls — one flex row so they never collide on narrow screens. */}
+      <div className="absolute top-3.5 right-3 z-30 flex items-center gap-1.5">
+        {/* Widgets — the rail is desktop-only, so phones open the same stack as a sheet. */}
+        {!chatMode && isMobile && (
+          <button
+            type="button"
+            onClick={() => setShowWidgetSheet(true)}
+            className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+            title="Widgets"
+            aria-label="Widgets"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {/* Capture thoughts — record / paste / import, organized into your notes. */}
+        <button
+          type="button"
+          onClick={() => setShowThoughts(true)}
+          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-cyan-400/40 hover:text-cyan-200"
+          title="Capture thoughts — record, paste, or import"
+          aria-label="Capture thoughts"
+        >
+          <Brain className="h-3.5 w-3.5" /> <span className="hidden xs:inline sm:inline">Thoughts</span>
+        </button>
+        {/* Send yourself a test of the smart daily briefing email. */}
+        <button
+          type="button"
+          onClick={sendTestBriefing}
+          disabled={sendingBrief}
+          className="flex items-center gap-1.5 rounded-full border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 backdrop-blur-sm transition-colors hover:border-blue-400/40 hover:text-blue-200 disabled:opacity-50"
+          title="Send yourself a test briefing email"
+          aria-label="Send test briefing"
+        >
+          {sendingBrief ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+        </button>
+        {/* Mode switcher — full assistant (Donna) vs plain typed chat with the same powers. */}
+        <div className="flex items-center rounded-full border border-white/10 bg-black/40 p-0.5 text-[11px] backdrop-blur-sm">
+          <button
+            type="button"
+            onClick={() => setChatMode(false)}
+            className={`rounded-full px-2.5 py-1 font-medium transition-colors ${!chatMode ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400 hover:text-gray-200"}`}
+            title="Full assistant — voice, briefings, always listening"
+          >
+            Donna
+          </button>
+          <button
+            type="button"
+            onClick={() => setChatMode(true)}
+            className={`rounded-full px-2.5 py-1 font-medium transition-colors ${chatMode ? "bg-blue-500/25 text-blue-200" : "text-gray-400 hover:text-gray-200"}`}
+            title="Plain typed chat — same powers, no briefings or auto-talking"
+          >
+            Chat
+          </button>
+        </div>
+      </div>
 
       {/* Customize (Donna + dashboard). */}
       <button
@@ -1223,8 +2021,17 @@ export default function Donna() {
         <div className="absolute top-14 left-1/2 z-30 -translate-x-1/2">
           <div className="flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-500/15 px-4 py-2 text-sm font-medium text-cyan-100 shadow-lg backdrop-blur-sm">
             <Bell className="h-4 w-4 text-cyan-300" />
-            <span>Reminder — {reminderToast}</span>
-            <button type="button" onClick={() => setReminderToast("")} aria-label="Dismiss" className="ml-1 text-cyan-200/70 hover:text-cyan-100">
+            <span>Reminder — {reminderToast.title}</span>
+            {/* Skip = stop this recurring reminder for good (not just close the banner). */}
+            <button
+              type="button"
+              onClick={() => { if (reminderToast.id) removeReminder(reminderToast.id); lastReminderRef.current = null; setReminderToast(null); }}
+              className="ml-1 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-cyan-50 hover:bg-white/20"
+              title="Stop this reminder"
+            >
+              <Trash2 className="h-3 w-3" /> Skip
+            </button>
+            <button type="button" onClick={() => setReminderToast(null)} aria-label="Close" className="text-cyan-200/70 hover:text-cyan-100">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -1233,7 +2040,7 @@ export default function Donna() {
 
       {/* Routines editor overlay. */}
       {showRoutines && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowRoutines(false)}>
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-20 backdrop-blur-sm" onClick={() => setShowRoutines(false)}>
           <div onClick={(e) => e.stopPropagation()}>
             <RoutinesPanel reminders={reminders} onUpdate={updateReminder} onDelete={removeReminder} />
             <p className="mt-2 max-w-xs text-center text-[11px] text-gray-500">
@@ -1245,7 +2052,7 @@ export default function Donna() {
 
       {/* Customize overlay — tabbed: Donna (persona/voice/questions/habits/nudges) + Dashboard tiles. */}
       {showCustomize && (
-        <div className="absolute inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-16 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
+        <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-4 pt-16 backdrop-blur-sm" onClick={() => setShowCustomize(false)}>
           <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-2">
             <div className="flex gap-1 rounded-full border border-white/10 bg-white/5 p-1 text-xs">
               <button type="button" onClick={() => setCustomizeTab("donna")} className={`rounded-full px-3 py-1 ${customizeTab === "donna" ? "bg-cyan-500/20 text-cyan-200" : "text-gray-400"}`}>Donna</button>
@@ -1256,9 +2063,9 @@ export default function Donna() {
         </div>
       )}
 
-      {/* Proactive nudge: Donna asks permission to speak; tap to hear it. */}
-      {nudgeReady && mode === "idle" && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5">
+      {/* Proactive nudge: Donna asks permission to speak; tap to hear it. Donna mode only. */}
+      {nudgeReady && mode === "idle" && !chatMode && (
+        <div className="absolute top-14 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 md:top-3.5">
           <button
             type="button"
             onClick={hearNudge}
@@ -1276,14 +2083,10 @@ export default function Donna() {
         </div>
       )}
 
-      {/* The status "matrix" — tiles framing the orb (reads live entities). */}
-      <StatusGrid />
+      {/* Status widgets + recent-action undo now live in the right WidgetPanel. */}
 
-      {/* Recent orb actions still inside their 24h undo window. */}
-      <RecentActions />
-
-      {/* Morning look-ahead / evening habit review (speaks via the orb). */}
-      <DailyBriefing onSpeak={speak} onActive={setBriefingActive} />
+      {/* Morning look-ahead / evening habit review (speaks via the orb). Donna mode only. */}
+      {!chatMode && <DailyBriefing onSpeak={speak} onActive={setBriefingActive} muted={muted} />}
 
       {/* Donna's captions ABOVE the orb; your words small BELOW it. */}
       <div className="relative z-[6] flex flex-col items-center gap-2 px-4">
@@ -1329,7 +2132,7 @@ export default function Donna() {
 
       {/* When Donna asks several things, list them on the right so you can track answers. */}
       {donnaQuestions.length >= 2 && mode !== "listening" && (
-        <div className="absolute right-3 top-1/2 z-[8] hidden max-h-[64vh] w-60 -translate-y-1/2 overflow-y-auto rounded-2xl border border-cyan-400/20 bg-[#0e1015]/92 p-3 shadow-2xl backdrop-blur-md sm:block">
+        <div className="absolute right-3 top-1/2 z-[8] max-h-[60vh] w-[min(62vw,15rem)] -translate-y-1/2 overflow-y-auto rounded-2xl border border-cyan-400/20 bg-[#0e1015]/92 p-3 shadow-2xl backdrop-blur-md">
           <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80">Tap to answer</div>
           <ul className="flex flex-col gap-1.5">
             {donnaQuestions.map((q, i) => {
@@ -1357,19 +2160,61 @@ export default function Donna() {
       {/* Controls: undo (when available) + mic + always-available type fallback.
           Sits above the safe area and, crucially, above the orb in stacking order
           (z-10 > orb's z-6) so the Undo tap target is never eaten by the orb. */}
-      <div className="absolute left-0 right-0 z-10 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
-        {lastActions.length > 0 && mode !== "processing" && (
+      <div className="pointer-events-none absolute left-0 right-0 z-20 flex flex-col items-center gap-3" style={{ bottom: "calc(4rem + env(safe-area-inset-bottom) + 0.75rem)" }}>
+        {pendingDeleteCount > 0 && !chatMode && (
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-rose-400/40 bg-[#1a0e12]/95 px-3 py-1.5 shadow-xl shadow-black/50 backdrop-blur-md">
+            <AlertTriangle className="h-3.5 w-3.5 text-rose-300" />
+            <span className="text-xs text-rose-100">Delete {pendingDeleteCount} {pendingDeleteLabel || "items"}?</span>
+            <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-full bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
+            <button type="button" onClick={cancelPendingDeletions} className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
+          </div>
+        )}
+        {(lastActions.length > 0 || redoActions.length > 0) && mode !== "processing" && !chatMode && (
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-[#0b0d11]/90 p-1 shadow-xl shadow-black/50 backdrop-blur-md">
+            {lastActions.length > 0 && (
+              <button
+                type="button"
+                onClick={undoLast}
+                disabled={undoing}
+                className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-400/15 px-4 py-2 text-xs font-medium text-amber-100 hover:bg-amber-400/25 transition-colors disabled:opacity-50"
+              >
+                {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
+              </button>
+            )}
+            {redoActions.length > 0 && (
+              <button
+                type="button"
+                onClick={redoLast}
+                disabled={undoing}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/[0.08] px-4 py-2 text-xs font-medium text-gray-200 hover:bg-white/[0.15] transition-colors disabled:opacity-50"
+              >
+                {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+                Redo
+              </button>
+            )}
+          </div>
+        )}
+        {/* Shared hidden file picker for syllabus upload (used by both input rows). */}
+        {/* No `accept` filter: mixing extension + MIME tokens greys out PDFs in some
+            OS pickers. We validate the picked file in handleSyllabusUpload instead. */}
+        <input
+          ref={syllabusInputRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleSyllabusUpload(f); }}
+        />
+        <form onSubmit={submitTyped} className="pointer-events-auto flex items-center gap-2 w-[min(92vw,460px)]">
           <button
             type="button"
-            onClick={undoLast}
-            disabled={undoing}
-            className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-xs font-medium text-amber-200 hover:bg-amber-400/20 transition-colors disabled:opacity-50"
+            onClick={() => syllabusInputRef.current?.click()}
+            disabled={mode === "processing"}
+            title="Upload a syllabus (PDF or image) to calendarize"
+            aria-label="Upload syllabus"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] text-gray-300 hover:bg-white/[0.12] hover:text-cyan-200 transition-colors disabled:opacity-50"
           >
-            {undoing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-            Undo {lastActions.length > 1 ? `${lastActions.length} actions` : "that"}
+            <Paperclip className="h-4 w-4" />
           </button>
-        )}
-        <form onSubmit={submitTyped} className="flex items-center gap-2 w-[min(92vw,460px)]">
           {voice.supported && (
             <button
               type="button"
@@ -1384,6 +2229,15 @@ export default function Donna() {
               {!muted && <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />}
             </button>
           )}
+          <button
+            type="button"
+            onClick={testVoice}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-gray-400 transition-colors hover:text-cyan-200 hover:border-cyan-400/40"
+            title="Test Donna's voice"
+            aria-label="Test voice"
+          >
+            <Volume2 className="h-5 w-5" />
+          </button>
           <input
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
@@ -1396,9 +2250,98 @@ export default function Donna() {
         </form>
       </div>
 
+      {/* ---- Chat mode: a plain ChatGPT-style typed conversation over the same
+             pipeline (all of Donna's powers), covering the orb UI. ---- */}
+      {chatMode && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-[#0b0d11]">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 pr-28">
+            <Link to="/Dashboard" className="rounded-full p-1.5 text-gray-400 hover:bg-white/5 hover:text-gray-100" title="Back" aria-label="Back">
+              <ArrowLeft className="h-5 w-5" />
+            </Link>
+            <span className="text-xs font-semibold uppercase tracking-[0.3em] text-gray-500">Chat</span>
+            <span className="w-8" />
+          </div>
+
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+            {turns.length === 0 ? (
+              <div className="mx-auto mt-10 max-w-md text-center text-sm text-gray-500">
+                <p className="mb-2 text-gray-300">Chat with all of Donna's powers — quietly.</p>
+                <p>Log things, manage tasks, ask about your money, search the web, read your inbox. No briefings, no nudges, no talking back — just type. Switch to <span className="text-cyan-300">Donna</span> anytime for the full assistant.</p>
+              </div>
+            ) : (
+              <div className="mx-auto flex max-w-2xl flex-col gap-3">
+                {turns.map((tn) => (
+                  <div key={tn.id} className={`flex ${tn.who === "you" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm ${
+                      tn.who === "you" ? "bg-blue-600 text-white" : "bg-white/[0.06] text-gray-100"
+                    }`}>
+                      {tn.text}
+                    </div>
+                  </div>
+                ))}
+                {mode === "processing" && (
+                  <div className="flex justify-start">
+                    <div className="inline-flex items-center gap-2 rounded-2xl bg-white/[0.06] px-3.5 py-2 text-sm text-gray-400">
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-400" /> Thinking…
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {note && <p className="px-4 pb-1 text-center text-[11px] text-cyan-300">{note}</p>}
+          {pendingDeleteCount > 0 && (
+            <div className="mx-3 mb-1 flex items-center gap-2 rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-rose-300" />
+              <span className="flex-1 text-xs text-rose-100">Delete {pendingDeleteCount} {pendingDeleteLabel || "items"}?</span>
+              <button type="button" onClick={confirmPendingDeletions} disabled={undoing} className="rounded-md bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">Delete</button>
+              <button type="button" onClick={cancelPendingDeletions} className="rounded-md bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20">Keep</button>
+            </div>
+          )}
+          <form onSubmit={submitTyped} className="flex items-center gap-2 border-t border-white/10 p-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+            <button type="button" onClick={() => syllabusInputRef.current?.click()} disabled={mode === "processing"} title="Upload a syllabus (PDF or image)" aria-label="Upload syllabus" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.05] text-gray-300 hover:bg-white/[0.12] hover:text-cyan-200 disabled:opacity-50">
+              <Paperclip className="h-4 w-4" />
+            </button>
+            {lastActions.length > 0 && (
+              <button type="button" onClick={undoLast} disabled={undoing} title="Undo last" aria-label="Undo last" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-amber-400/30 bg-amber-400/10 text-amber-200 hover:bg-amber-400/20 disabled:opacity-50">
+                {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              </button>
+            )}
+            {redoActions.length > 0 && (
+              <button type="button" onClick={redoLast} disabled={undoing} title="Redo" aria-label="Redo" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/[0.06] text-gray-300 hover:bg-white/[0.12] disabled:opacity-50">
+                {undoing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCw className="h-4 w-4" />}
+              </button>
+            )}
+            <input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              autoFocus
+              placeholder="Message…"
+              className="flex-1 rounded-xl border border-white/10 bg-white/[0.05] px-3.5 py-2.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25"
+            />
+            <button type="submit" disabled={!typed.trim() || mode === "processing"} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white disabled:opacity-40 hover:bg-blue-500" aria-label="Send">
+              <Send className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Capture-thoughts panel — record/paste/import → organized into your notes. */}
+      {showThoughts && (
+        <ThoughtsPanel
+          onClose={() => setShowThoughts(false)}
+          onSaved={(title) => {
+            setShowThoughts(false);
+            setNote(`Saved "${title}" to your notes`);
+            queryClient.invalidateQueries({ queryKey: ["grid"] });
+          }}
+        />
+      )}
+
       {/* Email draft — review & edit, then send. Never sent automatically. */}
       {emailDraft && (
-        <div className="absolute inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center" onClick={() => !emailSending && setEmailDraft(null)}>
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center" onClick={() => !emailSending && setEmailDraft(null)}>
           <div
             className="w-full max-w-lg rounded-t-2xl border border-white/10 bg-[#0e1015] p-4 shadow-2xl sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
@@ -1448,6 +2391,90 @@ export default function Donna() {
                 Send
               </button>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+
+      {/* Right-hand widget panel (Donna mode only) — collapsible, edit via Customize.
+          A large widget takes its place at half the screen while it is expanded. */}
+      {!chatMode && !isMobile && expandedWidget !== "market" && (
+        <WidgetPanel
+          collapsed={widgetsCollapsed}
+          onToggleCollapse={toggleWidgets}
+          onEdit={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+          onExpandWidget={openWidget}
+        />
+      )}
+      {!chatMode && expandedWidget === "market" && (
+        <aside
+          className="fixed inset-0 z-[45] flex flex-col bg-[#0d0f13] md:static md:z-auto md:w-1/2 md:min-w-[380px] md:max-w-[780px] md:shrink-0 md:border-l md:border-white/[0.06] md:bg-[#0d0f13]/80 md:backdrop-blur-sm"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
+          <div className="flex items-center gap-1 border-b border-white/[0.05] px-4 py-3">
+            {/* On a phone this is the only way back, so it reads as a back arrow there. */}
+            <button
+              type="button" onClick={closeWidget}
+              title="Back to widgets" aria-label="Back to widgets"
+              className="-ml-1.5 mr-0.5 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-white/5 hover:text-gray-200 md:hidden"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Markets</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+              title="Add or remove widgets" aria-label="Edit widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
+            <button
+              type="button" onClick={closeWidget}
+              title="Collapse to the widget panel" aria-label="Collapse to the widget panel"
+              className="hidden rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200 md:block"
+            >
+              <Minimize2 className="h-4 w-4" />
+            </button>
+          </div>
+          {/* On a phone the whole card scrolls as one — stacked, its header block
+              alone would fill the screen and leave the event list no room. On md+
+              the card is pinned to the panel height and scrolls its own list.
+              The floating tab bar sits over the bottom of the screen on a phone. */}
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] md:overflow-hidden md:pb-3">
+            <WeekAheadWidget className="md:h-full" />
+          </div>
+        </aside>
+      )}
+
+      {/* Phones: the widget stack as a full-screen sheet, since the rail is md+. */}
+      {!chatMode && isMobile && showWidgetSheet && (
+        <div
+          className="fixed inset-0 z-40 flex flex-col bg-[#0d0f13]"
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
+          <div className="flex items-center gap-1 border-b border-white/[0.05] px-4 py-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Widgets</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => { setCustomizeTab("dashboard"); setShowCustomize(true); }}
+              title="Add or remove widgets" aria-label="Edit widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
+            <button
+              type="button" onClick={() => setShowWidgetSheet(false)}
+              title="Close" aria-label="Close widgets"
+              className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-white/5 hover:text-gray-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 pb-[calc(env(safe-area-inset-bottom)+4.5rem)]">
+            <WidgetStack onExpandWidget={openWidget} />
           </div>
         </div>
       )}

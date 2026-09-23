@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { Loader2, Calendar } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 const googleProvider = new GoogleAuthProvider();
 

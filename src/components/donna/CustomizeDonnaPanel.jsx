@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Settings2, Plus, Trash2, Power, Sparkles, Volume2, MessageCircleQuestion, ListChecks, BellRing, Link2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import {
-  loadPrefs, savePrefs, patchPrefs, TONES, VERBOSITIES, VOICE_PREFS, PROACTIVE,
+  loadPrefs, patchPrefs, TONES, VERBOSITIES, VOICE_PREFS, PROACTIVE,
   addCheckinQuestion, removeCheckinQuestion,
 } from "./settings";
 

@@ -278,7 +278,7 @@ function Card({ tile, compact, expanded, onToggle }) {
   );
 }
 
-export default function StatusGrid() {
+export default function StatusGrid({ variant = "float" }) {
   const { tiles } = useTileData();
   const [cfg, setCfg] = useState(loadDashCfg);
   const [expanded, setExpanded] = useState(null); // key of the expanded tile
@@ -296,6 +296,22 @@ export default function StatusGrid() {
 
   const visible = applyDashCfg(tiles, cfg);
   const toggle = (key) => setExpanded((cur) => (cur === key ? null : key));
+
+  // Panel variant: a single vertical stack for the Donna widget panel.
+  if (variant === "panel") {
+    return (
+      <div className="flex flex-col gap-2.5">
+        {visible.length === 0 ? (
+          <p className="px-1 text-[11px] text-gray-600">No widgets — add some from the edit button.</p>
+        ) : (
+          visible.map((t) => (
+            <Card key={t.key} tile={t} expanded={expanded === t.key} onToggle={() => toggle(t.key)} />
+          ))
+        )}
+      </div>
+    );
+  }
+
   const half = Math.ceil(visible.length / 2);
   const left = visible.slice(0, half);
   const right = visible.slice(half);

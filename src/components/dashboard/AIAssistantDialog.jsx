@@ -5,6 +5,97 @@ import { Sparkles, Send, Image, X, Loader2, User, Bot, Square, Undo2, Redo2 } fr
 import { base44 } from "@/api/base44Client";
 import ReactMarkdown from "react-markdown";
 
+// --- Deletion parsing (handled in the client, with confirmation, because the AI
+// backend once wiped the whole calendar via an unconfirmed "delete_all"). ---
+const norm = (s) => (s || "").trim().toLowerCase();
+
+function findDuplicateTasks(tasks) {
+  const seen = new Set();
+  const dups = [];
+  for (const t of tasks || []) {
+    const k = `${norm(t.title)}|${t.due_date || ""}`;
+    if (seen.has(k)) dups.push(t); else seen.add(k);
+  }
+  return dups;
+}
+
+// Tasks belonging to a named group — matched against the category KEY, the category
+// LABEL (via the categories list), or the term appearing in the task title.
+function tasksInGroup(tasks, term, categories = []) {
+  const q = norm(term);
+  if (q.length < 2) return [];
+  const catKeys = new Set((categories || []).filter((c) => {
+    const k = norm(c.key), l = norm(c.label);
+    return (k && (k.includes(q) || q.includes(k))) || (l && (l.includes(q) || q.includes(l)));
+  }).map((c) => c.key));
+  return (tasks || []).filter((t) => {
+    const c = norm(t.category), ti = norm(t.title);
+    return catKeys.has(t.category) || (c && (c.includes(q) || (q.includes(c) && c.length > 1))) || ti.includes(q);
+  });
+}
+
+// Words that are never a category name (verbs, articles, object nouns, fillers, and
+// common stopwords) — so "delete all the events that are under the musi category"
+// leaves only "musi".
+const DEL_FILLER = new Set(
+  ("delete remove clear get rid of wipe all any my the every of for in from under over about to into a an and or " +
+    "please can you could would should now today event events task tasks class classes assignment assignments " +
+    "homework hw calendar schedule everything them it stuff things this that these those whole entire " +
+    "thing want need make me are is am was were be been being have has had do does did will " +
+    "which who whom whose what when where why how category categories label labeled labelled tag tagged " +
+    "named called related associated marked only just also too very really some most more less " +
+    "put set on off up down out with without").split(/\s+/),
+);
+
+// If `text` is a deletion command, return { tasks, label, all } to delete; else null.
+// Rule that matters: if the command names ANY category/course term, scope to it —
+// NEVER fall through to deleting the whole calendar when a term is present.
+function parseDeletion(text, tasks, categories = []) {
+  const s = norm(text);
+  const hasVerb = /\b(delete|remove|get rid of|wipe)\b/.test(s) || /\bclear\s+(all|my|the|every|everything)/.test(s);
+  if (!hasVerb) return null;
+  if (/duplicate/.test(s)) return { tasks: findDuplicateTasks(tasks), label: "duplicate events" };
+
+  // Candidate category/course terms = the meaningful words left after removing fillers.
+  const terms = s.replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length >= 2 && !DEL_FILLER.has(w));
+  if (terms.length) {
+    // Prefer real CATEGORY matches (key or label contains a term) — that's exactly
+    // what "under the X category" means, and it avoids stray title-substring hits.
+    const catKeys = new Set();
+    for (const term of terms) {
+      for (const c of (categories || [])) {
+        const k = norm(c.key), l = norm(c.label);
+        if ((k && (k.includes(term) || term.includes(k))) || (l && (l.includes(term) || term.includes(l)))) catKeys.add(c.key);
+      }
+    }
+    let matched;
+    let label;
+    if (catKeys.size) {
+      matched = (tasks || []).filter((t) => catKeys.has(t.category));
+      label = `"${terms.join(" ")}" events`;
+    } else {
+      // No category matched — fall back to title/category-string contains.
+      const seen = new Set();
+      matched = [];
+      for (const term of terms) {
+        for (const tk of tasksInGroup(tasks, term, categories)) {
+          if (!seen.has(tk.id)) { seen.add(tk.id); matched.push(tk); }
+        }
+      }
+      label = `"${terms.join(" ")}" events`;
+    }
+    // Named a group → scope to it. If nothing matched, delete NOTHING (say so) —
+    // NEVER escalate to the whole calendar.
+    return { tasks: matched, label };
+  }
+
+  // No specific term at all → only now is it "everything", and only for explicit phrasing.
+  if (/\b(everything|all (of )?(my )?(tasks|events)|whole calendar|all of (them|it))\b/.test(s)) {
+    return { tasks: (tasks || []).slice(), label: "all your events", all: true };
+  }
+  return null;
+}
+
 export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categories = [] }) {
   const [messages, setMessages] = useState([
     {
@@ -15,6 +106,8 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
   const [input, setInput] = useState("");
   const [attachedImages, setAttachedImages] = useState([]); // { file, preview, url }
   const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false); // undo/redo/delete in flight
+  const [pendingDelete, setPendingDelete] = useState(null); // { tasks, label } awaiting confirm
   const [, forceUpdate] = useState(0);
   const undoStackRef = useRef([]);
   const redoStackRef = useRef([]);
@@ -50,6 +143,37 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
 
   const handleSend = async () => {
     if (!input.trim() && attachedImages.length === 0) return;
+
+    // SAFETY: if this is a deletion command, resolve it to a concrete task list HERE
+    // and require confirmation — never hand a bulk delete to the AI, which once wiped
+    // the whole calendar. Only intercept when there are no images to analyze.
+    if (input.trim() && attachedImages.length === 0) {
+      let currentTasks = [];
+      try {
+        const user = await base44.auth.me();
+        currentTasks = await base44.entities.Task.filter({ created_by: user.email }, "-due_date");
+      } catch { /* ignore */ }
+      const del = parseDeletion(input, currentTasks, categories);
+      if (del) {
+        const userText = input;
+        setInput("");
+        setMessages((prev) => [...prev, { role: "user", content: userText }]);
+        if (!del.tasks.length) {
+          const none = del.label.startsWith("duplicate")
+            ? "Good news — I don't see any duplicates to remove."
+            : `I don't see any ${del.label} to delete.`;
+          setMessages((prev) => [...prev, { role: "assistant", content: none }]);
+          return;
+        }
+        setPendingDelete(del);
+        setMessages((prev) => [...prev, {
+          role: "assistant",
+          content: `⚠️ That would delete **${del.tasks.length} ${del.label}**. This can't be un-asked — confirm below.`,
+        }]);
+        return;
+      }
+    }
+
     abortRef.current = false;
     setLoading(true);
 
@@ -110,11 +234,20 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
       const user = await base44.auth.me();
       const snapshotTasks = await base44.entities.Task.filter({ created_by: user.email });
 
-      // Handle delete_all specially — fetch all tasks and delete in parallel
-      if (actions.some(a => a.action === "delete_all")) {
-        await Promise.all(snapshotTasks.map(t => base44.entities.Task.delete(t.id)));
-        actionCount += snapshotTasks.length;
-      } else {
+      // SAFETY NET: never execute a mass delete the AI proposes without confirmation.
+      // delete_all → the whole calendar; many individual deletes → likely a mistake.
+      const wantsDeleteAll = actions.some(a => a.action === "delete_all");
+      const deleteIds = actions.filter(a => a.action === "delete" && a.id).map(a => a.id);
+      if (wantsDeleteAll || deleteIds.length > 3) {
+        const doomed = wantsDeleteAll ? snapshotTasks.slice() : snapshotTasks.filter(t => deleteIds.includes(t.id));
+        setPendingDelete({ tasks: doomed, label: wantsDeleteAll ? "all your events" : "events", all: wantsDeleteAll });
+        setMessages((prev) => [...prev, { role: "assistant", content: `⚠️ That would delete **${doomed.length} ${wantsDeleteAll ? "— your whole calendar" : "events"}**. Confirm below if that's really what you want.` }]);
+        setLoading(false);
+        return;
+      }
+
+      // Normal (non-bulk-delete) actions — mass deletes were already intercepted above.
+      {
         // Process categories and folders first (sequentially), then tasks in parallel
         const catActions = actions.filter(a => a.action === "create_category");
         const folderActions = actions.filter(a => a.action === "create_folder");
@@ -180,7 +313,37 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
     setLoading(false);
   };
 
+  // Execute a confirmed deletion: snapshot first (so Undo restores everything), then
+  // delete just the staged tasks.
+  const confirmDelete = async () => {
+    const del = pendingDelete;
+    if (!del || busy) return;
+    setBusy(true);
+    setPendingDelete(null);
+    try {
+      const user = await base44.auth.me();
+      const snapshotTasks = await base44.entities.Task.filter({ created_by: user.email });
+      await Promise.all(del.tasks.map((t) => base44.entities.Task.delete(t.id).catch(() => {})));
+      undoStackRef.current = [...undoStackRef.current, snapshotTasks];
+      redoStackRef.current = [];
+      onUpdated();
+      setMessages((prev) => [...prev, { role: "assistant", content: `Deleted ${del.tasks.length} ${del.label}. Hit Undo (top-right) to bring them back.` }]);
+    } catch {
+      setMessages((prev) => [...prev, { role: "assistant", content: "That delete didn't go through — try again." }]);
+    }
+    setBusy(false);
+  };
+  const cancelDelete = () => {
+    setPendingDelete(null);
+    setMessages((prev) => [...prev, { role: "assistant", content: "Okay — I've left everything where it is." }]);
+  };
+
   const handleUndo = async () => {
+    if (undoStackRef.current.length === 0 || busy) return;
+    setBusy(true);
+    try { await doUndo(); } finally { setBusy(false); }
+  };
+  const doUndo = async () => {
     if (undoStackRef.current.length === 0) return;
     const user = await base44.auth.me();
     const currentTasks = await base44.entities.Task.filter({ created_by: user.email });
@@ -199,6 +362,11 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
   };
 
   const handleRedo = async () => {
+    if (redoStackRef.current.length === 0 || busy) return;
+    setBusy(true);
+    try { await doRedo(); } finally { setBusy(false); }
+  };
+  const doRedo = async () => {
     if (redoStackRef.current.length === 0) return;
     const user = await base44.auth.me();
     const currentTasks = await base44.entities.Task.filter({ created_by: user.email });
@@ -227,7 +395,7 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg h-[85vh] flex flex-col p-0 gap-0 bg-[#1e1f20] border-white/10">
         <DialogHeader className="px-4 py-3 border-b border-white/10 flex-shrink-0">
-          <DialogTitle className="flex items-center justify-between text-sm font-semibold text-gray-200">
+          <DialogTitle className="flex items-center justify-between text-sm font-semibold text-gray-200 pr-9">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-blue-400" />
               AI Calendar Assistant
@@ -235,19 +403,19 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
             <div className="flex items-center gap-1">
               <button
                 onClick={handleUndo}
-                disabled={undoStackRef.current.length === 0}
+                disabled={undoStackRef.current.length === 0 || busy}
                 title="Undo last action"
                 className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <Undo2 className="h-4 w-4" />
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
               </button>
               <button
                 onClick={handleRedo}
-                disabled={redoStackRef.current.length === 0}
+                disabled={redoStackRef.current.length === 0 || busy}
                 title="Redo last action"
                 className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
               >
-                <Redo2 className="h-4 w-4" />
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Redo2 className="h-4 w-4" />}
               </button>
             </div>
           </DialogTitle>
@@ -307,6 +475,17 @@ export default function AIAssistantDialog({ open, onOpenChange, onUpdated, categ
           )}
           <div ref={bottomRef} />
         </div>
+
+        {/* Deletion confirmation bar — nothing bulk deletes without this. */}
+        {pendingDelete && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 flex-shrink-0">
+            <span className="flex-1 text-xs text-rose-100">Delete {pendingDelete.tasks.length} {pendingDelete.label}?</span>
+            <button type="button" onClick={confirmDelete} disabled={busy} className="rounded-lg bg-rose-500/80 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-500 disabled:opacity-50">
+              {busy ? "Deleting…" : "Delete"}
+            </button>
+            <button type="button" onClick={cancelDelete} disabled={busy} className="rounded-lg bg-white/10 px-3 py-1 text-[11px] font-medium text-gray-200 hover:bg-white/20 disabled:opacity-50">Keep</button>
+          </div>
+        )}
 
         {/* Image previews */}
         {attachedImages.length > 0 && (

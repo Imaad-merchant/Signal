@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Calendar as CalendarIcon, Type, Flag, Activity, MoreHorizontal, MessageCircle, Plus, ChevronDown, FileText } from "lucide-react";
+import { Calendar as CalendarIcon, Type, Flag, Activity, MessageCircle, Plus, FileText } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
 import { useAutosave } from "./useAutosave";
 import { format, parseISO } from "date-fns";

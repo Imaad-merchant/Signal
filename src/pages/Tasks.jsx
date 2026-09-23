@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, Check, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,14 +10,17 @@ import TaskCard from "../components/tasks/TaskCard";
 import AddTaskDialog from "../components/tasks/AddTaskDialog";
 import NotionSidebar from "../components/tasks/NotionSidebar";
 import DocsHome from "../components/tasks/DocsHome";
-import Whiteboard from "../components/tasks/Whiteboard";
+import MemoriesView from "../components/tasks/MemoriesView";
+// Lazy-loaded: the whiteboard (+ dompurify/html2canvas) is large and only needed
+// when a whiteboard page is opened, so it stays out of the initial bundle.
+const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
 import { ICON_MAP } from "../components/tasks/NotionSidebar";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { format, isSameDay, isToday, parseISO } from "date-fns";
+import { format, isToday, parseISO } from "date-fns";
 import { useIsMobile } from "../components/useIsMobile";
 
 const PULL_THRESHOLD = 70;
@@ -196,6 +199,33 @@ export default function Tasks() {
   // the sidebar/editor; trashed pages live in the "Recently deleted" view. Each
   // trashed subtree shares a `deleted_root_id` so it restores/purges as a unit.
   const activePages = useMemo(() => pages.filter(p => !p.deleted_at), [pages]);
+
+  // Indexed Obsidian vault + captures (read-only) — shown in the Memories view.
+  const { data: vaultNotes = [] } = useQuery({
+    queryKey: ["donna-notes", user?.email],
+    queryFn: async () => {
+      const r = await base44.functions.invoke("donna", { route: "list-notes" });
+      return (r && r.data && r.data.notes) || r?.notes || [];
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
+  // Memories = your workspace pages + Donna's vault notes (as read-only nodes).
+  const memoryItems = useMemo(() => {
+    const vault = vaultNotes.map((n) => ({
+      id: `vault_${n.id}`,
+      title: n.title || "Untitled",
+      content: n.content || "",
+      type: "document",
+      icon: "file",
+      source: "donna",
+      folder: n.folder || "",
+      updated_date: n.updated_date || null,
+      _vault: true,
+      obsidian: n.path ? `obsidian://open?path=${encodeURIComponent(n.path)}` : null,
+    }));
+    return [...activePages, ...vault];
+  }, [activePages, vaultNotes]);
   const trashedRoots = useMemo(
     () => pages
       .filter(p => p.deleted_at && (p.deleted_root_id === p.id || !p.deleted_root_id))
@@ -241,6 +271,14 @@ export default function Tasks() {
     setTemplatePicker({ parentId, section });
   };
 
+  const handleCreateFolder = async (parentId = null) => {
+    await base44.entities.Page.create({
+      title: "New folder", icon: "folder", is_folder: true, type: "folder",
+      parent_id: parentId || null, section: "private", status: "not_started", source: "user",
+    });
+    refreshPages();
+  };
+
   const handleCreateFromTemplate = async (template) => {
     const ctx = templatePicker || { parentId: null, section: "private" };
     setTemplatePicker(null);
@@ -253,6 +291,7 @@ export default function Tasks() {
       type: template.type || "whiteboard",
       content: template.content || "",
       whiteboard: template.whiteboard || "",
+      source: "user", // made by you in the workspace (vs Donna's memories)
     };
     const newPage = await base44.entities.Page.create(payload);
     refreshPages();
@@ -763,6 +802,7 @@ export default function Tasks() {
           selectedPageId={selectedPageId}
           trashCount={trashedRoots.length}
           onSelectHome={() => { setView("home"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
+          onSelectMemories={() => { setView("memories"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
           onSelectTrash={() => { setView("trash"); setSelectedPageId(null); if (isMobile) setSidebarOpen(false); }}
           onSelectPage={(p) => { setSelectedPageId(p.id); setView("page"); if (isMobile) setSidebarOpen(false); }}
           onCreatePage={handleCreatePage}
@@ -829,6 +869,13 @@ export default function Tasks() {
               onRestore={handleRestorePage}
               onPurge={handlePermanentDelete}
             />
+          ) : view === "memories" ? (
+            <MemoriesView
+              pages={memoryItems}
+              onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
+              onDelete={handleDeletePage}
+              onUpdate={handleUpdatePageById}
+            />
           ) : view === "page" && selectedPage ? (() => {
             const pageType = selectedPage.type || "whiteboard";
             const iconCfg = ICON_MAP[selectedPage.icon] || ICON_MAP.file;
@@ -862,18 +909,37 @@ export default function Tasks() {
               return (
                 <>
                   {header}
-                  <DocumentView key={selectedPage.id} page={selectedPage} onSave={updatePageById} onAIVisualize={handleAIVisualize} onAIEdit={handleAIEditDoc} />
+                  <DocumentView
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    onSave={updatePageById}
+                    onAIVisualize={handleAIVisualize}
+                    onAIEdit={handleAIEditDoc}
+                    onOpenLink={(title) => {
+                      const t = (title || "").trim().toLowerCase();
+                      const pg = activePages.find((p) => (p.title || "").trim().toLowerCase() === t);
+                      if (pg) { setSelectedPageId(pg.id); setView("page"); }
+                    }}
+                  />
                 </>
               );
             }
             // Default: whiteboard
-            return <Whiteboard key={selectedPage.id} page={selectedPage} onSave={updatePageById} headerSlot={header} />;
+            return (
+              <Suspense key={selectedPage.id} fallback={<div className="flex h-full items-center justify-center text-sm text-gray-500">Loading whiteboard…</div>}>
+                <Whiteboard page={selectedPage} onSave={updatePageById} headerSlot={header} />
+              </Suspense>
+            );
           })() : (
             <DocsHome
               pages={activePages}
               user={user}
               onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
-              onCreate={() => handleCreatePage(null, "private")}
+              onCreate={(type) => handleCreateFromTemplate({ type, icon: "file", title: "" })}
+              onDelete={handleDeletePage}
+              onUpdate={handleUpdatePageById}
+              onCreateFolder={handleCreateFolder}
+              onMove={handleUpdatePageById}
             />
           )}
         </div>

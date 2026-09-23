@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import {
@@ -6,9 +6,7 @@ import {
   addWeeks, subWeeks, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
   addDays, isSameMonth
 } from "date-fns";
-import { Link } from "react-router-dom";
-import { createPageUrl } from "@/utils";
-import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, Calendar, ChevronDown, Settings, CheckSquare, Sparkles, X, Folder, FolderOpen, Square, Check, Orbit } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Minus, ListTodo, CalendarDays, Menu, ChevronDown, CheckSquare, Sparkles, X, Folder, FolderOpen, Square } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import CategoryContextMenu from "../components/dashboard/CategoryContextMenu";
 import AIAssistantDialog from "../components/dashboard/AIAssistantDialog";
@@ -17,7 +15,6 @@ import AddTaskDialog2 from "../components/dashboard/AddTaskDialog2";
 import EditTaskDialog from "../components/dashboard/EditTaskDialog";
 import { MonthlyView, WeeklyView, DailyView, YearlyView } from "../components/dashboard/CalendarViews";
 import { useIsMobile } from "../components/useIsMobile";
-import CheckInLauncher from "../components/donna/CheckInLauncher";
 
 const VIEWS = ["Day", "Week", "Month", "Year"];
 const VIEW_MAP = { Day: "Daily", Week: "Weekly", Month: "Monthly", Year: "Yearly" };
@@ -78,6 +75,25 @@ function MiniCalendar({ currentMonth, selectedDate, setSelectedDate, onMonthChan
 export default function Dashboard() {
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
+
+  // Pull Google Calendar → tasks when the calendar opens (throttled), so events
+  // added/changed in Google show up here. App→Google push happens on each edit.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const last = Number(localStorage.getItem("gcal_last_sync") || 0);
+        if (Date.now() - last < 3 * 60 * 1000) return;
+        localStorage.setItem("gcal_last_sync", String(Date.now()));
+        const res = await base44.functions.invoke("donna", { route: "gcal-sync" });
+        const d = (res && res.data) ? res.data : res || {};
+        if (!cancelled && d.ok && ((d.created || 0) + (d.updated || 0) + (d.deleted || 0)) > 0) {
+          queryClient.invalidateQueries({ queryKey: ["tasks"] });
+        }
+      } catch { /* offline or Google not connected — ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [queryClient]);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showAIAssistant, setShowAIAssistant] = useState(false);
@@ -679,17 +695,17 @@ export default function Dashboard() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Bar */}
         <div className="flex items-center gap-1 px-3 py-1.5 border-b border-white/[0.08] flex-shrink-0 min-w-0 bg-[#232425]">
-          <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
+          <button onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Toggle sidebar" className="p-2 rounded-lg hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <Menu className="h-4 w-4" />
           </button>
 
           <button onClick={navigateToday} className="px-2.5 py-1.5 rounded-md border border-white/[0.08] text-[11px] text-gray-400 hover:bg-white/5 transition-colors font-medium flex-shrink-0">
             Today
           </button>
-          <button onClick={navigatePrev} className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
+          <button onClick={navigatePrev} aria-label="Previous" className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
-          <button onClick={navigateNext} className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
+          <button onClick={navigateNext} aria-label="Next" className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 transition-colors flex-shrink-0">
             <ChevronRight className="h-3.5 w-3.5" />
           </button>
 
@@ -710,18 +726,6 @@ export default function Dashboard() {
                 </button>
               ))}
             </div>
-
-
-            <CheckInLauncher />
-            <Link to="/cowork" className="p-2 rounded-full hover:bg-white/10 text-blue-400 hover:text-blue-300 transition-colors" title="Jarvis">
-              <Orbit className="h-5 w-5" />
-            </Link>
-            <Link to={createPageUrl("Tasks")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Tasks">
-              <CheckSquare className="h-5 w-5" />
-            </Link>
-            <Link to={createPageUrl("Settings")} className="hidden md:flex p-2 rounded-full hover:bg-white/10 text-gray-400 transition-colors" title="Settings">
-              <Settings className="h-5 w-5" />
-            </Link>
           </div>
         </div>
 
@@ -729,7 +733,7 @@ export default function Dashboard() {
          <div
            ref={calBodyRef}
            data-scroll-container
-           className="flex-1 min-h-0 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+           className="flex-1 min-h-0 overflow-auto relative pb-[calc(4rem+env(safe-area-inset-bottom))]"
            onTouchStart={handleCalTouchStart}
            onTouchMove={handleCalTouchMove}
            onTouchEnd={handleCalTouchEnd}

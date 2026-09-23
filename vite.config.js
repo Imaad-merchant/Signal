@@ -87,4 +87,20 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split big vendor libs into their own long-cacheable chunks so the main
+        // bundle is smaller and a lib update doesn't bust the whole app cache.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('recharts') || id.includes('/d3-') || id.includes('victory')) return 'charts';
+          if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
+          if (id.includes('framer-motion')) return 'motion';
+          if (id.includes('dompurify')) return 'dompurify';
+          return undefined;
+        },
+      },
+    },
+  },
 })

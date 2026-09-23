@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { ChevronDown, ChevronRight, Plus, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { fmtMoney } from "@/components/money/money";
 import { netWorthBreakdown } from "@/components/money/analytics";
 import { Avatar, Card, Empty, StatRow } from "@/components/money/ui";
@@ -157,8 +158,8 @@ function GroupList({ title, groups, total, tone = "good", onChange, empty }) {
     if (next.has(label)) next.delete(label); else next.add(label);
     return next;
   });
-  const update = async (a, bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(() => {}); onChange(); };
-  const del = async (a) => { await base44.entities.Account.delete(a.id).catch(() => {}); onChange(); };
+  const update = async (a, bal) => { await base44.entities.Account.update(a.id, { balance: Number(bal) || 0 }).catch(writeFailed); onChange(); };
+  const del = async (a) => { await base44.entities.Account.delete(a.id).catch(writeFailed); onChange(); };
 
   return (
     <Card title={title} right={<span className={`text-[11px] font-semibold ${tone === "bad" ? "text-[#c01530]" : "text-[#454b54]"}`}>{fmtMoney(total)}</span>}>
@@ -210,7 +211,7 @@ function ManualAccount({ onChange }) {
   const [balance, setBalance] = useState("");
   const add = async () => {
     if (!name.trim()) return;
-    await base44.entities.Account.create({ name: name.trim(), type, balance: Number(balance) || 0 }).catch(() => {});
+    await base44.entities.Account.create({ name: name.trim(), type, balance: Number(balance) || 0 }).catch(writeFailed);
     setName(""); setBalance(""); setOpen(false); onChange();
   };
   if (!open) {

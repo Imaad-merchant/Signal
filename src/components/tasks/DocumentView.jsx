@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAutosave } from "./useAutosave";
 import RichTextEditor from "./RichTextEditor";
+import { base44 } from "@/api/base44Client";
+
+// Upload an image file to storage and return its URL (used for paste/drop/insert).
+async function uploadImage(file) {
+  const { file_url } = await base44.integrations.Core.UploadFile({ file });
+  return file_url;
+}
 
 // Detect if content is HTML (vs. plain text / markdown from older docs)
 function isLikelyHTML(s) {
@@ -33,7 +40,7 @@ function legacyToHTML(s) {
   }).join("");
 }
 
-export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit }) {
+export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit, onOpenLink }) {
   const [html, setHtml] = useState(() => legacyToHTML(page.content || ""));
   const loadedRef = useRef(false);
   const mountedRef = useRef(true);
@@ -70,6 +77,8 @@ export default function DocumentView({ page, onSave, onAIVisualize, onAIEdit }) 
       placeholder="Start writing..."
       onAIVisualize={onAIVisualize}
       onAIEdit={onAIEdit ? handleAIEdit : undefined}
+      onOpenLink={onOpenLink}
+      uploadImage={uploadImage}
     />
   );
 }

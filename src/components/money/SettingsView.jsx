@@ -9,6 +9,7 @@
 import React, { useMemo, useState } from "react";
 import { Download, Landmark, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import { writeFailed } from "@/components/money/writes";
 import { fmtMoney, toCsv } from "@/components/money/money";
 import { lastSyncedLabel } from "@/components/money/analytics";
 import { Card, Empty } from "@/components/money/ui";
@@ -40,7 +41,7 @@ export default function SettingsView({ data, onChange = () => {} }) {
   // recreates the row.
   const removeAccount = async (id) => {
     setBusy(id);
-    await base44.entities.Account.delete(id).catch(() => {});
+    await base44.entities.Account.delete(id).catch(writeFailed);
     setBusy(""); setConfirming("");
     onChange();
   };

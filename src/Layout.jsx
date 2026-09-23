@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import MobileBottomTab from "./components/MobileBottomTab";
 
 export default function Layout({ children, currentPageName }) {
   const [themeColor, setThemeColor] = useState(() => localStorage.getItem("pulse_theme") || "#4285f4");
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     const sync = () => setThemeColor(localStorage.getItem("pulse_theme") || "#4285f4");
@@ -35,11 +36,11 @@ export default function Layout({ children, currentPageName }) {
       <AnimatePresence mode="wait">
         <motion.main
           key={currentPageName}
-          initial={{ opacity: 0, x: 16 }}
+          initial={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 16 }}
           animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -16 }}
-          transition={{ duration: 0.18, ease: "easeInOut" }}
-          className={isFullHeight ? "overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20 md:pb-8"}
+          exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: -16 }}
+          transition={{ duration: reduceMotion ? 0.08 : 0.18, ease: "easeInOut" }}
+          className={isFullHeight ? "overflow-hidden" : "p-4 sm:p-6 lg:p-8 pb-20"}
           style={isFullHeight ? { height: "calc(100dvh - env(safe-area-inset-top))" } : undefined}
         >
           {children}
