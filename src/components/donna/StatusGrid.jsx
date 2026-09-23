@@ -2,10 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
-  CalendarClock, ListChecks, Sparkles, GraduationCap, Mail, Cpu, Loader2, ChevronRight, LineChart,
+  CalendarClock, ListChecks, Sparkles, GraduationCap, Mail, Cpu, Loader2, ChevronRight,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import { loadDashCfg, applyDashCfg, isWidgetVisible } from "./dashboardConfig";
+import { loadDashCfg, applyDashCfg } from "./dashboardConfig";
 
 // The dark "matrix" status grid that frames the orb on /cowork.
 // Each tile reads existing entities and degrades gracefully: loading → empty → value.
@@ -278,25 +278,6 @@ function Card({ tile, compact, expanded, onToggle }) {
   );
 }
 
-// The big panel widgets have no home in the tile strip, so on phones they get a
-// launcher card that opens them full-screen (Donna listens for the event).
-function PanelWidgetLauncher({ label, sub, icon: Icon, widgetKey }) {
-  return (
-    <button
-      type="button"
-      onClick={() => window.dispatchEvent(new CustomEvent("donna-open-widget", { detail: widgetKey }))}
-      className="pointer-events-auto flex min-w-[8.5rem] shrink-0 flex-col rounded-xl border border-white/[0.07] bg-white/[0.03] px-3 py-2.5 text-left backdrop-blur-sm transition-all hover:border-white/15"
-    >
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500">
-        <Icon className="h-3 w-3 text-blue-300" />
-        {label}
-        <ChevronRight className="ml-auto h-3 w-3 text-gray-600" />
-      </span>
-      <span className="mt-1.5 text-[11px] text-gray-400">{sub}</span>
-    </button>
-  );
-}
-
 export default function StatusGrid({ variant = "float" }) {
   const { tiles } = useTileData();
   const [cfg, setCfg] = useState(loadDashCfg);
@@ -339,9 +320,6 @@ export default function StatusGrid({ variant = "float" }) {
     <div className="pointer-events-none absolute inset-0 z-[5]">
       {/* Mobile / tablet: a horizontally scrollable strip below the header. */}
       <div className="lg:hidden pointer-events-auto absolute top-14 left-0 right-0 flex items-start gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {isWidgetVisible("market", cfg) && (
-          <PanelWidgetLauncher widgetKey="market" label="Markets" sub="Week ahead" icon={LineChart} />
-        )}
         {visible.map((t) => (
           <Card key={t.key} tile={t} compact expanded={expanded === t.key} onToggle={() => toggle(t.key)} />
         ))}

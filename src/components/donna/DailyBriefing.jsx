@@ -364,7 +364,7 @@ export default function DailyBriefing({ onSpeak, onActive, muted = false }) {
       {/* One clean prompt: Donna offers the briefing; tap to hear it. No stray icon
           button — this pill (styled like the proactive nudge) is the single trigger. */}
       {!open && !dismissed && loadPrefs().nudges.briefing !== false && (
-        <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5">
+        <div className="absolute top-14 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1.5 md:top-3.5">
           <button
             type="button"
             onClick={openBriefing}

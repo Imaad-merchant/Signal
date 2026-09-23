@@ -1,29 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { PanelRightClose, PanelRightOpen, SlidersHorizontal } from "lucide-react";
-import StatusGrid from "./StatusGrid";
-import RecentActions from "./RecentActions";
-import DeletedHistory from "./DeletedHistory";
-import WeekAheadWidget from "@/components/markets/WeekAheadWidget";
-import { isWidgetVisible, loadDashCfg } from "./dashboardConfig";
+import WidgetStack from "./WidgetStack";
 
-// The right-hand widget panel on the Donna screen: the large panel widgets first,
-// then the status widgets (today, open, grades, inbox, …) stacked vertically.
-// Collapsible, and its widgets are managed via the dashboard section of Customize
-// (onEdit) — including the large ones, which switch off from the same list.
+// The right-hand widget panel on the Donna screen — the desktop home for the widget
+// stack. Collapsible, and its widgets are managed via the dashboard section of
+// Customize (onEdit). Phones get the same stack from the Widgets sheet instead.
 export default function WidgetPanel({ collapsed, onToggleCollapse, onEdit, onExpandWidget }) {
-  const [cfg, setCfg] = useState(loadDashCfg);
-
-  // Stay in step with Customize (and with anything Donna changes by voice).
-  useEffect(() => {
-    const onChange = () => setCfg(loadDashCfg());
-    window.addEventListener("donna-dash-change", onChange);
-    window.addEventListener("storage", onChange);
-    return () => {
-      window.removeEventListener("donna-dash-change", onChange);
-      window.removeEventListener("storage", onChange);
-    };
-  }, []);
-
   if (collapsed) {
     return (
       <div className="hidden md:flex shrink-0 flex-col items-center border-l border-white/[0.06] bg-[#0d0f13]/80 px-1.5 py-3 backdrop-blur-sm">
@@ -45,13 +27,8 @@ export default function WidgetPanel({ collapsed, onToggleCollapse, onEdit, onExp
           <PanelRightClose className="h-4 w-4" />
         </button>
       </div>
-      <div className="relative flex-1 space-y-3 overflow-y-auto p-3 pt-3">
-        <RecentActions />
-        <DeletedHistory />
-        {isWidgetVisible("market", cfg) && (
-          <WeekAheadWidget compact onExpand={onExpandWidget ? () => onExpandWidget("market") : null} />
-        )}
-        <StatusGrid variant="panel" />
+      <div className="relative flex-1 overflow-y-auto p-3 pt-3">
+        <WidgetStack onExpandWidget={onExpandWidget} />
       </div>
     </aside>
   );
