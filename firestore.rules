@@ -171,6 +171,18 @@ service cloud.firestore {
       allow update: if canUpdate();
       allow create: if isCreatingOwner();
     }
+    // Savings goals for the Money section — created and edited by the owner.
+    match /goals/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
+    // Credit score readings, entered by the owner (no bureau integration).
+    match /credit_scores/{docId} {
+      allow read, delete: if isOwner();
+      allow update: if canUpdate();
+      allow create: if isCreatingOwner();
+    }
     // Daily net-worth snapshots. Written server-side by the plaid-sync cron via
     // the Admin SDK (which bypasses rules); the client only ever reads them.
     match /networth_snapshots/{docId} {

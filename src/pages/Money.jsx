@@ -16,6 +16,9 @@ import NetWorthView from "@/components/money/NetWorthView";
 import SpendingView from "@/components/money/SpendingView";
 import RecurringView from "@/components/money/RecurringView";
 import TransactionsView from "@/components/money/TransactionsView";
+import GoalsView from "@/components/money/GoalsView";
+import CreditView from "@/components/money/CreditView";
+import SettingsView from "@/components/money/SettingsView";
 
 const VIEW_KEY = "money_view";
 
@@ -67,6 +70,8 @@ export default function Money() {
   const subsQ = useQuery({ queryKey: ["money", "subscriptions"], queryFn: () => base44.entities.Subscription.list("-created_date", 200) });
   const budgetsQ = useQuery({ queryKey: ["money", "budgets"], queryFn: () => base44.entities.Budget.list("-created_date", 100).catch(() => []) });
   const rulesQ = useQuery({ queryKey: ["money", "rules"], queryFn: () => base44.entities.CategoryRule.list("-created_date", 200).catch(() => []) });
+  const goalsQ = useQuery({ queryKey: ["money", "goals"], queryFn: () => base44.entities.Goal.list("-created_date", 100).catch(() => []) });
+  const creditQ = useQuery({ queryKey: ["money", "credit"], queryFn: () => base44.entities.CreditScore.list("-date", 100).catch(() => []) });
 
   // Surface read failures (the usual cause is Firestore rules not published for
   // the money collections — server writes succeed via Admin, client reads deny).
@@ -77,6 +82,8 @@ export default function Money() {
   const transactions = useMemo(() => (Array.isArray(txQ.data) ? txQ.data : []), [txQ.data]);
   const budgets = useMemo(() => (Array.isArray(budgetsQ.data) ? budgetsQ.data : []), [budgetsQ.data]);
   const rules = useMemo(() => (Array.isArray(rulesQ.data) ? rulesQ.data : []), [rulesQ.data]);
+  const goals = useMemo(() => (Array.isArray(goalsQ.data) ? goalsQ.data : []), [goalsQ.data]);
+  const creditScores = useMemo(() => (Array.isArray(creditQ.data) ? creditQ.data : []), [creditQ.data]);
   const manualSubs = useMemo(
     () => (Array.isArray(subsQ.data) ? subsQ.data : []).filter((s) => s.active !== false),
     [subsQ.data],
@@ -99,12 +106,12 @@ export default function Money() {
     const byCat = spendingWithDelta(transactions, key)
       .map((c) => ({ category: c.category, total: c.amount, pct: c.pct, delta: c.delta }));
     return {
-      accounts, transactions, budgets, subs, rules,
+      accounts, transactions, budgets, subs, rules, goals, creditScores,
       netWorth, monthSpend, monthIncome, byCat,
       subsMonthly: subs.reduce((s, x) => s + monthlyCost(x), 0),
       spendDelta: lastSpend > 0 ? ((monthSpend - lastSpend) / lastSpend) * 100 : null,
     };
-  }, [accounts, transactions, budgets, subs, rules]);
+  }, [accounts, transactions, budgets, subs, rules, goals, creditScores]);
 
   const [banking, setBanking] = useState("");
   const [bankMsg, setBankMsg] = useState("");
@@ -167,6 +174,9 @@ export default function Money() {
             {view === "budgets" && <BudgetsView data={data} onChange={invalidate} />}
             {view === "networth" && <NetWorthView data={data} onChange={invalidate} />}
             {view === "transactions" && <TransactionsView data={data} onChange={invalidate} />}
+            {view === "goals" && <GoalsView data={data} onChange={invalidate} />}
+            {view === "credit" && <CreditView data={data} onChange={invalidate} />}
+            {view === "settings" && <SettingsView data={data} onChange={invalidate} />}
           </div>
         </div>
       </div>

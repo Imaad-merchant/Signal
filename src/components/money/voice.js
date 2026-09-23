@@ -1,6 +1,6 @@
 import { base44 } from "@/api/base44Client";
 import {
-  CATEGORIES, fmtMoney, detectSubscriptions, monthlyCost, yearlyCost, normMerchant,
+  CATEGORIES, fmtMoney, detectSubscriptions, monthlyCost, yearlyCost, normMerchant, savedFor, bandFor,
 } from "@/components/money/money";
 import { resolveCategory } from "@/components/money/rules";
 import { monthKey, spendingWithDelta, upcomingDays, netWorthBreakdown } from "@/components/money/analytics";
@@ -31,6 +31,9 @@ export function parseMoneyQuery(text) {
     return { kind: "spend", period, category, merchant };
   }
   if (/\bbudget\b/.test(s)) return { kind: "budget" };
+  if (/\b(goals?|saving up|savings goal|emergency fund)\b/.test(s)) return { kind: "goals" };
+  // "my credit card" is a bills/upcoming question, not a score question.
+  if (/\bcredit score\b|\bfico\b|\bmy credit\b(?!\s*card)/.test(s)) return { kind: "credit" };
   if (/\b(upcoming|due soon|coming up|bills? due)\b/.test(s)) return { kind: "upcoming" };
   return null;
 }
@@ -45,6 +48,33 @@ const periodLabel = (p) => (p === "today" ? "today" : p === "week" ? "this week"
 
 // Answer a parsed money query by reading the user's data. Returns a spoken string.
 export async function answerMoneyQuery(q) {
+  // Goals and credit readings are only needed by their own intents, so they
+  // are fetched lazily rather than on every money question.
+  if (q.kind === "goals") {
+    const goals = await base44.entities.Goal.list("-created_date", 100).catch(() => []);
+    const list = Array.isArray(goals) ? goals : [];
+    if (!list.length) return "You haven't set any savings goals yet. You can add one in the Goals view.";
+    const saved = list.reduce((s, g) => s + savedFor(g), 0);
+    const target = list.reduce((s, g) => s + (Number(g.target) || 0), 0);
+    const closest = list
+      .filter((g) => (Number(g.target) || 0) > 0)
+      .sort((a, b) => (savedFor(b) / (Number(b.target) || 1)) - (savedFor(a) / (Number(a.target) || 1)))[0];
+    const pct = closest ? Math.round((savedFor(closest) / (Number(closest.target) || 1)) * 100) : 0;
+    return `You've saved ${fmtMoney(saved)} of ${fmtMoney(target)} across ${list.length} goal${list.length === 1 ? "" : "s"}.${closest ? ` ${closest.name} is furthest along at ${pct} percent.` : ""}`;
+  }
+
+  if (q.kind === "credit") {
+    const rows = await base44.entities.CreditScore.list("-date", 100).catch(() => []);
+    const list = (Array.isArray(rows) ? rows : []).slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    if (!list.length) return "You haven't recorded a credit score yet. Signal doesn't pull from a bureau — you can record one in the Credit Score view.";
+    const latest = list[0];
+    const prev = list[1];
+    const band = bandFor(latest.score).label.toLowerCase();
+    const delta = prev ? (Number(latest.score) || 0) - (Number(prev.score) || 0) : null;
+    const move = delta == null || delta === 0 ? "" : ` That's ${Math.abs(delta)} point${Math.abs(delta) === 1 ? "" : "s"} ${delta > 0 ? "up" : "down"} from your last check.`;
+    return `Your last recorded credit score was ${latest.score}, which is ${band}.${move}`;
+  }
+
   const [accounts, transactions, subsRaw, budgetsRaw, rulesRaw] = await Promise.all([
     base44.entities.Account.list("-created_date", 100).catch(() => []),
     base44.entities.Transaction.list("-date", 2000).catch(() => []),

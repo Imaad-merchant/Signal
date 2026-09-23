@@ -203,6 +203,12 @@ export const base44 = {
     // Daily assets/debts/net snapshot, written by the plaid-sync cron, read by
     // the Net Worth trend chart.
     NetWorthSnapshot: createEntityHandler("networth_snapshots"),
+    // Savings goals (Rocket Money's Goals screen). Contributions live on the
+    // goal doc as an array rather than a second collection — the history is
+    // short and always read together with the goal it belongs to.
+    Goal: createEntityHandler("goals"),
+    // Credit score readings, one doc per check, charted as a history line.
+    CreditScore: createEntityHandler("credit_scores"),
   },
 
   functions: {

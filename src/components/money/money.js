@@ -228,3 +228,78 @@ function csvRows(text) {
   }
   return rows;
 }
+
+// ---- Goals -----------------------------------------------------------------
+// A Goal is { name, target, saved, target_date, kind, contributions[] }.
+
+const contributionsOf = (g) => (Array.isArray(g?.contributions) ? g.contributions : []);
+
+// Saved amount is the stored total if present, else the sum of contributions —
+// a goal created with an opening balance has one without the other.
+export function savedFor(goal) {
+  const stored = Number(goal?.saved);
+  if (Number.isFinite(stored) && stored !== 0) return stored;
+  return contributionsOf(goal).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+}
+
+// Monthly pace needed to land the goal on its target date.
+export function paceFor(goal) {
+  const target = Number(goal?.target) || 0;
+  const remaining = Math.max(0, target - savedFor(goal));
+  if (!goal?.target_date || remaining <= 0) return null;
+  const end = new Date(goal.target_date);
+  if (Number.isNaN(end.getTime())) return null;
+  const months = Math.max(1, Math.round((end - new Date()) / (1000 * 60 * 60 * 24 * 30.44)));
+  return { perMonth: remaining / months, months, remaining, late: end < new Date() };
+}
+
+export { contributionsOf };
+
+// ---- Credit score ----------------------------------------------------------
+export const SCORE_MIN = 300;
+export const SCORE_MAX = 850;
+
+// FICO bands, worst -> best. `at` is the lower bound of each band.
+export const BANDS = [
+  { at: 300, label: "Poor", color: "#ef4444" },
+  { at: 580, label: "Fair", color: "#f97316" },
+  { at: 670, label: "Good", color: "#eab308" },
+  { at: 740, label: "Very Good", color: "#22c55e" },
+  { at: 800, label: "Exceptional", color: "#10b981" },
+];
+
+export function bandFor(score) {
+  const s = Number(score) || 0;
+  let band = BANDS[0];
+  for (const b of BANDS) if (s >= b.at) band = b;
+  return band;
+}
+
+// ---- CSV export ------------------------------------------------------------
+// One CSV cell. Quotes wrap everything so embedded commas, quotes and newlines
+// survive; a leading =/+/-/@ is prefixed with a quote so a spreadsheet doesn't
+// evaluate a merchant name as a formula.
+function csvCell(value) {
+  const s = String(value ?? "");
+  // Numbers are written through untouched — a spend is negative, and prefixing
+  // it would make the whole Amount column import as text and stop it summing.
+  // The guard is only for text a spreadsheet would otherwise evaluate.
+  const isNumber = typeof value === "number" || /^-?\d+(\.\d+)?$/.test(s);
+  const safe = !isNumber && /^[=+\-@]/.test(s) ? `'${s}` : s;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+export const CSV_COLUMNS = ["Date", "Merchant", "Category", "Amount", "Account", "Note", "Pending", "Ignored"];
+
+// `accounts` maps the stored account_id to the name a human recognises — the
+// raw id is a Firestore doc key and is useless in a spreadsheet. Unknown ids
+// fall back to the id itself so nothing silently disappears.
+export function toCsv(transactions, accounts = []) {
+  const nameById = new Map((accounts || []).map((a) => [a.id, a.name]));
+  const rows = (transactions || []).map((t) => [
+    t.date, t.merchant, t.category, Number(t.amount) || 0,
+    t.account_id ? (nameById.get(t.account_id) || t.account_id) : "",
+    t.note || "", t.pending ? "yes" : "no", t.ignored ? "yes" : "no",
+  ]);
+  return [CSV_COLUMNS, ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n");
+}
