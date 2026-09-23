@@ -32,7 +32,7 @@ export default function MobileBottomTab({ currentPageName }) {
               key={page}
               onClick={() => handleTabPress(page)}
               title={label}
-              className={`group relative flex flex-col items-center justify-center gap-[3px] rounded-xl px-3.5 py-1.5 transition-colors ${
+              className={`group relative flex flex-col items-center justify-center gap-[3px] rounded-xl px-2.5 py-1.5 transition-colors sm:px-3.5 ${
                 active ? "text-blue-300" : "text-gray-500 hover:text-gray-300"
               }`}
             >

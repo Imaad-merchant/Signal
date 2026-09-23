@@ -94,7 +94,7 @@ function ChatMessage({ msg }) {
 }
 
 export default function Markets() {
-  const [symbol, setSymbol] = useState("NQ=F");
+  const [symbol, setSymbol] = useState("ES=F");
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
@@ -177,7 +177,7 @@ SD Levels anchored to London Mean:
           <input
             value={symbol}
             onChange={e => setSymbol(e.target.value.toUpperCase())}
-            placeholder="Ticker (e.g. NQ=F)"
+            placeholder="Ticker (e.g. ES=F)"
             className="border border-white/10 rounded-xl px-3 py-2 text-sm w-32 focus:outline-none focus:ring-2 bg-white/5 text-gray-100 placeholder-gray-500 focus:ring-amber-400/40"
           />
           <select

@@ -1,11 +1,16 @@
-// Markets terminal endpoint.
+// Markets terminal endpoint. Three actions, all behind the Firebase auth check:
+//   getData   — intraday bars for a ticker, with the London-session SD stats and the
+//               hourly volatility profile the page charts.
+//   weekAhead — the week's event-risk map and directional bias (see below).
+//   chat      — the research chat, answering against the current SD levels.
 //
-// `weekAhead` is the live one: it builds the week's macro + micro event calendar
+// `weekAhead` builds the week's macro + micro event calendar
 // from _econCalendar.js (pure, offline) and overlays a market snapshot pulled from
 // Yahoo's public chart endpoint to size the expected move and score the directional
 // bias. The market overlay is best-effort — if the fetch fails the calendar, the
 // day-by-day risk map and the event reaction notes are all still returned.
 import { verifyAuth } from "./_auth.js";
+import { callLLM } from "./_llm.js";
 import {
   weekOf, buildWeekEvents, scoreWeek, computeBias, sessionOf, fomcCoverage,
 } from "./_econCalendar.js";
@@ -42,6 +47,60 @@ async function fetchCloses(symbol) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Hourly bars for a ticker over the last `days` sessions, for the price chart and
+// the session stats. Same public chart endpoint as the daily closes above.
+async function fetchIntraday(symbol, days) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`
+    + `?range=${encodeURIComponent(days)}d&interval=1h&includePrePost=false`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: controller.signal });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    const stamps = result?.timestamp;
+    const quote = result?.indicators?.quote?.[0];
+    if (!stamps?.length || !quote) return null;
+    const rows = stamps.map((ts, i) => ({
+      time: new Date(ts * 1000).toISOString(),
+      hour: new Date(ts * 1000).getUTCHours(),
+      open: quote.open?.[i], high: quote.high?.[i], low: quote.low?.[i],
+      close: quote.close?.[i], volume: quote.volume?.[i],
+    })).filter((r) => typeof r.close === "number");
+    return rows.length ? rows : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// London-session mean and standard deviation (the anchor the page's SD levels hang
+// off), the average hourly range, and the NY-open print.
+function sessionStats(rows) {
+  const london = rows.filter((r) => r.hour >= 2 && r.hour <= 5);
+  const closes = (london.length ? london : rows).map((r) => r.close);
+  const m = closes.reduce((a, b) => a + b, 0) / closes.length;
+  const std = Math.sqrt(closes.reduce((a, b) => a + (b - m) ** 2, 0) / closes.length);
+
+  const byHour = new Map();
+  for (const r of rows) {
+    if (typeof r.high !== "number" || typeof r.low !== "number") continue;
+    if (!byHour.has(r.hour)) byHour.set(r.hour, []);
+    byHour.get(r.hour).push(r.high - r.low);
+  }
+  const hourlyVol = [...byHour.entries()]
+    .map(([hour, ranges]) => ({ hour, avgRange: ranges.reduce((a, b) => a + b, 0) / ranges.length }))
+    .sort((a, b) => a.hour - b.hour);
+
+  // 14:00 UTC is the 9:30 ET cash open through most of the year.
+  const nyRows = rows.filter((r) => r.hour === 14);
+  const nyOpenPrice = nyRows.length ? nyRows[nyRows.length - 1].open ?? null : null;
+
+  return { mean: m, std, hourlyVol, nyOpenPrice };
 }
 
 // First symbol in the list that returns usable data.
@@ -154,7 +213,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { action, offset } = req.body || {};
+  const { action, offset, symbol, days, messages, context } = req.body || {};
 
   if (action === "weekAhead") {
     try {
@@ -165,9 +224,39 @@ export default async function handler(req, res) {
     }
   }
 
-  // Price history and the research chat still need a market-data provider wired up.
-  return res.status(200).json({
-    data: [],
-    message: "Market data not configured on this deployment",
-  });
+  if (action === "getData") {
+    const ticker = String(symbol || "ES=F").trim().slice(0, 20) || "ES=F";
+    const range = Math.max(1, Math.min(60, Number(days) || 30));
+    const rows = await fetchIntraday(ticker, range);
+    if (!rows) {
+      return res.status(200).json({ error: `No data returned for ${ticker} — check the ticker and try again.` });
+    }
+    return res.status(200).json({
+      stats: sessionStats(rows),
+      chartData: rows.slice(-200).map((r) => ({ time: r.time, open: r.open, high: r.high, low: r.low, close: r.close })),
+    });
+  }
+
+  if (action === "chat") {
+    const turns = (Array.isArray(messages) ? messages : []).slice(-12)
+      .map((m) => `${m.role === "user" ? "You" : "Analyst"}: ${String(m.content || "").slice(0, 2000)}`)
+      .join("\n");
+    try {
+      const answer = await callLLM({
+        system: "You are a quantitative futures analyst talking to an experienced index-futures trader. "
+          + "Answer from the levels and stats you are given — concise, concrete, no hedging boilerplate and no "
+          + "financial-advice disclaimers. Say plainly when the data does not support an answer.",
+        user: `Current session data:\n${String(context || "").slice(0, 2000)}\n\nConversation:\n${turns}`,
+      });
+      return res.status(200).json({ answer });
+    } catch (err) {
+      return res.status(200).json({
+        error: String(err?.message || err).includes("No LLM provider")
+          ? "The research chat needs an LLM key on this deployment (ANTHROPIC_API_KEY or OPENAI_API_KEY)."
+          : "The research chat is unavailable right now — try again.",
+      });
+    }
+  }
+
+  return res.status(400).json({ error: `Unknown action: ${String(action).slice(0, 40)}` });
 }
