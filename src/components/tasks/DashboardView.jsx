@@ -8,6 +8,8 @@ import {
   serializeDashboard,
   statsFor,
   answerFor,
+  buildChatPrompt,
+  CHAT_SCHEMA,
   makeSource,
   parseTranscript,
   parseReqs,
@@ -288,36 +290,12 @@ export default function DashboardView({ page, onSave }) {
     setDraft("");
     setPending(true);
 
-    // Context is used when it answers the question, but it is not a fence: a
-    // student planning a CPA path also needs answers the transcript can't give.
-    // The model reports whether it actually used the documents, so a general
-    // answer isn't decorated with citations it didn't read.
-    const ctx = st.on.length
-      ? st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text || "(no text could be read from this file)"}`).join("\n\n")
-      : "(nothing in context yet)";
-    const facts = st.on.length
-      ? `Computed from the documents: earned ${st.earned} of ${st.target} credits (${st.pct}%), in progress ${st.ip}, GPA ${st.gpa == null ? "n/a" : st.gpa.toFixed(2)}${st.audit ? `, program ${st.audit.program || "unknown"}` : ""}, required classes missing: ${st.missing.map((i) => i.code).join(", ") || "none listed"}.`
-      : "No documents in context yet.";
-
     let text = null;
     let usedContext = st.on.length > 0;
     try {
       const r = await base44.integrations.Core.InvokeLLM({
-        prompt:
-          `You are Signal, an academic advisor inside a student's degree dashboard.\n\n` +
-          `Use the context documents below whenever they bear on the question — quote real course codes, credits and grades from them rather than inventing any. The computed figures are authoritative; never contradict them.\n` +
-          `If the question is not answerable from the documents (career paths, certifications, exam requirements, what a program generally involves), answer it from your own knowledge anyway and say briefly that it is not from their documents. Never refuse for lack of context.\n` +
-          `If a document was uploaded but no text could be read from it, say so plainly instead of guessing at its contents.\n` +
-          `Be direct and specific. Plain text, no markdown. Up to 140 words, shorter when a short answer will do.\n\n` +
-          `${facts}\n\n${ctx}\n\nQuestion: ${q}`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            answer: { type: "string" },
-            used_context: { type: "boolean", description: "true only if the context documents informed the answer" },
-          },
-          required: ["answer", "used_context"],
-        },
+        prompt: buildChatPrompt(q, st),
+        response_json_schema: CHAT_SCHEMA,
       });
       const data = typeof r === "string" ? { answer: r } : (r || {});
       const candidate = typeof data.answer === "string" ? data.answer : typeof data.result === "string" ? data.result : null;
@@ -334,8 +312,8 @@ export default function DashboardView({ page, onSave }) {
     // Progress pane because it reads the same stats.
     if (!text) {
       text = st.on.length
-        ? answerFor(q, st)
-        : "I couldn't reach the assistant just now. Add your transcript or degree audit on the left and I can still answer from it, or try the question again.";
+        ? `I couldn't reach the assistant just now, so this is straight from your documents rather than an answer to what you asked.\n\n${answerFor(q, st)}`
+        : "I couldn't reach the assistant just now — try the question again. Adding your transcript or degree audit on the left also lets me answer from it offline.";
     }
     if (!mountedRef.current) return;
     const cites = usedContext
