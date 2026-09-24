@@ -103,13 +103,40 @@ async function extractPdfOnServer(file) {
   return String(data.text || "");
 }
 
+// A .docx is a zip holding word/document.xml. Its text comes out of the browser
+// with no upload and no service — a degree plan or advising sheet is almost always
+// one, and until now it read as an empty source.
+async function extractDocxText(file) {
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const files = unzipSync(new Uint8Array(await file.arrayBuffer()));
+  const entry = files["word/document.xml"];
+  if (!entry) throw new Error("not a Word document");
+  const xml = strFromU8(entry);
+  return xml
+    // Each paragraph and explicit break becomes a line; tabs become spaces, so
+    // a table row of "CODE  Title  Credits" survives as one readable line.
+    .replace(/<w:tab\b[^>]*\/?>/g, "  ")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<w:br\b[^>]*\/?>/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&")
+    .split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 const isPdfFile = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+const isDocxFile = (f) => /\.docx$/i.test(f.name) || f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const isTextFile = (f) => /^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name);
 
 // Returns { text, error } — never throws, so one bad file can't take the batch down.
 async function readFileText(file) {
   if (isTextFile(file)) {
     try { return { text: await file.text(), error: "" }; }
+    catch (err) { return { text: "", error: err && err.message ? err.message : "could not be read" }; }
+  }
+  if (isDocxFile(file)) {
+    try { return { text: await extractDocxText(file), error: "" }; }
     catch (err) { return { text: "", error: err && err.message ? err.message : "could not be read" }; }
   }
   if (!isPdfFile(file)) return { text: "", error: "" };
@@ -316,8 +343,10 @@ export default function DashboardView({ page, onSave }) {
         : "I couldn't reach the assistant just now — try the question again. Adding your transcript or degree audit on the left also lets me answer from it offline.";
     }
     if (!mountedRef.current) return;
+    // Only cite documents that actually have text — a source that produced none
+    // was never read, and listing it implies the answer came partly from it.
     const cites = usedContext
-      ? st.on.filter((s) => s.kind !== "notes" || /advisor|plan|minor|cpa|certif/i.test(q)).map((s) => s.name)
+      ? st.on.filter((s) => s.text.trim() && (s.kind !== "notes" || /advisor|plan|minor|cpa|certif/i.test(q))).map((s) => s.name)
       : [];
     commit((s) => ({ ...s, messages: [...s.messages, { role: "ai", text: String(text).trim(), cites }] }));
     setPending(false);
@@ -412,7 +441,7 @@ export default function DashboardView({ page, onSave }) {
               >
                 <Upload style={{ width: 20, height: 20, flex: "none" }} />
                 <span style={heading(16, 1.2)}>{extracting ? "Reading your file…" : "Drop any file here"}</span>
-                <span style={{ fontSize: 12, color: T.n700 }}>or click to browse. PDFs, docs, images, spreadsheets.</span>
+                <span style={{ fontSize: 12, color: T.n700 }}>or click to browse. PDFs, Word docs, text files.</span>
               </button>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, width: "100%", minHeight: 112, padding: 16, background: T.a100, border: `2px solid ${T.accent}`, color: T.a800 }}>
