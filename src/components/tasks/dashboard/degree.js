@@ -77,8 +77,8 @@ export function parseTranscript(text) {
   (text || "").split("\n").forEach((l) => {
     const t = l.trim();
     if (/^(fall|spring|summer|winter)\s+\d{4}$/i.test(t)) { term = t; return; }
-    const m = t.match(/^([A-Z]{2,5})\s?(\d{3}[A-Z]?)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(A\+|A-|A|B\+|B-|B|C\+|C-|C|D\+|D-|D|F|P|W|IP)$/);
-    if (m) out.push({ code: m[1] + " " + m[2], name: m[3], cr: +m[4], grade: m[5], term });
+    const m = t.match(/^([A-Z]{2,5})\s?(\d{3,4}[A-Z]?)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(A\+|A-|A|B\+|B-|B|C\+|C-|C|D\+|D-|D|F|P|W|I|IP|CR|NC|TR)$/i);
+    if (m) out.push({ code: m[1] + " " + m[2], name: m[3], cr: +m[4], grade: m[5].toUpperCase(), term });
   });
   return out;
 }
@@ -89,7 +89,7 @@ export function parseReqs(text) {
     const t = l.trim(); if (!t) return;
     const tm = t.match(/total credits[^\d]*(\d+)/i);
     if (tm) { total = +tm[1]; return; }
-    const m = t.match(/^([A-Z]{2,5})\s?(\d{3}[A-Z]?)\s+(.*)$/);
+    const m = t.match(/^([A-Z]{2,5})\s?(\d{3,4}[A-Z]?)\s+(.*)$/);
     if (m) {
       if (!g) { g = { name: "Required", need: null, items: [] }; groups.push(g); }
       g.items.push({ code: m[1] + " " + m[2], name: m[3] });
@@ -218,6 +218,15 @@ export function statsFor(sources, degreeId) {
   const auditSrc = on.find((s) => isDegreeWorks(s.text));
   if (auditSrc) {
     const audit = parseDegreeWorks(auditSrc.text);
+    // A transcript alongside the audit still matters: it is the only place the
+    // classes a student actually passed are named. It does not move the audit's
+    // credit totals — those are the school's — but its courses are carried so
+    // they can be checked against any other requirement list in context.
+    const transcriptCourses = [];
+    for (const src of on) {
+      if (src === auditSrc || src.kind !== "transcript") continue;
+      for (const c of parseTranscript(src.text)) transcriptCourses.push(c);
+    }
     const target = audit.creditsRequired || 120;
     const earned = audit.creditsApplied || 0;
     const groups = audit.blocks.map((b) => ({
@@ -229,10 +238,10 @@ export function statsFor(sources, degreeId) {
     const done = audit.blocks.filter((b) => b.status === "COMPLETE").length;
     return {
       audit, auditName: auditSrc.name,
-      hasTranscript: true, hasCourses: audit.courses.length > 0 || earned > 0,
+      hasTranscript: true, hasCourses: audit.courses.length > 0 || transcriptCourses.length > 0 || earned > 0,
       reqSrc: auditSrc, req: { total: target, groups: [] }, target,
       earned: r1(earned), ip: 0, gpa: audit.gpa, gcr: r1(earned),
-      courses: audit.courses, groups,
+      courses: [...transcriptCourses, ...audit.courses], transcriptCourses, groups,
       reqNeed: audit.blocks.length, reqDone: done, reqIp: 0,
       reqLeft: Math.max(0, audit.blocks.length - done),
       missing: [], inProg: [],
@@ -345,6 +354,74 @@ export const STARTERS = [
   "Which classes do I still need for a CPA path, and which have I done?",
 ];
 
+
+// ── Chat prompt ───────────────────────────────────────────────────────────────
+// Built here rather than inline in the view so the exact text sent to the model
+// can be inspected and asserted from node.
+
+// What the parsed documents actually establish. Deliberately explicit about what
+// is NOT known: a Degree Works audit marks requirements with icons, so "nothing
+// listed as missing" must never read as "nothing is missing".
+export function contextFacts(st) {
+  if (!st.on.length) return "No documents in context yet.";
+  const lines = [];
+  if (st.audit) {
+    const a = st.audit;
+    lines.push(`Degree audit for ${a.student || "the student"}: ${a.program || "program unknown"}${a.major ? `, major ${a.major}` : ""}${a.classification ? `, ${a.classification}` : ""}.`);
+    lines.push(`${st.earned} of ${st.target} credits applied (${st.pct}% of the degree)${a.gpa != null ? `, institutional GPA ${a.gpa.toFixed(2)}` : ""}.`);
+    for (const b of a.blocks) lines.push(`Block "${b.name}": ${b.applied} of ${b.required} credits applied, ${(b.status || "status unknown").toLowerCase()}. Requirements listed: ${b.items.join("; ")}.`);
+    if (a.courses.length) lines.push(`Classes the audit lists as earning no credit (repeated, withdrawn or failed): ${a.courses.map((c) => `${c.code} ${c.name} (${c.grade}, ${c.term})`).join("; ")}.`);
+    lines.push("IMPORTANT: this audit shows whether each individual requirement is met with an icon, which carries no text. So the per-requirement ticks are NOT available to you. Do not claim a specific requirement is complete or incomplete unless a transcript in context shows the class. Never say the student is missing nothing.");
+    const passed = (st.transcriptCourses || []).filter((c) => c.grade !== "W" && c.grade !== "F");
+    if (passed.length) {
+      lines.push(`Classes from the transcript also in context: ${passed.map((c) => `${c.code} ${c.name} (${c.grade}${c.term ? `, ${c.term}` : ""})`).join("; ")}.`);
+    } else if (!st.on.some((s) => s.kind === "transcript")) {
+      lines.push("No separate transcript is in context, so the full list of passed classes is unknown — only the block totals above and the no-credit classes. Say so if the question needs them.");
+    }
+    return lines.join("\n");
+  }
+  lines.push(`Earned ${st.earned} of ${st.target} credits (${st.pct}%), ${st.ip} in progress, GPA ${st.gpa == null ? "not yet established" : st.gpa.toFixed(2)}.`);
+  if (st.req) {
+    lines.push(`Required classes still missing: ${st.missing.map((i) => `${i.code} ${i.name}`).join("; ") || "none"}.`);
+    if (st.inProg.length) lines.push(`Required classes in progress: ${st.inProg.map((i) => i.code).join(", ")}.`);
+  } else {
+    lines.push("No degree requirement list is in context, so which specific classes are required is unknown.");
+  }
+  return lines.join("\n");
+}
+
+export function buildChatPrompt(q, st) {
+  const ctx = st.on.length
+    ? st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text ? s.text.slice(0, 60000) : "(no text could be read from this file)"}`).join("\n\n")
+    : "(nothing in context yet)";
+  return [
+    "You are Signal, an academic advisor inside a student's degree dashboard.",
+    "",
+    "Use the context documents below whenever they bear on the question. Quote real course codes, credits and grades from them — never invent a class, a grade or a requirement.",
+    "The ESTABLISHED FACTS are computed from those documents and are authoritative: never contradict them, and never restate a number that contradicts them.",
+    "If something is not in the documents, say which part you don't have rather than guessing at it.",
+    "If the question is not answerable from the documents at all — career paths, certifications, licensing or exam requirements, what a programme generally involves — answer it from your own knowledge anyway and note in one short clause that it is not from their documents. Never refuse a question for lack of context.",
+    "Requirements vary by state, school and catalogue year; when that matters, say so in a clause rather than a paragraph, and name what the student should confirm.",
+    "Be direct and specific. Plain text, no markdown, no bullet characters. Up to 160 words, shorter when a short answer will do.",
+    "",
+    "ESTABLISHED FACTS",
+    contextFacts(st),
+    "",
+    "CONTEXT DOCUMENTS",
+    ctx,
+    "",
+    `Question: ${q}`,
+  ].join("\n");
+}
+
+export const CHAT_SCHEMA = {
+  type: "object",
+  properties: {
+    answer: { type: "string" },
+    used_context: { type: "boolean", description: "true only if the context documents informed the answer" },
+  },
+  required: ["answer", "used_context"],
+};
 
 // ── Persistence ───────────────────────────────────────────────────────────────
 // The page doc stores this as a JSON string in its `dashboard` field. Parsing is
