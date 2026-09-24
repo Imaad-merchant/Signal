@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { Plus, FileText, Folder as FolderIcon, FolderPlus, MoreVertical, Pin, PinOff, Trash2, Download, CheckSquare, ArrowUpDown, X, Check } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
+import { parseDashboard, computeStats, formatGpa } from "./dashboard/academic";
 
 // Relative "edited X ago" label.
 function relTime(iso) {
@@ -18,15 +19,38 @@ function relTime(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-const typeLabel = (t) => (t === "notion" ? "Page" : t === "document" ? "Document" : "Whiteboard");
+const typeLabel = (t) => (t === "notion" ? "Page" : t === "document" ? "Document" : t === "dashboard" ? "Dashboard" : "Whiteboard");
 const escapeHtml = (s) => (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Turn a dashboard page's stored JSON into printable HTML — its content lives in
+// `page.dashboard`, not in `page.content`, so the generic path would export nothing.
+function dashboardToHtml(page) {
+  const state = parseDashboard(page.dashboard);
+  if (!state.courses.length) return "";
+  const stats = computeStats(state.courses, state.target_credits);
+  const rows = state.courses.map((c) =>
+    `<tr><td>${escapeHtml(c.term)}</td><td>${escapeHtml(c.code)}</td><td>${escapeHtml(c.name)}</td>` +
+    `<td>${c.credits}</td><td>${escapeHtml(c.status.replace("_", " "))}</td><td>${escapeHtml(c.grade)}</td></tr>`
+  ).join("");
+  return (
+    `<p><strong>Cumulative GPA:</strong> ${formatGpa(stats.cumulativeGpa)} &nbsp;·&nbsp; ` +
+    `<strong>Credits earned:</strong> ${stats.creditsEarned} of ${stats.targetCredits} &nbsp;·&nbsp; ` +
+    `<strong>In progress:</strong> ${stats.creditsInProgress} &nbsp;·&nbsp; <strong>Planned:</strong> ${stats.creditsPlanned}</p>` +
+    `<table style="width:100%;border-collapse:collapse;font-size:12px" border="1" cellpadding="4">` +
+    `<tr><th>Term</th><th>Code</th><th>Course</th><th>Cr</th><th>Status</th><th>Grade</th></tr>${rows}</table>`
+  );
+}
+
 // Download a page as a PDF (its title + text content). Documents/notes carry HTML
-// content; whiteboards have no text, so the PDF is just the title.
+// content; dashboards render a course-table summary; whiteboards have no text, so
+// the PDF is just the title.
 async function exportPageToPdf(page) {
   const { jsPDF } = await import("jspdf");
   const title = page.title || "Untitled";
-  const contentHtml = page.type === "whiteboard" ? "" : (page.content || "");
+  const contentHtml =
+    page.type === "whiteboard" ? "" :
+    page.type === "dashboard" ? dashboardToHtml(page) :
+    (page.content || "");
   const holder = document.createElement("div");
   holder.style.cssText = "position:fixed;left:-9999px;top:0;width:620px;background:#fff;color:#111;padding:8px 4px;font-family:Inter,Arial,sans-serif";
   holder.innerHTML =
@@ -66,6 +90,23 @@ function WhiteboardPreview() {
       <line x1="52" y1="30" x2="72" y2="32" stroke="#9ca3af" strokeWidth="1.5" />
       <rect x="34" y="50" width="26" height="18" rx="2" fill="#fbbf24" opacity="0.85" />
       <rect x="70" y="52" width="26" height="14" rx="2" fill="#f472b6" opacity="0.7" />
+    </svg>
+  );
+}
+
+function DashboardPreview() {
+  return (
+    <svg viewBox="0 0 120 80" className="w-full h-full">
+      <rect x="8" y="4" width="104" height="72" rx="5" fill="#111827" />
+      <rect x="16" y="12" width="40" height="20" rx="3" fill="#1f2937" />
+      <rect x="22" y="18" width="18" height="8" rx="2" fill="#60a5fa" />
+      <rect x="62" y="12" width="42" height="20" rx="3" fill="#1f2937" />
+      <rect x="68" y="18" width="14" height="8" rx="2" fill="#34d399" />
+      <rect x="16" y="38" width="88" height="4" rx="2" fill="#374151" />
+      <rect x="16" y="38" width="52" height="4" rx="2" fill="#34d399" />
+      <rect x="16" y="50" width="88" height="3.5" rx="1.75" fill="#374151" />
+      <rect x="16" y="59" width="88" height="3.5" rx="1.75" fill="#374151" />
+      <rect x="16" y="68" width="60" height="3.5" rx="1.75" fill="#2b3442" />
     </svg>
   );
 }
@@ -199,9 +240,10 @@ export default function DocsHome({ pages, user, onOpen, onCreate, onDelete, onUp
               <FolderPlus className="h-3.5 w-3.5" /> New folder
             </button>
           </div>
-          <div className="grid grid-cols-2 gap-3 max-w-lg">
+          <div className="grid grid-cols-2 gap-3 max-w-lg sm:grid-cols-3 sm:max-w-2xl">
             <CreateCard preview={<DocPreview />} title="Document" subtitle="Rich-text notes" onClick={() => onCreate("document")} />
             <CreateCard preview={<WhiteboardPreview />} title="Whiteboard" subtitle="Freeform canvas" onClick={() => onCreate("whiteboard")} />
+            <CreateCard preview={<DashboardPreview />} title="Dashboard" subtitle="Classes, credits & GPA" onClick={() => onCreate("dashboard")} />
           </div>
         </section>
 
