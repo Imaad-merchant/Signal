@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { ArrowUpRight, Link2, CornerDownRight, FileText, ChevronLeft, ChevronRight, ChevronDown, MoreVertical, Trash2, Pencil, Check, ArrowUpDown, CheckSquare, X, Sparkles } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
 
-const TYPE_COLOR = { whiteboard: "#60a5fa", document: "#34d399", notion: "#c084fc" };
+const TYPE_COLOR = { whiteboard: "#60a5fa", document: "#34d399", notion: "#c084fc", dashboard: "#a78bfa" };
 const colorFor = (p) => TYPE_COLOR[p?.type] || "#9ca3af";
 
 // Three memory sources, kept separate in the sidebar:
