@@ -58,14 +58,15 @@ function guessKind(name, text) {
   return "notes";
 }
 
-// Pull the text layer out of a PDF in the browser — no upload, no server round
-// trip, and no new serverless function. pdf.js is imported on demand (it is a
-// large dependency and only a dropped PDF needs it) with its worker resolved
-// through Vite, so it never lands in the initial Tasks bundle.
+// Read a dropped file's text.
 //
-// Text is reassembled using each item's `hasEOL` flag rather than joining on
-// spaces: Degree Works prints label/value stanzas, and its parser reads lines.
-async function extractPdfText(file) {
+// PDFs try pdf.js in the browser first — fast, and the bytes never leave the
+// machine. pdf.js is imported on demand (it is large, and only a PDF needs it)
+// with its worker resolved through Vite. If that path fails or comes back empty
+// — a blocked worker, an older browser, a locked-down profile — the file is
+// uploaded and the same extraction runs server-side, so a transcript is readable
+// whatever the browser does. A genuinely scanned PDF has no text either way.
+async function extractPdfInBrowser(file) {
   const [pdfjs, workerUrl] = await Promise.all([
     import("pdfjs-dist"),
     import("pdfjs-dist/build/pdf.worker.min.mjs?url").then((m) => m.default),
@@ -88,6 +89,45 @@ async function extractPdfText(file) {
     try { await doc.destroy(); } catch { /* ignore */ }
   }
   return out;
+}
+
+async function extractPdfOnServer(file) {
+  const up = await base44.integrations.Core.UploadFile({ file });
+  const fileUrl = up && up.file_url;
+  if (!fileUrl) throw new Error("upload failed");
+  const r = await base44.functions.invoke("donna", { route: "extract-pdf-text", file_url: fileUrl });
+  const data = (r && r.data) || r || {};
+  if (data.error) throw new Error(data.detail || data.error);
+  return String(data.text || "");
+}
+
+const isPdfFile = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+const isTextFile = (f) => /^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name);
+
+// Returns { text, error } — never throws, so one bad file can't take the batch down.
+async function readFileText(file) {
+  if (isTextFile(file)) {
+    try { return { text: await file.text(), error: "" }; }
+    catch (err) { return { text: "", error: err && err.message ? err.message : "could not be read" }; }
+  }
+  if (!isPdfFile(file)) return { text: "", error: "" };
+
+  let browserError = "";
+  try {
+    const text = await extractPdfInBrowser(file);
+    if (text.trim()) return { text, error: "" };
+  } catch (err) {
+    browserError = err && err.message ? err.message : String(err);
+    // Worth reporting: it tells us whether the in-browser path is worth keeping.
+    console.warn("pdf.js in-browser failed, falling back to the server:", browserError);
+  }
+  try {
+    const text = await extractPdfOnServer(file);
+    return { text, error: "" };
+  } catch (err) {
+    const serverError = err && err.message ? err.message : "could not be read";
+    return { text: "", error: browserError ? `${serverError} (in-browser: ${browserError})` : serverError };
+  }
 }
 
 const fmtSize = (bytes) => (bytes > 1e6 ? (bytes / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(bytes / 1e3)) + " KB");
@@ -184,19 +224,8 @@ export default function DashboardView({ page, onSave }) {
     const failures = [];
     try {
       for (const f of arr) {
-        let text = "";
-        if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) {
-          try { text = await f.text(); } catch { /* keep the file, drop the text */ }
-        } else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
-          try {
-            text = await extractPdfText(f);
-          } catch (err) {
-            // A worker that failed to load and a PDF with no text layer are
-            // different problems — say which one actually happened.
-            console.error("PDF text extraction failed", err);
-            failures.push(`${f.name}: ${err && err.message ? err.message : "could not be read"}`);
-          }
-        }
+        const { text, error } = await readFileText(f);
+        if (error) failures.push(`${f.name}: ${error}`);
         out.push({ id: nid(), name: f.name, text, size: fmtSize(f.size) });
       }
     } finally {
@@ -226,10 +255,7 @@ export default function DashboardView({ page, onSave }) {
     let text = "";
     let error = "";
     try {
-      if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) text = await f.text();
-      else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) text = await extractPdfText(f);
-    } catch (err) {
-      error = err && err.message ? err.message : "could not be read";
+      ({ text, error } = await readFileText(f));
     } finally {
       if (mountedRef.current) setExtracting(false);
     }
@@ -262,24 +288,59 @@ export default function DashboardView({ page, onSave }) {
     setDraft("");
     setPending(true);
 
+    // Context is used when it answers the question, but it is not a fence: a
+    // student planning a CPA path also needs answers the transcript can't give.
+    // The model reports whether it actually used the documents, so a general
+    // answer isn't decorated with citations it didn't read.
+    const ctx = st.on.length
+      ? st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text || "(no text could be read from this file)"}`).join("\n\n")
+      : "(nothing in context yet)";
+    const facts = st.on.length
+      ? `Computed from the documents: earned ${st.earned} of ${st.target} credits (${st.pct}%), in progress ${st.ip}, GPA ${st.gpa == null ? "n/a" : st.gpa.toFixed(2)}${st.audit ? `, program ${st.audit.program || "unknown"}` : ""}, required classes missing: ${st.missing.map((i) => i.code).join(", ") || "none listed"}.`
+      : "No documents in context yet.";
+
     let text = null;
-    if (st.on.length) {
-      const ctx = st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text || "(PDF, no extracted text)"}`).join("\n\n");
-      const facts = `Computed: earned ${st.earned} of ${st.target} credits (${st.pct}%), in progress ${st.ip}, GPA ${st.gpa == null ? "n/a" : st.gpa.toFixed(2)}, required classes missing: ${st.missing.map((i) => i.code).join(", ") || "none"}.`;
-      try {
-        const r = await base44.integrations.Core.InvokeLLM({
-          prompt: `You are Signal, a degree-progress assistant inside a student's dashboard. Answer ONLY from the context documents below. Be direct and specific with numbers, under 90 words, plain text, no markdown.\n\n${facts}\n\n${ctx}\n\nQuestion: ${q}`,
-        });
-        // The endpoint returns parsed JSON when the model emits JSON, else { result }.
-        const candidate = typeof r === "string" ? r : r && typeof r.result === "string" ? r.result : null;
-        if (candidate && candidate.trim()) text = candidate;
-      } catch { text = null; }
+    let usedContext = st.on.length > 0;
+    try {
+      const r = await base44.integrations.Core.InvokeLLM({
+        prompt:
+          `You are Signal, an academic advisor inside a student's degree dashboard.\n\n` +
+          `Use the context documents below whenever they bear on the question — quote real course codes, credits and grades from them rather than inventing any. The computed figures are authoritative; never contradict them.\n` +
+          `If the question is not answerable from the documents (career paths, certifications, exam requirements, what a program generally involves), answer it from your own knowledge anyway and say briefly that it is not from their documents. Never refuse for lack of context.\n` +
+          `If a document was uploaded but no text could be read from it, say so plainly instead of guessing at its contents.\n` +
+          `Be direct and specific. Plain text, no markdown. Up to 140 words, shorter when a short answer will do.\n\n` +
+          `${facts}\n\n${ctx}\n\nQuestion: ${q}`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            answer: { type: "string" },
+            used_context: { type: "boolean", description: "true only if the context documents informed the answer" },
+          },
+          required: ["answer", "used_context"],
+        },
+      });
+      const data = typeof r === "string" ? { answer: r } : (r || {});
+      const candidate = typeof data.answer === "string" ? data.answer : typeof data.result === "string" ? data.result : null;
+      if (candidate && candidate.trim()) {
+        text = candidate;
+        if (typeof data.used_context === "boolean") usedContext = data.used_context && st.on.length > 0;
+      }
+    } catch (err) {
+      console.warn("Dashboard chat fell back to the computed answer:", err && err.message);
+      text = null;
     }
-    // Offline/refused → the artifact's own computed answer, which never lies about
-    // the numbers because it reads the same stats the right-hand pane shows.
-    if (!text) text = answerFor(q, st);
+
+    // Offline or refused → the computed answer, which never disagrees with the
+    // Progress pane because it reads the same stats.
+    if (!text) {
+      text = st.on.length
+        ? answerFor(q, st)
+        : "I couldn't reach the assistant just now. Add your transcript or degree audit on the left and I can still answer from it, or try the question again.";
+    }
     if (!mountedRef.current) return;
-    const cites = st.on.filter((s) => s.kind !== "notes" || /advisor|plan|minor/i.test(q)).map((s) => s.name);
+    const cites = usedContext
+      ? st.on.filter((s) => s.kind !== "notes" || /advisor|plan|minor|cpa|certif/i.test(q)).map((s) => s.name)
+      : [];
     commit((s) => ({ ...s, messages: [...s.messages, { role: "ai", text: String(text).trim(), cites }] }));
     setPending(false);
   };
@@ -514,7 +575,7 @@ export default function DashboardView({ page, onSave }) {
         <div className="degree-dash-chat" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "20px 32px 0" }}>
             <span style={eyebrow}>Ask</span>
-            <span style={{ fontSize: 12, color: T.n700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{usingText}</span>
+            <span style={{ fontSize: 12, color: T.n700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{usingText + (onCount ? " · and general knowledge" : "")}</span>
           </div>
 
           <div ref={chatRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 32px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
@@ -530,7 +591,6 @@ export default function DashboardView({ page, onSave }) {
                       key={q}
                       className="dd-row"
                       onClick={() => send(q)}
-                      disabled={onCount === 0}
                       style={{ ...bare, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", padding: "12px 4px", borderBottom: `1px solid ${T.divider}`, textAlign: "left", fontSize: 15, color: T.text }}
                     >
                       {q}
@@ -538,7 +598,7 @@ export default function DashboardView({ page, onSave }) {
                     </button>
                   ))}
                 </div>
-                {onCount === 0 && <div style={{ fontSize: 13, color: T.a700 }}>Add a transcript to Context to start asking.</div>}
+                {onCount === 0 && <div style={{ fontSize: 13, color: T.a700 }}>Ask anything now — add your transcript on the left for answers about your own classes.</div>}
               </div>
             )}
 
@@ -591,7 +651,7 @@ export default function DashboardView({ page, onSave }) {
                 rows={2}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder={onCount ? "Ask about your degree…" : "Add a transcript first, then ask…"}
+                placeholder={onCount ? "Ask about your degree…" : "Ask anything — add documents on the left for answers about your own classes"}
                 style={{ flex: 1, resize: "none", padding: "8px 10px", fontFamily: T.body, fontSize: 15, lineHeight: 1.4, color: T.text, background: T.surface, border: `1px solid ${T.divider}`, caretColor: T.accent, outline: "none" }}
               />
               <button className="dd-accent-btn" onClick={() => send()} style={{ ...bare, display: "flex", alignItems: "flex-end", justifyContent: "flex-start", gap: 6, padding: "8px 16px", minWidth: 96, background: T.accent, color: T.bg, fontFamily: T.head, fontWeight: 800, fontSize: 14 }}>

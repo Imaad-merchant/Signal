@@ -65,6 +65,7 @@ export default async function handler(req, res) {
     if (route === "semantic-search") return await semanticSearch(auth, body, res);
     if (route === "list-notes") return await listNotes(auth, res);
     if (route === "extract-syllabus") return await extractSyllabus(auth, body, res);
+    if (route === "extract-pdf-text") return await extractPdfTextRoute(body, res);
     if (route === "test-brief") {
       const { sendBriefingEmail } = await import("./ingest.js");
       const result = await sendBriefingEmail(getAdminDb(), body.slot === "evening" ? "evening" : "morning");
@@ -671,6 +672,45 @@ async function listNotes(auth, res) {
 // The generic invoke-llm endpoint never attaches the file, so this reads it directly:
 // Claude reads PDFs and images via base64 content blocks; images fall back to gpt-4o
 // vision. Returns { category:{name,color}, assignments:[{title,due_date}] } or { error }.
+// Fetch an uploaded file and pull its text layer out with pdf.js. Shared by
+// extract-syllabus and the extract-pdf-text route below, which exists because
+// the in-browser pdf.js path can fail (blocked worker, older browser) and the
+// dashboard needs a transcript to be readable regardless.
+const PDF_MAX_BYTES = 12 * 1024 * 1024;
+
+export async function extractPdfTextFromBuffer(buf) {
+  const pdf = await getDocumentProxy(new Uint8Array(buf));
+  const out = await extractText(pdf, { mergePages: true });
+  return Array.isArray(out?.text) ? out.text.join("\n") : (out?.text || "");
+}
+
+async function fetchFileBuffer(fileUrl) {
+  const r = await fetch(fileUrl);
+  if (!r.ok) return { error: "fetch-failed" };
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (buf.length > PDF_MAX_BYTES) return { error: "too-large" };
+  return { buf, contentType: String(r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase() };
+}
+
+// Returns { text } — never throws at the caller. An empty string means the PDF
+// carries no text layer (i.e. it is scanned), which is a different answer from
+// an error and the client words it differently.
+async function extractPdfTextRoute(body, res) {
+  const fileUrl = String(body.file_url || "");
+  if (!fileUrl) return res.status(400).json({ error: "file_url required" });
+  const got = await fetchFileBuffer(fileUrl);
+  if (got.error) return res.status(200).json({ error: got.error });
+  const isPdf = got.contentType === "application/pdf" || /\.pdf(\?|$)/i.test(fileUrl);
+  if (!isPdf) return res.status(200).json({ error: "unsupported-type" });
+  try {
+    const text = await extractPdfTextFromBuffer(got.buf);
+    return res.status(200).json({ text: String(text || "").slice(0, 400000) });
+  } catch (e) {
+    console.error("extract-pdf-text:", e.message);
+    return res.status(200).json({ error: "pdf-text", detail: e.message });
+  }
+}
+
 async function extractSyllabus(auth, body, res) {
   const fileUrl = String(body.file_url || "");
   if (!fileUrl) return res.status(400).json({ error: "file_url required" });
@@ -714,9 +754,7 @@ Resolve EVERY date to a full ISO date; infer the year from the syllabus, else us
   if (isPdf) {
     let text = "";
     try {
-      const pdf = await getDocumentProxy(new Uint8Array(Buffer.from(b64, "base64")));
-      const out = await extractText(pdf, { mergePages: true });
-      text = Array.isArray(out?.text) ? out.text.join("\n") : (out?.text || "");
+      text = await extractPdfTextFromBuffer(Buffer.from(b64, "base64"));
     } catch (e) { lastErr = `pdf-text: ${e.message}`; console.error("extract-syllabus pdf text:", e.message); }
 
     if (text && text.trim().length > 40) {
