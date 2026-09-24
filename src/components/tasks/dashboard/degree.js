@@ -342,7 +342,7 @@ export const STARTERS = [
   "What percent of my degree is finished?",
   "Which required classes am I still missing?",
   "What’s my cumulative GPA?",
-  "How many terms until I graduate?",
+  "Which classes do I still need for a CPA path, and which have I done?",
 ];
 
 

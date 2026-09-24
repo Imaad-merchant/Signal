@@ -288,24 +288,59 @@ export default function DashboardView({ page, onSave }) {
     setDraft("");
     setPending(true);
 
+    // Context is used when it answers the question, but it is not a fence: a
+    // student planning a CPA path also needs answers the transcript can't give.
+    // The model reports whether it actually used the documents, so a general
+    // answer isn't decorated with citations it didn't read.
+    const ctx = st.on.length
+      ? st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text || "(no text could be read from this file)"}`).join("\n\n")
+      : "(nothing in context yet)";
+    const facts = st.on.length
+      ? `Computed from the documents: earned ${st.earned} of ${st.target} credits (${st.pct}%), in progress ${st.ip}, GPA ${st.gpa == null ? "n/a" : st.gpa.toFixed(2)}${st.audit ? `, program ${st.audit.program || "unknown"}` : ""}, required classes missing: ${st.missing.map((i) => i.code).join(", ") || "none listed"}.`
+      : "No documents in context yet.";
+
     let text = null;
-    if (st.on.length) {
-      const ctx = st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text || "(PDF, no extracted text)"}`).join("\n\n");
-      const facts = `Computed: earned ${st.earned} of ${st.target} credits (${st.pct}%), in progress ${st.ip}, GPA ${st.gpa == null ? "n/a" : st.gpa.toFixed(2)}, required classes missing: ${st.missing.map((i) => i.code).join(", ") || "none"}.`;
-      try {
-        const r = await base44.integrations.Core.InvokeLLM({
-          prompt: `You are Signal, a degree-progress assistant inside a student's dashboard. Answer ONLY from the context documents below. Be direct and specific with numbers, under 90 words, plain text, no markdown.\n\n${facts}\n\n${ctx}\n\nQuestion: ${q}`,
-        });
-        // The endpoint returns parsed JSON when the model emits JSON, else { result }.
-        const candidate = typeof r === "string" ? r : r && typeof r.result === "string" ? r.result : null;
-        if (candidate && candidate.trim()) text = candidate;
-      } catch { text = null; }
+    let usedContext = st.on.length > 0;
+    try {
+      const r = await base44.integrations.Core.InvokeLLM({
+        prompt:
+          `You are Signal, an academic advisor inside a student's degree dashboard.\n\n` +
+          `Use the context documents below whenever they bear on the question — quote real course codes, credits and grades from them rather than inventing any. The computed figures are authoritative; never contradict them.\n` +
+          `If the question is not answerable from the documents (career paths, certifications, exam requirements, what a program generally involves), answer it from your own knowledge anyway and say briefly that it is not from their documents. Never refuse for lack of context.\n` +
+          `If a document was uploaded but no text could be read from it, say so plainly instead of guessing at its contents.\n` +
+          `Be direct and specific. Plain text, no markdown. Up to 140 words, shorter when a short answer will do.\n\n` +
+          `${facts}\n\n${ctx}\n\nQuestion: ${q}`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            answer: { type: "string" },
+            used_context: { type: "boolean", description: "true only if the context documents informed the answer" },
+          },
+          required: ["answer", "used_context"],
+        },
+      });
+      const data = typeof r === "string" ? { answer: r } : (r || {});
+      const candidate = typeof data.answer === "string" ? data.answer : typeof data.result === "string" ? data.result : null;
+      if (candidate && candidate.trim()) {
+        text = candidate;
+        if (typeof data.used_context === "boolean") usedContext = data.used_context && st.on.length > 0;
+      }
+    } catch (err) {
+      console.warn("Dashboard chat fell back to the computed answer:", err && err.message);
+      text = null;
     }
-    // Offline/refused → the artifact's own computed answer, which never lies about
-    // the numbers because it reads the same stats the right-hand pane shows.
-    if (!text) text = answerFor(q, st);
+
+    // Offline or refused → the computed answer, which never disagrees with the
+    // Progress pane because it reads the same stats.
+    if (!text) {
+      text = st.on.length
+        ? answerFor(q, st)
+        : "I couldn't reach the assistant just now. Add your transcript or degree audit on the left and I can still answer from it, or try the question again.";
+    }
     if (!mountedRef.current) return;
-    const cites = st.on.filter((s) => s.kind !== "notes" || /advisor|plan|minor/i.test(q)).map((s) => s.name);
+    const cites = usedContext
+      ? st.on.filter((s) => s.kind !== "notes" || /advisor|plan|minor|cpa|certif/i.test(q)).map((s) => s.name)
+      : [];
     commit((s) => ({ ...s, messages: [...s.messages, { role: "ai", text: String(text).trim(), cites }] }));
     setPending(false);
   };
@@ -540,7 +575,7 @@ export default function DashboardView({ page, onSave }) {
         <div className="degree-dash-chat" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "20px 32px 0" }}>
             <span style={eyebrow}>Ask</span>
-            <span style={{ fontSize: 12, color: T.n700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{usingText}</span>
+            <span style={{ fontSize: 12, color: T.n700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{usingText + (onCount ? " · and general knowledge" : "")}</span>
           </div>
 
           <div ref={chatRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 32px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
@@ -556,7 +591,6 @@ export default function DashboardView({ page, onSave }) {
                       key={q}
                       className="dd-row"
                       onClick={() => send(q)}
-                      disabled={onCount === 0}
                       style={{ ...bare, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", padding: "12px 4px", borderBottom: `1px solid ${T.divider}`, textAlign: "left", fontSize: 15, color: T.text }}
                     >
                       {q}
@@ -564,7 +598,7 @@ export default function DashboardView({ page, onSave }) {
                     </button>
                   ))}
                 </div>
-                {onCount === 0 && <div style={{ fontSize: 13, color: T.a700 }}>Add a transcript to Context to start asking.</div>}
+                {onCount === 0 && <div style={{ fontSize: 13, color: T.a700 }}>Ask anything now — add your transcript on the left for answers about your own classes.</div>}
               </div>
             )}
 
@@ -617,7 +651,7 @@ export default function DashboardView({ page, onSave }) {
                 rows={2}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
-                placeholder={onCount ? "Ask about your degree…" : "Add a transcript first, then ask…"}
+                placeholder={onCount ? "Ask about your degree…" : "Ask anything — add documents on the left for answers about your own classes"}
                 style={{ flex: 1, resize: "none", padding: "8px 10px", fontFamily: T.body, fontSize: 15, lineHeight: 1.4, color: T.text, background: T.surface, border: `1px solid ${T.divider}`, caretColor: T.accent, outline: "none" }}
               />
               <button className="dd-accent-btn" onClick={() => send()} style={{ ...bare, display: "flex", alignItems: "flex-end", justifyContent: "flex-start", gap: 6, padding: "8px 16px", minWidth: 96, background: T.accent, color: T.bg, fontFamily: T.head, fontWeight: 800, fontSize: 14 }}>
