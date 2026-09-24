@@ -11,6 +11,9 @@ import {
   makeSource,
   parseTranscript,
   parseReqs,
+  parseDegreeWorks,
+  isDegreeWorks,
+  degreeWorksMeta,
   fmtCr,
   tooLarge,
   STARTERS,
@@ -47,10 +50,44 @@ const nid = () => "s" + Date.now().toString(36) + Math.random().toString(36).sli
 // Which bucket a pasted or dropped document belongs in — the artifact reads the
 // content first and only falls back to the file name.
 function guessKind(name, text) {
+  // A Degree Works audit IS the degree list, whatever the file is called.
+  if (isDegreeWorks(text)) return "requirements";
   if (/transcript|grades/i.test(name || "") || parseTranscript(text).length) return "transcript";
   const r = parseReqs(text);
   if (/require|audit|degree|catalog/i.test(name || "") || r.groups.reduce((a, g) => a + g.items.length, 0) >= 3) return "requirements";
   return "notes";
+}
+
+// Pull the text layer out of a PDF in the browser — no upload, no server round
+// trip, and no new serverless function. pdf.js is imported on demand (it is a
+// large dependency and only a dropped PDF needs it) with its worker resolved
+// through Vite, so it never lands in the initial Tasks bundle.
+//
+// Text is reassembled using each item's `hasEOL` flag rather than joining on
+// spaces: Degree Works prints label/value stanzas, and its parser reads lines.
+async function extractPdfText(file) {
+  const [pdfjs, workerUrl] = await Promise.all([
+    import("pdfjs-dist"),
+    import("pdfjs-dist/build/pdf.worker.min.mjs?url").then((m) => m.default),
+  ]);
+  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+  const data = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjs.getDocument({ data, useSystemFonts: true, isEvalSupported: false }).promise;
+  let out = "";
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const tc = await page.getTextContent();
+      for (const item of tc.items) {
+        out += item.str || "";
+        if (item.hasEOL) out += "\n";
+      }
+      out += "\n";
+    }
+  } finally {
+    try { await doc.destroy(); } catch { /* ignore */ }
+  }
+  return out;
 }
 
 const fmtSize = (bytes) => (bytes > 1e6 ? (bytes / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(bytes / 1e3)) + " KB");
@@ -67,6 +104,7 @@ export default function DashboardView({ page, onSave }) {
   const [dragOver, setDragOver] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
+  const [extracting, setExtracting] = useState(false);
 
   const fileRef = useRef(null);
   const chatRef = useRef(null);
@@ -133,20 +171,34 @@ export default function DashboardView({ page, onSave }) {
     setPaste(""); setTitle(""); setStaged([]); setNotice("");
   };
 
-  // Only text files yield text in the browser, exactly as the artifact does it —
-  // a dropped PDF is kept as a named source with no course lines, and chat says so.
+  // Text comes out of the file in the browser — no upload, no server round trip.
+  // PDFs go through pdf.js (lazily imported, so it stays out of the initial bundle);
+  // a scanned PDF has no text layer and still lands as a named source with none.
   const handleFiles = async (files) => {
     const arr = Array.from(files || []);
     if (!arr.length) return;
+    setExtracting(true);
     const out = [];
-    for (const f of arr) {
-      let text = "";
-      if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) {
-        try { text = await f.text(); } catch { /* keep the file, drop the text */ }
+    try {
+      for (const f of arr) {
+        let text = "";
+        if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) {
+          try { text = await f.text(); } catch { /* keep the file, drop the text */ }
+        } else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
+          try {
+            text = await extractPdfText(f);
+          } catch (err) {
+            console.error("PDF text extraction failed", err);
+          }
+        }
+        out.push({ id: nid(), name: f.name, text, size: fmtSize(f.size) });
       }
-      out.push({ id: nid(), name: f.name, text, size: fmtSize(f.size) });
+    } finally {
+      if (mountedRef.current) setExtracting(false);
     }
     if (!mountedRef.current) return;
+    const blank = out.filter((f) => !f.text.trim());
+    setNotice(blank.length ? `${blank[0].name} has no text layer — it looks scanned. Paste the text instead, or export it again from the browser.` : "");
     setStaged((s) => [...s, ...out]);
   };
 
@@ -201,6 +253,8 @@ export default function DashboardView({ page, onSave }) {
       const cs = parseTranscript(s.text);
       const terms = new Set(cs.map((c) => c.term)).size;
       meta = cs.length ? `${cs.length} courses · ${terms} terms` : (s.size ? `PDF · ${s.size}` : "No course lines found");
+    } else if (isDegreeWorks(s.text)) {
+      meta = degreeWorksMeta(parseDegreeWorks(s.text));
     } else if (s.kind === "requirements") {
       const r = parseReqs(s.text);
       const n = r.groups.reduce((a, g) => a + g.items.length, 0);
@@ -269,7 +323,7 @@ export default function DashboardView({ page, onSave }) {
                 style={{ ...bare, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, width: "100%", minHeight: 112, padding: 16, border: `1px solid ${T.divider}`, textAlign: "left", color: T.text }}
               >
                 <Upload style={{ width: 20, height: 20, flex: "none" }} />
-                <span style={heading(16, 1.2)}>Drop any file here</span>
+                <span style={heading(16, 1.2)}>{extracting ? "Reading your file…" : "Drop any file here"}</span>
                 <span style={{ fontSize: 12, color: T.n700 }}>or click to browse. PDFs, docs, images, spreadsheets.</span>
               </button>
             ) : (

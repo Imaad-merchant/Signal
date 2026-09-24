@@ -112,8 +112,137 @@ export function makeSource(kind, name, text, origin, size) {
   return { id: nid(), kind, name, text: text || "", origin: origin || "paste", size: size || null, on: true };
 }
 
+// ── Ellucian Degree Works audits ──────────────────────────────────────────────
+// A Degree Works export is not a line-per-course transcript: it prints label/value
+// stanzas (Course / Title / Grade / Credits / Term) and reports its own applied vs
+// required credits per block. Those totals are authoritative — the per-requirement
+// tick marks are icons in the PDF and do not survive text extraction — so an audit
+// drives the numbers directly rather than being summed up from course lines.
+
+const DW_FOOTER = /^(\d{1,2}\/\d{1,2}\/\d{2,4},?\s.*Degree Works|https?:\/\/)/i;
+
+export function isDegreeWorks(text) {
+  return /Ellucian Degree Works|Degree Audit/i.test(text || "");
+}
+
+export function parseDegreeWorks(text) {
+  if (!isDegreeWorks(text)) return null;
+  // Page headers/footers interleave with content on every page break.
+  const lines = (text || "").split("\n").map((l) => l.trim()).filter((l) => l && !DW_FOOTER.test(l));
+
+  const joined = lines.join("\n");
+  const prog = joined.match(/Program\s+(.+?)\s+Major\s+(.+?)(?:\s+Classification\s+(\S+))?$/m);
+  const gpaM = joined.match(/Institutional GPA\s+([\d.]+)/i);
+  const student = joined.match(/^([A-Z][\w'-]+,\s?[\w'\- ]+)$/m);
+
+  // Blocks: "Credits required: N [Credits applied: M]" then the block's name, then its status.
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^Credits required:\s*(\d+)(?:\s+Credits applied:\s*(\d+))?/i);
+    if (!m) continue;
+    let applied = m[2] == null ? null : +m[2];
+    let j = i + 1;
+    // The degree-level block prints its applied credits on the following line.
+    if (applied == null) {
+      const cont = lines[j] && lines[j].match(/^Credits applied:\s*(\d+)/i);
+      if (cont) { applied = +cont[1]; j++; }
+    }
+    const name = lines[j] || "";
+    const status = (lines[j + 1] || "").match(/^(COMPLETE|INCOMPLETE)$/i) ? lines[j + 1].toUpperCase() : "";
+    // Requirement rows run from after the block's "Minimum ... " preamble to the next block.
+    const items = [];
+    for (let k = j + 2; k < lines.length; k++) {
+      if (/^Credits required:/i.test(lines[k]) || /^Course\s/i.test(lines[k]) || /^Legend$|^Disclaimer$/i.test(lines[k])) break;
+      if (/^Minimum\b/i.test(lines[k]) || /^(COMPLETE|INCOMPLETE)$/i.test(lines[k])) continue;
+      if (/^(Name|Degree|Show more|Degree progress|Requirements Credits)$/i.test(lines[k])) continue;
+      if (/^(Credits|Classes) applied:/i.test(lines[k]) || /^Insufficient Credits/i.test(lines[k])) continue;
+      items.push(lines[k]);
+    }
+    blocks.push({ name, status, required: +m[1], applied, items });
+  }
+
+  // Course stanzas: Course / Title / Grade / Credits / Term (Repeated is optional).
+  const courses = [];
+  for (let i = 0; i < lines.length; i++) {
+    const c = lines[i].match(/^Course\s+([A-Z]{2,5})\s?(\d{3,4}[A-Z]?)$/);
+    if (!c) continue;
+    const get = (label) => {
+      for (let k = i + 1; k < Math.min(i + 7, lines.length); k++) {
+        const m = lines[k].match(new RegExp("^" + label + "\\s+(.+)$"));
+        if (m) return m[1].trim();
+      }
+      return "";
+    };
+    const cr = parseFloat(get("Credits"));
+    courses.push({
+      code: c[1] + " " + c[2],
+      name: get("Title"),
+      cr: Number.isFinite(cr) ? cr : 0,
+      grade: get("Grade").toUpperCase(),
+      term: get("Term"),
+      repeated: /^Repeated/i.test(lines[i + 5] || ""),
+    });
+  }
+
+  const degree = blocks.find((b) => /^Degree in\b/i.test(b.name)) || blocks[0] || null;
+  return {
+    student: student ? student[1] : "",
+    program: prog ? prog[1] : "",
+    major: prog ? prog[2] : "",
+    classification: prog && prog[3] ? prog[3] : "",
+    gpa: gpaM ? +gpaM[1] : null,
+    creditsRequired: degree ? degree.required : null,
+    creditsApplied: degree && degree.applied != null ? degree.applied : null,
+    // Every block but the degree-level one, which is reported as the headline total.
+    blocks: blocks.filter((b) => b !== degree),
+    courses,
+  };
+}
+
+// Human summary of an audit source, for the Context list.
+export function degreeWorksMeta(audit) {
+  const bits = [];
+  if (audit.creditsApplied != null && audit.creditsRequired) bits.push(`${audit.creditsApplied} of ${audit.creditsRequired} cr applied`);
+  if (audit.gpa != null) bits.push(`GPA ${audit.gpa.toFixed(2)}`);
+  if (audit.courses.length) bits.push(`${audit.courses.length} listed classes`);
+  return "Degree Works audit" + (bits.length ? " · " + bits.join(" · ") : "");
+}
+
 export function statsFor(sources, degreeId) {
   const on = sources.filter((s) => s.on);
+
+  // A Degree Works audit reports its own applied/required credits and institutional
+  // GPA. Those are the school's numbers, so they win over anything summed from
+  // course lines — and its per-requirement status is an icon that text extraction
+  // cannot recover, so those rows are listed without a claim about their state.
+  const auditSrc = on.find((s) => isDegreeWorks(s.text));
+  if (auditSrc) {
+    const audit = parseDegreeWorks(auditSrc.text);
+    const target = audit.creditsRequired || 120;
+    const earned = audit.creditsApplied || 0;
+    const groups = audit.blocks.map((b) => ({
+      name: b.name,
+      need: null,
+      items: b.items.map((name) => ({ code: "", name, st: "listed", grade: "" })),
+      meta: (b.applied != null && b.required ? `${b.applied} of ${b.required} cr applied` : "") + (b.status ? ` · ${b.status.toLowerCase()}` : ""),
+    }));
+    const done = audit.blocks.filter((b) => b.status === "COMPLETE").length;
+    return {
+      audit, auditName: auditSrc.name,
+      hasTranscript: true, hasCourses: audit.courses.length > 0 || earned > 0,
+      reqSrc: auditSrc, req: { total: target, groups: [] }, target,
+      earned: r1(earned), ip: 0, gpa: audit.gpa, gcr: r1(earned),
+      courses: audit.courses, groups,
+      reqNeed: audit.blocks.length, reqDone: done, reqIp: 0,
+      reqLeft: Math.max(0, audit.blocks.length - done),
+      missing: [], inProg: [],
+      pct: target ? Math.min(100, Math.round((earned / target) * 100)) : 0,
+      pctIp: target ? Math.min(100, Math.round((earned / target) * 100)) : 0,
+      citeNames: on.map((s) => s.name),
+      on,
+    };
+  }
+
   const trSources = on.filter((s) => s.kind === "transcript");
   const map = {};
   trSources.forEach((s) => parseTranscript(s.text).forEach((c) => { map[c.code] = c; }));
@@ -157,8 +286,37 @@ export function statsFor(sources, degreeId) {
   };
 }
 
+// Offline answers for a Degree Works audit. Every number here is one the audit
+// itself prints, so this never contradicts the Progress pane.
+function answerFromAudit(s, st) {
+  const a = st.audit;
+  const left = Math.max(0, st.target - st.earned);
+  const blocks = a.blocks.map((b) => `${b.name}: ${b.applied} of ${b.required} cr (${(b.status || "").toLowerCase() || "in progress"})`).join("; ");
+  if (/gpa|grade point/.test(s)) {
+    return a.gpa == null
+      ? "Your audit doesn't print an institutional GPA."
+      : `Your institutional GPA is ${a.gpa.toFixed(2)}, from ${st.auditName}.` + (a.classification ? ` You're classified as a ${a.classification.toLowerCase()}.` : "");
+  }
+  if (/missing|left|still|remaining|need to take|what.*need/.test(s)) {
+    return `You have ${fmtCr(left)} credits left of the ${st.target} your ${a.program || "program"} requires. By block — ${blocks}.` +
+      `\nThe audit marks each requirement with an icon rather than text, so I can't tell from this file which individual ones are ticked off. The blocks above are what it reports.`;
+  }
+  if (/graduat|how long|terms|semesters|when/.test(s)) {
+    const terms = Math.ceil(left / 15);
+    return `You've applied ${fmtCr(st.earned)} of ${st.target} credits, leaving ${fmtCr(left)} — about ${terms} more term${terms === 1 ? "" : "s"} at 15 credits each.`;
+  }
+  if (/repeat|withdraw|fail|insufficient|retake/.test(s) && a.courses.length) {
+    return `${a.courses.length} classes carried no credit: ` + a.courses.map((c) => `${c.code} (${c.grade}, ${c.term})`).join(", ") + ".";
+  }
+  return `Your audit shows ${fmtCr(st.earned)} of ${st.target} credits applied toward ${a.program || "your program"} — ${st.pct}% of the degree.` +
+    (a.gpa != null ? ` Institutional GPA ${a.gpa.toFixed(2)}.` : "") +
+    (blocks ? `\nBy block — ${blocks}.` : "") +
+    (a.courses.length ? `\n${a.courses.length} classes are listed as insufficient credit (repeated, withdrawn or failed).` : "");
+}
+
 export function answerFor(q, st) {
   const s = q.toLowerCase();
+  if (st.audit) return answerFromAudit(s, st);
   if (!st.hasTranscript) return "I don’t see a transcript in Context yet. Paste it or upload the PDF on the left and I’ll work from that.";
   if (!st.hasCourses) return "I have your file, but I couldn’t read course lines from it yet. Paste the transcript text and I’ll pick up each class, its credits and grade.";
   const left = Math.max(0, st.target - st.earned - st.ip);
