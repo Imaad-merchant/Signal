@@ -87,7 +87,14 @@ export function parseReqs(text) {
   let total = null; const groups = []; let g = null;
   (text || "").split("\n").forEach((l) => {
     const t = l.trim(); if (!t) return;
-    const tm = t.match(/total credits[^\d]*(\d+)/i);
+    // Degree plans say "total credits", "total hours required", "120 semester hours" —
+    // the artifact only knew the first.
+    // "total credits" / "total hours required" / "150 total semester hours" /
+    // "120 credit hours required". The word total or required must be present, or a
+    // group header like "30 hours upper-level accounting" would read as the degree total.
+    const tm = t.match(/total[^\n\d]{0,20}?(?:credit|hour)s?[^\d]{0,12}(\d{2,3})/i)
+      || t.match(/(\d{2,3})\s+total\s+(?:semester\s+)?(?:credit|hour)/i)
+      || t.match(/(\d{2,3})\s+(?:semester\s+)?(?:credit|hour)\s?(?:hour)?s?\s+required/i);
     if (tm) { total = +tm[1]; return; }
     const m = t.match(/^([A-Z]{2,5})\s?(\d{3,4}[A-Z]?)\s+(.*)$/);
     if (m) {
