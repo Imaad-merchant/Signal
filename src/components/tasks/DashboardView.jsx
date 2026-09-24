@@ -58,14 +58,15 @@ function guessKind(name, text) {
   return "notes";
 }
 
-// Pull the text layer out of a PDF in the browser — no upload, no server round
-// trip, and no new serverless function. pdf.js is imported on demand (it is a
-// large dependency and only a dropped PDF needs it) with its worker resolved
-// through Vite, so it never lands in the initial Tasks bundle.
+// Read a dropped file's text.
 //
-// Text is reassembled using each item's `hasEOL` flag rather than joining on
-// spaces: Degree Works prints label/value stanzas, and its parser reads lines.
-async function extractPdfText(file) {
+// PDFs try pdf.js in the browser first — fast, and the bytes never leave the
+// machine. pdf.js is imported on demand (it is large, and only a PDF needs it)
+// with its worker resolved through Vite. If that path fails or comes back empty
+// — a blocked worker, an older browser, a locked-down profile — the file is
+// uploaded and the same extraction runs server-side, so a transcript is readable
+// whatever the browser does. A genuinely scanned PDF has no text either way.
+async function extractPdfInBrowser(file) {
   const [pdfjs, workerUrl] = await Promise.all([
     import("pdfjs-dist"),
     import("pdfjs-dist/build/pdf.worker.min.mjs?url").then((m) => m.default),
@@ -88,6 +89,45 @@ async function extractPdfText(file) {
     try { await doc.destroy(); } catch { /* ignore */ }
   }
   return out;
+}
+
+async function extractPdfOnServer(file) {
+  const up = await base44.integrations.Core.UploadFile({ file });
+  const fileUrl = up && up.file_url;
+  if (!fileUrl) throw new Error("upload failed");
+  const r = await base44.functions.invoke("donna", { route: "extract-pdf-text", file_url: fileUrl });
+  const data = (r && r.data) || r || {};
+  if (data.error) throw new Error(data.detail || data.error);
+  return String(data.text || "");
+}
+
+const isPdfFile = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+const isTextFile = (f) => /^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name);
+
+// Returns { text, error } — never throws, so one bad file can't take the batch down.
+async function readFileText(file) {
+  if (isTextFile(file)) {
+    try { return { text: await file.text(), error: "" }; }
+    catch (err) { return { text: "", error: err && err.message ? err.message : "could not be read" }; }
+  }
+  if (!isPdfFile(file)) return { text: "", error: "" };
+
+  let browserError = "";
+  try {
+    const text = await extractPdfInBrowser(file);
+    if (text.trim()) return { text, error: "" };
+  } catch (err) {
+    browserError = err && err.message ? err.message : String(err);
+    // Worth reporting: it tells us whether the in-browser path is worth keeping.
+    console.warn("pdf.js in-browser failed, falling back to the server:", browserError);
+  }
+  try {
+    const text = await extractPdfOnServer(file);
+    return { text, error: "" };
+  } catch (err) {
+    const serverError = err && err.message ? err.message : "could not be read";
+    return { text: "", error: browserError ? `${serverError} (in-browser: ${browserError})` : serverError };
+  }
 }
 
 const fmtSize = (bytes) => (bytes > 1e6 ? (bytes / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(bytes / 1e3)) + " KB");
@@ -184,19 +224,8 @@ export default function DashboardView({ page, onSave }) {
     const failures = [];
     try {
       for (const f of arr) {
-        let text = "";
-        if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) {
-          try { text = await f.text(); } catch { /* keep the file, drop the text */ }
-        } else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
-          try {
-            text = await extractPdfText(f);
-          } catch (err) {
-            // A worker that failed to load and a PDF with no text layer are
-            // different problems — say which one actually happened.
-            console.error("PDF text extraction failed", err);
-            failures.push(`${f.name}: ${err && err.message ? err.message : "could not be read"}`);
-          }
-        }
+        const { text, error } = await readFileText(f);
+        if (error) failures.push(`${f.name}: ${error}`);
         out.push({ id: nid(), name: f.name, text, size: fmtSize(f.size) });
       }
     } finally {
@@ -226,10 +255,7 @@ export default function DashboardView({ page, onSave }) {
     let text = "";
     let error = "";
     try {
-      if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) text = await f.text();
-      else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) text = await extractPdfText(f);
-    } catch (err) {
-      error = err && err.message ? err.message : "could not be read";
+      ({ text, error } = await readFileText(f));
     } finally {
       if (mountedRef.current) setExtracting(false);
     }
