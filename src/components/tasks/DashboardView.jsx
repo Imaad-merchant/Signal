@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { GraduationCap, Upload, FileText, X, Plus, ArrowRight, ListChecks, NotebookPen, Check, ArrowUpRight, ArrowUp } from "lucide-react";
+import { GraduationCap, Upload, FileText, X, Plus, ArrowRight, ListChecks, NotebookPen, Check, ArrowUpRight, ArrowUp, RotateCw } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useAutosave } from "./useAutosave";
 import "./dashboard/degree.css";
@@ -107,6 +107,8 @@ export default function DashboardView({ page, onSave }) {
   const [extracting, setExtracting] = useState(false);
 
   const fileRef = useRef(null);
+  const rereadRef = useRef(null);
+  const rereadId = useRef(null);
   const chatRef = useRef(null);
   const loadedRef = useRef(false);
   const mountedRef = useRef(true);
@@ -179,6 +181,7 @@ export default function DashboardView({ page, onSave }) {
     if (!arr.length) return;
     setExtracting(true);
     const out = [];
+    const failures = [];
     try {
       for (const f of arr) {
         let text = "";
@@ -188,7 +191,10 @@ export default function DashboardView({ page, onSave }) {
           try {
             text = await extractPdfText(f);
           } catch (err) {
+            // A worker that failed to load and a PDF with no text layer are
+            // different problems — say which one actually happened.
             console.error("PDF text extraction failed", err);
+            failures.push(`${f.name}: ${err && err.message ? err.message : "could not be read"}`);
           }
         }
         out.push({ id: nid(), name: f.name, text, size: fmtSize(f.size) });
@@ -197,9 +203,47 @@ export default function DashboardView({ page, onSave }) {
       if (mountedRef.current) setExtracting(false);
     }
     if (!mountedRef.current) return;
-    const blank = out.filter((f) => !f.text.trim());
-    setNotice(blank.length ? `${blank[0].name} has no text layer — it looks scanned. Paste the text instead, or export it again from the browser.` : "");
+    const blank = out.filter((f) => !f.text.trim() && !failures.some((m) => m.startsWith(f.name)));
+    setNotice(
+      failures.length ? `Couldn't read ${failures[0]}`
+      : blank.length ? `${blank[0].name} has no text layer — it looks scanned. Paste the text instead, or export it again from the browser.`
+      : ""
+    );
     setStaged((s) => [...s, ...out]);
+  };
+
+  // Re-read a source whose file produced no text — a stale cached build, a failed
+  // worker or a wrong file all leave the same empty source, and removing and
+  // re-adding it would lose its name and its degree-list pick.
+  const rereadSource = (id) => { rereadId.current = id; if (rereadRef.current) rereadRef.current.click(); };
+
+  const onRereadFile = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    const id = rereadId.current;
+    e.target.value = "";
+    if (!f || !id) return;
+    setExtracting(true);
+    let text = "";
+    let error = "";
+    try {
+      if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) text = await f.text();
+      else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) text = await extractPdfText(f);
+    } catch (err) {
+      error = err && err.message ? err.message : "could not be read";
+    } finally {
+      if (mountedRef.current) setExtracting(false);
+    }
+    if (!mountedRef.current) return;
+    if (!text.trim()) {
+      setNotice(error ? `Couldn't read ${f.name}: ${error}` : `${f.name} still has no text to read.`);
+      return;
+    }
+    if (tooLarge(text)) { setNotice(`${f.name} is too long to store on this page. Paste the part with your courses.`); return; }
+    setNotice("");
+    commit((p) => ({
+      ...p,
+      sources: p.sources.map((x) => (x.id === id ? { ...x, text, kind: guessKind(x.name, text), size: fmtSize(f.size) } : x)),
+    }));
   };
 
   const onGripDown = (e) => {
@@ -249,6 +293,11 @@ export default function DashboardView({ page, onSave }) {
 
   const sourceRows = sources.map((s) => {
     let meta = "";
+    // An empty file source is the failure case that used to be invisible: it read
+    // as "PDF · 166 KB", exactly like a file that had been parsed fine.
+    if (!s.text.trim()) {
+      return { s, meta: s.origin === "file" ? "No text read from this file" : "Empty", warn: true, canReread: s.origin === "file", isDegree: false, canBeDegree: false };
+    }
     if (s.kind === "transcript") {
       const cs = parseTranscript(s.text);
       const terms = new Set(cs.map((c) => c.term)).size;
@@ -262,7 +311,7 @@ export default function DashboardView({ page, onSave }) {
     } else {
       meta = `${(s.text.match(/\S+/g) || []).length} words`;
     }
-    return { s, meta, isDegree: s.kind === "requirements" && s.id === effDegree, canBeDegree: s.kind === "requirements" && s.id !== effDegree && reqCount > 1 && s.on };
+    return { s, meta, warn: false, canReread: false, isDegree: s.kind === "requirements" && s.id === effDegree, canBeDegree: s.kind === "requirements" && s.id !== effDegree && reqCount > 1 && s.on };
   });
 
   const usingText = onCount
@@ -333,6 +382,7 @@ export default function DashboardView({ page, onSave }) {
               </div>
             )}
             <input ref={fileRef} type="file" multiple onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} style={{ display: "none" }} />
+            <input ref={rereadRef} type="file" onChange={onRereadFile} style={{ display: "none" }} />
 
             {staged.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", borderTop: `1px solid ${T.divider}` }}>
@@ -401,7 +451,7 @@ export default function DashboardView({ page, onSave }) {
 
           {sources.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", borderTop: `2px solid ${T.divider}` }}>
-              {sourceRows.map(({ s, meta, isDegree, canBeDegree }) => {
+              {sourceRows.map(({ s, meta, warn, canReread, isDegree, canBeDegree }) => {
                 const Icon = KIND_ICON[s.kind];
                 return (
                   <div key={s.id} style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) auto", gap: 10, alignItems: "start", padding: "12px 0", borderBottom: `1px solid ${T.divider}` }}>
@@ -414,7 +464,13 @@ export default function DashboardView({ page, onSave }) {
                         onChange={(e) => { const v = e.target.value; commit((p) => ({ ...p, sources: p.sources.map((x) => (x.id === s.id ? { ...x, name: v } : x)) })); }}
                         style={{ width: "100%", minWidth: 0, padding: "2px 4px", margin: "-2px 0 0 -4px", fontFamily: T.body, fontSize: 14, fontWeight: 600, lineHeight: 1.3, color: T.text, background: "transparent", border: "1px solid transparent", outline: "none", textOverflow: "ellipsis" }}
                       />
-                      <span style={{ fontSize: 12, color: T.n700 }}>{KIND_LABEL[s.kind]} · {meta}</span>
+                      <span style={{ fontSize: 12, color: warn ? T.a700 : T.n700 }}>{KIND_LABEL[s.kind]} · {meta}</span>
+                      {canReread && (
+                        <button className="dd-accent-link" onClick={() => rereadSource(s.id)} style={{ ...bare, alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", marginLeft: -4, fontFamily: T.head, fontWeight: 800, fontSize: 12, color: T.a700 }}>
+                          <RotateCw style={{ width: 12, height: 12 }} />
+                          Read this file again
+                        </button>
+                      )}
                       {isDegree && <span style={{ alignSelf: "flex-start", fontSize: 11, letterSpacing: "0.02em", padding: "3px 10px", background: T.a100, color: T.a800 }}>Degree list</span>}
                       {canBeDegree && (
                         <button className="dd-accent-link" onClick={() => commit((p) => ({ ...p, degreeId: s.id }))} style={{ ...bare, alignSelf: "flex-start", padding: "2px 4px", marginLeft: -4, fontFamily: T.head, fontWeight: 800, fontSize: 12, color: T.a700 }}>
