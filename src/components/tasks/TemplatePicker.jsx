@@ -21,7 +21,7 @@ const TEMPLATES = [
   {
     type: "dashboard",
     name: "Dashboard",
-    description: "Track the classes you've taken and the ones you still need, with live GPA and credit progress.",
+    description: "Drop in your transcript and degree requirements, then ask about credits, GPA and what is still missing.",
     icon: LayoutDashboard,
     accent: "from-violet-500/20 to-fuchsia-500/15 text-violet-400",
     starter: { dashboard: "" },

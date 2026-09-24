@@ -1,131 +1,78 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Plus, Trash2, GraduationCap, Target, TrendingUp, BookOpen, AlertTriangle, LayoutList, CalendarDays } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { GraduationCap, Upload, FileText, X, Plus, ArrowRight, ListChecks, NotebookPen, Check, ArrowUpRight, ArrowUp } from "lucide-react";
+import { base44 } from "@/api/base44Client";
 import { useAutosave } from "./useAutosave";
+import "./dashboard/degree.css";
 import {
   parseDashboard,
   serializeDashboard,
-  computeStats,
-  blankCourse,
-  normalizeCourse,
-  requiredGpaForTarget,
-  formatGpa,
-  GRADE_POINTS,
-  NON_GPA_GRADES,
-  STATUSES,
-} from "./dashboard/academic";
+  statsFor,
+  answerFor,
+  makeSource,
+  parseTranscript,
+  parseReqs,
+  fmtCr,
+  tooLarge,
+  STARTERS,
+  SAMPLE_TRANSCRIPT,
+  SAMPLE_REQS,
+} from "./dashboard/degree";
 
-const STATUS_STYLE = {
-  completed: "bg-emerald-500/15 text-emerald-300 border-emerald-500/25",
-  in_progress: "bg-blue-500/15 text-blue-300 border-blue-500/25",
-  planned: "bg-white/[0.05] text-gray-400 border-white/[0.09]",
+// ─── Tokens used inline, straight from the artifact ──────────────────────────
+const T = {
+  bg: "var(--color-bg)",
+  surface: "var(--color-surface)",
+  text: "var(--color-text)",
+  accent: "var(--color-accent)",
+  divider: "var(--color-divider)",
+  n200: "var(--color-neutral-200)",
+  n600: "var(--color-neutral-600)",
+  n700: "var(--color-neutral-700)",
+  n800: "var(--color-neutral-800)",
+  a100: "var(--color-accent-100)",
+  a700: "var(--color-accent-700)",
+  a800: "var(--color-accent-800)",
+  head: "var(--font-heading)",
+  body: "var(--font-body)",
 };
+const eyebrow = { fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" };
+const heading = (size, lh = 1.15) => ({ fontFamily: T.head, fontWeight: 800, fontSize: size, lineHeight: lh });
+const bare = { background: "transparent", border: 0, cursor: "pointer", fontFamily: T.body, color: "inherit" };
 
-function StatTile({ icon: Icon, label, value, sub, accent = "text-gray-100" }) {
-  return (
-    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] px-4 py-3">
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-gray-500">
-        <Icon className="h-3.5 w-3.5" />
-        {label}
-      </div>
-      <p className={`mt-1.5 text-2xl font-semibold tabular-nums ${accent}`}>{value}</p>
-      {sub ? <p className="mt-0.5 text-[11px] text-gray-500">{sub}</p> : null}
-    </div>
-  );
+const KIND_LABEL = { transcript: "Transcript", requirements: "Requirements", notes: "Notes" };
+const KIND_ICON = { transcript: FileText, requirements: ListChecks, notes: NotebookPen };
+
+const nid = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+// Which bucket a pasted or dropped document belongs in — the artifact reads the
+// content first and only falls back to the file name.
+function guessKind(name, text) {
+  if (/transcript|grades/i.test(name || "") || parseTranscript(text).length) return "transcript";
+  const r = parseReqs(text);
+  if (/require|audit|degree|catalog/i.test(name || "") || r.groups.reduce((a, g) => a + g.items.length, 0) >= 3) return "requirements";
+  return "notes";
 }
 
-// Borderless cell input so the table reads like a spreadsheet, not a form.
-function Cell({ value, onChange, placeholder, className = "", type = "text", ...rest }) {
-  return (
-    <input
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      className={`w-full bg-transparent px-2 py-1.5 text-[13px] text-gray-200 placeholder-gray-600 rounded focus:outline-none focus:bg-white/[0.05] ${className}`}
-      {...rest}
-    />
-  );
-}
-
-function CourseRow({ course, onChange, onDelete }) {
-  const set = (patch) => onChange(normalizeCourse({ ...course, ...patch }));
-  return (
-    <tr className="border-t border-white/[0.04] hover:bg-white/[0.02] group">
-      <td className="w-[120px]"><Cell value={course.term} onChange={(v) => set({ term: v })} placeholder="Fall 2025" /></td>
-      <td className="w-[110px]"><Cell value={course.code} onChange={(v) => set({ code: v })} placeholder="CS 101" className="font-medium" /></td>
-      <td><Cell value={course.name} onChange={(v) => set({ name: v })} placeholder="Course name" /></td>
-      <td className="w-[120px]"><Cell value={course.category} onChange={(v) => set({ category: v })} placeholder="Major" /></td>
-      <td className="w-[70px]">
-        <Cell type="number" min="0" step="0.5" value={course.credits} onChange={(v) => set({ credits: v })} placeholder="3" className="text-right tabular-nums" />
-      </td>
-      <td className="w-[120px]">
-        <select
-          value={course.status}
-          onChange={(e) => set({ status: e.target.value })}
-          className={`w-full rounded-md border px-2 py-1 text-[11.5px] focus:outline-none ${STATUS_STYLE[course.status]}`}
-        >
-          {STATUSES.map((s) => <option key={s.key} value={s.key} className="bg-[#1e1f20] text-gray-200">{s.label}</option>)}
-        </select>
-      </td>
-      <td className="w-[86px]">
-        {course.status === "completed" ? (
-          <select
-            value={course.grade}
-            onChange={(e) => set({ grade: e.target.value })}
-            className="w-full rounded-md border border-white/[0.09] bg-white/[0.03] px-2 py-1 text-[11.5px] text-gray-200 focus:outline-none"
-          >
-            <option value="" className="bg-[#1e1f20]">—</option>
-            {Object.keys(GRADE_POINTS).map((g) => <option key={g} value={g} className="bg-[#1e1f20]">{g}</option>)}
-            {Object.keys(NON_GPA_GRADES).map((g) => <option key={g} value={g} className="bg-[#1e1f20]">{g}</option>)}
-          </select>
-        ) : (
-          <span className="block px-2 text-[11.5px] text-gray-600">—</span>
-        )}
-      </td>
-      <td className="w-[36px]">
-        <button
-          onClick={() => onDelete(course.id)}
-          title="Remove course"
-          className="p-1.5 rounded text-gray-600 opacity-0 group-hover:opacity-100 hover:text-rose-400 hover:bg-white/[0.05] transition"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      </td>
-    </tr>
-  );
-}
-
-function CourseTable({ courses, onChange, onDelete }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-white/[0.06] bg-white/[0.015]">
-      <table className="w-full min-w-[760px] border-collapse">
-        <thead>
-          <tr className="text-[10.5px] uppercase tracking-wider text-gray-500">
-            <th className="px-2 py-2 text-left font-medium">Term</th>
-            <th className="px-2 py-2 text-left font-medium">Code</th>
-            <th className="px-2 py-2 text-left font-medium">Course</th>
-            <th className="px-2 py-2 text-left font-medium">Category</th>
-            <th className="px-2 py-2 text-right font-medium">Cr</th>
-            <th className="px-2 py-2 text-left font-medium">Status</th>
-            <th className="px-2 py-2 text-left font-medium">Grade</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {courses.map((c) => <CourseRow key={c.id} course={c} onChange={onChange} onDelete={onDelete} />)}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+const fmtSize = (bytes) => (bytes > 1e6 ? (bytes / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(bytes / 1e3)) + " KB");
 
 export default function DashboardView({ page, onSave }) {
-  const [state, setState] = useState(() => parseDashboard(page.dashboard));
-  const [groupBy, setGroupBy] = useState("term"); // "term" | "status"
-  const [targetGpa, setTargetGpa] = useState(() => {
-    try { return localStorage.getItem("pulse_dashboard_target_gpa") || "3.5"; } catch { return "3.5"; }
-  });
+  // Persisted: everything below is written back to the page doc.
+  const [doc, setDoc] = useState(() => parseDashboard(page.dashboard));
+  // Transient: draft text, staging and drag state never trigger a save.
+  const [draft, setDraft] = useState("");
+  const [paste, setPaste] = useState("");
+  const [title, setTitle] = useState("");
+  const [staged, setStaged] = useState([]);
+  const [textH, setTextH] = useState(120);
+  const [dragOver, setDragOver] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const fileRef = useRef(null);
+  const chatRef = useRef(null);
   const loadedRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
 
   // Bound to THIS page's id (the component is keyed per page.id), so a debounced
   // write that lands after a page switch still targets the right dashboard.
@@ -133,214 +80,499 @@ export default function DashboardView({ page, onSave }) {
   const { schedule } = useAutosave(500);
 
   useEffect(() => {
-    setState(parseDashboard(page.dashboard));
+    setDoc(parseDashboard(page.dashboard));
     loadedRef.current = true;
   }, [page.id]);
 
-  useEffect(() => {
-    try { localStorage.setItem("pulse_dashboard_target_gpa", targetGpa); } catch { /* ignore */ }
-  }, [targetGpa]);
-
-  // Every mutation goes through here so nothing can change state without scheduling a save.
-  const commit = useCallback((next) => {
-    setState(next);
-    if (loadedRef.current) schedule({ dashboard: serializeDashboard(next) }, save);
+  // Single funnel for persisted changes — nothing mutates `doc` without saving.
+  const commit = useCallback((updater) => {
+    setDoc((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (loadedRef.current) schedule({ dashboard: serializeDashboard(next) }, save);
+      return next;
+    });
   }, [schedule, save]);
 
-  const updateCourse = useCallback((course) => {
-    commit({ ...state, courses: state.courses.map((c) => (c.id === course.id ? course : c)) });
-  }, [commit, state]);
+  const { sources, degreeId, messages } = doc;
 
-  const deleteCourse = useCallback((id) => {
-    commit({ ...state, courses: state.courses.filter((c) => c.id !== id) });
-  }, [commit, state]);
+  useEffect(() => {
+    const el = chatRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length, pending]);
 
-  const addCourse = useCallback((status = "planned") => {
-    // Seed the term from the most recent row so adding a semester isn't all retyping.
-    const last = state.courses[state.courses.length - 1];
-    const seeded = { ...blankCourse(status), term: last ? last.term : "" };
-    commit({ ...state, courses: [...state.courses, seeded] });
-  }, [commit, state]);
+  const st = useMemo(() => statsFor(sources, degreeId), [sources, degreeId]);
+  const hasT = sources.some((x) => x.kind === "transcript");
+  const hasR = sources.some((x) => x.kind === "requirements");
+  const onCount = sources.filter((s) => s.on).length;
+  const effDegree = st.reqSrc ? st.reqSrc.id : null;
+  const reqCount = sources.filter((x) => x.kind === "requirements").length;
 
-  const stats = useMemo(() => computeStats(state.courses, state.target_credits), [state.courses, state.target_credits]);
+  const addSources = useCallback((list) => {
+    if (!list.length) return;
+    commit((s) => {
+      let nextDegree = s.degreeId;
+      list.forEach((src) => { if (src.kind === "requirements" && !nextDegree) nextDegree = src.id; });
+      return { ...s, sources: [...s.sources, ...list], degreeId: nextDegree };
+    });
+  }, [commit]);
 
-  const plannedAhead = stats.creditsInProgress + stats.creditsPlanned;
-  const needed = useMemo(() => {
-    const t = parseFloat(targetGpa);
-    if (!Number.isFinite(t)) return null;
-    return requiredGpaForTarget(state.courses, t, plannedAhead);
-  }, [state.courses, targetGpa, plannedAhead]);
-
-  const groups = useMemo(() => {
-    if (groupBy === "status") {
-      return STATUSES.map((s) => ({
-        key: s.key,
-        label: s.label,
-        meta: `${state.courses.filter((c) => c.status === s.key).reduce((n, c) => n + c.credits, 0)} cr`,
-        courses: state.courses.filter((c) => c.status === s.key),
-      })).filter((g) => g.courses.length);
+  const addStaged = () => {
+    const text = paste.trim();
+    const out = staged.map((f) => makeSource(guessKind(f.name, f.text), f.name, f.text, "file", f.size));
+    if (text) {
+      const kind = guessKind(title, text);
+      out.push(makeSource(kind, title.trim() || { transcript: "Transcript", requirements: "Degree requirements", notes: "Note" }[kind], text, "paste"));
     }
-    return stats.terms.map((t) => ({
-      key: t.term,
-      label: t.term,
-      meta: `${t.credits} cr${t.gpa === null ? "" : ` · GPA ${formatGpa(t.gpa)}`}`,
-      courses: t.courses,
-    }));
-  }, [groupBy, state.courses, stats.terms]);
+    if (!out.length) return;
+    const oversized = out.filter((s) => tooLarge(s.text));
+    if (oversized.length) {
+      setNotice(`${oversized[0].name} is too long to store on this page. Paste the part with your courses.`);
+      return;
+    }
+    addSources(out);
+    setPaste(""); setTitle(""); setStaged([]); setNotice("");
+  };
+
+  // Only text files yield text in the browser, exactly as the artifact does it —
+  // a dropped PDF is kept as a named source with no course lines, and chat says so.
+  const handleFiles = async (files) => {
+    const arr = Array.from(files || []);
+    if (!arr.length) return;
+    const out = [];
+    for (const f of arr) {
+      let text = "";
+      if (/^text\//.test(f.type) || /\.(txt|md|csv|json)$/i.test(f.name)) {
+        try { text = await f.text(); } catch { /* keep the file, drop the text */ }
+      }
+      out.push({ id: nid(), name: f.name, text, size: fmtSize(f.size) });
+    }
+    if (!mountedRef.current) return;
+    setStaged((s) => [...s, ...out]);
+  };
+
+  const onGripDown = (e) => {
+    e.preventDefault();
+    const y0 = e.clientY, h0 = textH;
+    const move = (ev) => setTextH(Math.max(72, Math.min(520, h0 + ev.clientY - y0)));
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  const send = async (qIn) => {
+    const q = (qIn ?? draft).trim();
+    if (!q || pending) return;
+    commit((s) => ({ ...s, messages: [...s.messages, { role: "user", text: q, cites: [] }] }));
+    setDraft("");
+    setPending(true);
+
+    let text = null;
+    if (st.on.length) {
+      const ctx = st.on.map((s) => `=== ${s.name} (${s.kind}) ===\n${s.text || "(PDF, no extracted text)"}`).join("\n\n");
+      const facts = `Computed: earned ${st.earned} of ${st.target} credits (${st.pct}%), in progress ${st.ip}, GPA ${st.gpa == null ? "n/a" : st.gpa.toFixed(2)}, required classes missing: ${st.missing.map((i) => i.code).join(", ") || "none"}.`;
+      try {
+        const r = await base44.integrations.Core.InvokeLLM({
+          prompt: `You are Signal, a degree-progress assistant inside a student's dashboard. Answer ONLY from the context documents below. Be direct and specific with numbers, under 90 words, plain text, no markdown.\n\n${facts}\n\n${ctx}\n\nQuestion: ${q}`,
+        });
+        // The endpoint returns parsed JSON when the model emits JSON, else { result }.
+        const candidate = typeof r === "string" ? r : r && typeof r.result === "string" ? r.result : null;
+        if (candidate && candidate.trim()) text = candidate;
+      } catch { text = null; }
+    }
+    // Offline/refused → the artifact's own computed answer, which never lies about
+    // the numbers because it reads the same stats the right-hand pane shows.
+    if (!text) text = answerFor(q, st);
+    if (!mountedRef.current) return;
+    const cites = st.on.filter((s) => s.kind !== "notes" || /advisor|plan|minor/i.test(q)).map((s) => s.name);
+    commit((s) => ({ ...s, messages: [...s.messages, { role: "ai", text: String(text).trim(), cites }] }));
+    setPending(false);
+  };
+
+  const loadSamples = () => {
+    const add = [];
+    if (!hasT) add.push(makeSource("transcript", "Transcript_Unofficial_2026.pdf", SAMPLE_TRANSCRIPT, "file", "212 KB"));
+    if (!hasR) add.push(makeSource("requirements", "BS_CS_Requirements_2023.pdf", SAMPLE_REQS, "file", "96 KB"));
+    addSources(add);
+  };
+
+  const sourceRows = sources.map((s) => {
+    let meta = "";
+    if (s.kind === "transcript") {
+      const cs = parseTranscript(s.text);
+      const terms = new Set(cs.map((c) => c.term)).size;
+      meta = cs.length ? `${cs.length} courses · ${terms} terms` : (s.size ? `PDF · ${s.size}` : "No course lines found");
+    } else if (s.kind === "requirements") {
+      const r = parseReqs(s.text);
+      const n = r.groups.reduce((a, g) => a + g.items.length, 0);
+      meta = n ? `${n} classes${r.total ? ` · ${r.total} cr` : ""}` : (s.size ? `PDF · ${s.size}` : "No classes found");
+    } else {
+      meta = `${(s.text.match(/\S+/g) || []).length} words`;
+    }
+    return { s, meta, isDegree: s.kind === "requirements" && s.id === effDegree, canBeDegree: s.kind === "requirements" && s.id !== effDegree && reqCount > 1 && s.on };
+  });
+
+  const usingText = onCount
+    ? "Using " + sources.filter((s) => s.on).map((s) => ({ transcript: "transcript", requirements: s.id === effDegree ? "degree list" : "requirements", notes: "notes" }[s.kind])).filter((v, i, a) => a.indexOf(v) === i).join(", ")
+    : "Nothing in context yet";
+  const asked = new Set(messages.filter((m) => m.role === "user").map((m) => m.text));
+  const followups = STARTERS.filter((t) => !asked.has(t)).slice(0, 3);
+  const nothingStaged = !paste.trim() && staged.length === 0;
+  const addCount = staged.length + (paste.trim() ? 1 : 0);
+
+  const C = 2 * Math.PI * 58;
+  const eLen = (Math.min(st.earned, st.target) / st.target) * C;
+  const iLen = (Math.min(st.ip, Math.max(0, st.target - st.earned)) / st.target) * C;
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <StatTile
-            icon={GraduationCap}
-            label="Cumulative GPA"
-            value={formatGpa(stats.cumulativeGpa)}
-            sub={`${stats.gradedCredits} graded cr · unweighted 4.0`}
-            accent={stats.cumulativeGpa === null ? "text-gray-500" : "text-blue-300"}
+    <div className="degree-dash" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 24, padding: "18px 24px 14px", borderBottom: `2px solid ${T.divider}`, flex: "none" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, ...eyebrow, letterSpacing: "0.1em", color: T.a700 }}>
+            <GraduationCap style={{ width: 14, height: 14, flex: "none" }} />
+            Dashboard
+          </div>
+          <input
+            value={page.title || ""}
+            onChange={(e) => onSave(page.id, { title: e.target.value })}
+            placeholder="Degree dashboard"
+            aria-label="Page title"
+            style={{ ...heading(26), letterSpacing: "-0.015em", color: T.text, background: "transparent", border: 0, padding: 0, width: "100%", outline: "none" }}
           />
-          <StatTile
-            icon={BookOpen}
-            label="Credits earned"
-            value={stats.creditsEarned}
-            sub={`of ${stats.targetCredits} · ${stats.percentComplete}% done`}
-            accent="text-emerald-300"
-          />
-          <StatTile icon={TrendingUp} label="In progress" value={stats.creditsInProgress} sub={`${stats.creditsPlanned} cr planned`} />
-          <StatTile icon={Target} label="Still to take" value={stats.creditsRemaining} sub={`${stats.totalCourses} courses tracked`} />
         </div>
-
-        {/* Progress bar */}
-        <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/[0.05]">
-          <div className="h-full bg-emerald-500/70 transition-all" style={{ width: `${stats.percentComplete}%` }} />
+        <div style={{ fontSize: 12, color: T.n700, paddingBottom: 4 }}>
+          {sources.length ? `${onCount} of ${sources.length} sources in chat · Saved` : "New · Saved"}
         </div>
+      </div>
 
-        {/* Targets */}
-        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3">
-          <label className="flex items-center gap-2 text-[12px] text-gray-400">
-            Degree credits
-            <input
-              type="number"
-              min="0"
-              value={state.target_credits}
-              onChange={(e) => commit({ ...state, target_credits: e.target.value })}
-              className="w-20 rounded-md border border-white/[0.09] bg-white/[0.03] px-2 py-1 text-[12.5px] tabular-nums text-gray-200 focus:outline-none focus:border-blue-500/40"
-            />
-          </label>
-          <label className="flex items-center gap-2 text-[12px] text-gray-400">
-            Target GPA
-            <input
-              type="number"
-              min="0"
-              max="4"
-              step="0.1"
-              value={targetGpa}
-              onChange={(e) => setTargetGpa(e.target.value)}
-              className="w-20 rounded-md border border-white/[0.09] bg-white/[0.03] px-2 py-1 text-[12.5px] tabular-nums text-gray-200 focus:outline-none focus:border-blue-500/40"
-            />
-          </label>
-          <p className="text-[12px] text-gray-400">
-            {needed === null ? (
-              <span className="text-gray-600">Add in-progress or planned courses to see what you need to average.</span>
-            ) : needed > 4 ? (
-              <span className="text-amber-300">Not reachable — {plannedAhead} remaining credits would need a {formatGpa(needed)} average.</span>
-            ) : needed <= 0 ? (
-              <span className="text-emerald-300">Already there — your target holds even at a 0.0 across the remaining {plannedAhead} credits.</span>
+      <div className="degree-dash-grid" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "330px minmax(0, 1fr) 340px" }}>
+
+        {/* ── Context ───────────────────────────────────────────────────── */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); if (!dragOver) setDragOver(true); }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+          style={{ borderRight: `2px solid ${T.divider}`, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 20, position: "relative" }}
+        >
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={eyebrow}>Context</span>
+            <span style={{ fontSize: 12, color: T.n700 }}>
+              {sources.length ? `${sources.length} source${sources.length === 1 ? "" : "s"}` : "empty"}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {!dragOver ? (
+              <button
+                className="dd-drop"
+                onClick={() => fileRef.current && fileRef.current.click()}
+                style={{ ...bare, display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, width: "100%", minHeight: 112, padding: 16, border: `1px solid ${T.divider}`, textAlign: "left", color: T.text }}
+              >
+                <Upload style={{ width: 20, height: 20, flex: "none" }} />
+                <span style={heading(16, 1.2)}>Drop any file here</span>
+                <span style={{ fontSize: 12, color: T.n700 }}>or click to browse. PDFs, docs, images, spreadsheets.</span>
+              </button>
             ) : (
-              <>Need a <span className="font-medium text-gray-100">{formatGpa(needed)}</span> average across the remaining {plannedAhead} credits.</>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6, width: "100%", minHeight: 112, padding: 16, background: T.a100, border: `2px solid ${T.accent}`, color: T.a800 }}>
+                <Upload style={{ width: 20, height: 20, flex: "none" }} />
+                <span style={heading(16, 1.2)}>Release to add</span>
+              </div>
             )}
-          </p>
-          {stats.creditsShortfall > 0 ? (
-            <p className="flex items-center gap-1.5 text-[12px] text-amber-300">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {stats.creditsShortfall} credits short of the degree — plan more courses.
-            </p>
-          ) : null}
-        </div>
+            <input ref={fileRef} type="file" multiple onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} style={{ display: "none" }} />
 
-        {/* Courses */}
-        <div className="mt-6 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-gray-200">Courses</h2>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-lg border border-white/[0.07] p-0.5">
-              {[
-                { key: "term", label: "By term", icon: CalendarDays },
-                { key: "status", label: "By status", icon: LayoutList },
-              ].map((opt) => {
-                const Icon = opt.icon;
+            {staged.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", borderTop: `1px solid ${T.divider}` }}>
+                {staged.map((f) => (
+                  <div key={f.id} style={{ display: "grid", gridTemplateColumns: "16px minmax(0, 1fr) auto auto", gap: 8, alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${T.divider}`, fontSize: 13 }}>
+                    <FileText style={{ width: 14, height: 14, flex: "none" }} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                    <span style={{ fontSize: 12, color: T.n700 }}>{f.size}</span>
+                    <button
+                      className="dd-ghost"
+                      onClick={() => setStaged((s) => s.filter((x) => x.id !== f.id))}
+                      title="Remove"
+                      style={{ ...bare, width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center", color: T.n700 }}
+                    >
+                      <X style={{ width: 12, height: 12 }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <input
+                className="dd-field"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Title"
+                style={{ width: "100%", padding: "8px 10px", fontFamily: T.head, fontWeight: 800, fontSize: 14, color: T.text, background: T.surface, border: `1px solid ${T.divider}`, borderBottom: 0, caretColor: T.accent, outline: "none" }}
+              />
+              <textarea
+                className="dd-field"
+                value={paste}
+                onChange={(e) => setPaste(e.target.value)}
+                placeholder="Type or paste anything: a transcript, degree audit, advisor notes…"
+                style={{ width: "100%", height: textH, resize: "none", display: "block", padding: "8px 10px", fontFamily: T.body, fontSize: 14, lineHeight: 1.45, color: T.text, background: T.surface, border: `1px solid ${T.divider}`, borderBottom: 0, caretColor: T.accent, outline: "none" }}
+              />
+              <div
+                className="dd-grip"
+                onMouseDown={onGripDown}
+                title="Drag to resize"
+                style={{ height: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 3, background: T.n200, border: `1px solid ${T.divider}`, cursor: "ns-resize", userSelect: "none" }}
+              >
+                <span style={{ width: 24, height: 2, background: T.n600 }} />
+              </div>
+            </div>
+
+            {notice && <div style={{ fontSize: 12, color: T.a700 }}>{notice}</div>}
+
+            <button
+              className="dd-accent-btn"
+              onClick={addStaged}
+              disabled={nothingStaged}
+              style={{ ...bare, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6, width: "100%", padding: "10px 14px", background: T.accent, color: T.bg, fontFamily: T.head, fontWeight: 800, fontSize: 14 }}
+            >
+              <Plus style={{ width: 16, height: 16, flex: "none" }} />
+              {addCount > 1 ? `Add ${addCount} items to context` : "Add to context"}
+            </button>
+
+            {!(hasT && hasR) && (
+              <button className="dd-accent-link" onClick={loadSamples} style={{ ...bare, alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 6, padding: 4, marginLeft: -4, fontFamily: T.head, fontWeight: 800, fontSize: 13, color: T.a700 }}>
+                Load a sample transcript and degree list
+                <ArrowRight style={{ width: 14, height: 14, flex: "none" }} />
+              </button>
+            )}
+          </div>
+
+          {sources.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", borderTop: `2px solid ${T.divider}` }}>
+              {sourceRows.map(({ s, meta, isDegree, canBeDegree }) => {
+                const Icon = KIND_ICON[s.kind];
                 return (
-                  <button
-                    key={opt.key}
-                    onClick={() => setGroupBy(opt.key)}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] transition ${groupBy === opt.key ? "bg-white/[0.08] text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {opt.label}
-                  </button>
+                  <div key={s.id} style={{ display: "grid", gridTemplateColumns: "20px minmax(0, 1fr) auto", gap: 10, alignItems: "start", padding: "12px 0", borderBottom: `1px solid ${T.divider}` }}>
+                    <Icon style={{ width: 18, height: 18, marginTop: 1 }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+                      <input
+                        className="dd-rename"
+                        value={s.name}
+                        title="Rename"
+                        onChange={(e) => { const v = e.target.value; commit((p) => ({ ...p, sources: p.sources.map((x) => (x.id === s.id ? { ...x, name: v } : x)) })); }}
+                        style={{ width: "100%", minWidth: 0, padding: "2px 4px", margin: "-2px 0 0 -4px", fontFamily: T.body, fontSize: 14, fontWeight: 600, lineHeight: 1.3, color: T.text, background: "transparent", border: "1px solid transparent", outline: "none", textOverflow: "ellipsis" }}
+                      />
+                      <span style={{ fontSize: 12, color: T.n700 }}>{KIND_LABEL[s.kind]} · {meta}</span>
+                      {isDegree && <span style={{ alignSelf: "flex-start", fontSize: 11, letterSpacing: "0.02em", padding: "3px 10px", background: T.a100, color: T.a800 }}>Degree list</span>}
+                      {canBeDegree && (
+                        <button className="dd-accent-link" onClick={() => commit((p) => ({ ...p, degreeId: s.id }))} style={{ ...bare, alignSelf: "flex-start", padding: "2px 4px", marginLeft: -4, fontFamily: T.head, fontWeight: 800, fontSize: 12, color: T.a700 }}>
+                          Use as degree list
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button
+                        className="dd-ghost"
+                        title="Include in chat"
+                        onClick={() => commit((p) => ({ ...p, sources: p.sources.map((x) => (x.id === s.id ? { ...x, on: !x.on } : x)) }))}
+                        style={{ ...bare, display: "flex", alignItems: "center", gap: 6, padding: 4, fontSize: 12, color: T.n800 }}
+                      >
+                        {s.on ? (
+                          <span style={{ width: 16, height: 16, background: T.accent, color: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <Check style={{ width: 12, height: 12 }} />
+                          </span>
+                        ) : (
+                          <span style={{ width: 16, height: 16, border: `1.5px solid ${T.n600}` }} />
+                        )}
+                        Chat
+                      </button>
+                      <button
+                        className="dd-ghost"
+                        title="Remove"
+                        onClick={() => commit((p) => ({ ...p, sources: p.sources.filter((x) => x.id !== s.id), degreeId: p.degreeId === s.id ? null : p.degreeId }))}
+                        style={{ ...bare, width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: T.n700 }}
+                      >
+                        <X style={{ width: 14, height: 14 }} />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
-            <button
-              onClick={() => addCourse("planned")}
-              className="flex items-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[12px] text-blue-300 hover:bg-blue-500/20"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add course
-            </button>
+          )}
+        </div>
+
+        {/* ── Ask ───────────────────────────────────────────────────────── */}
+        <div className="degree-dash-chat" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "20px 32px 0" }}>
+            <span style={eyebrow}>Ask</span>
+            <span style={{ fontSize: 12, color: T.n700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{usingText}</span>
+          </div>
+
+          <div ref={chatRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 32px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
+            {messages.length === 0 && !pending && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 600, paddingTop: 24 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ ...heading(34, 1.1), letterSpacing: "-0.015em", textWrap: "pretty" }}>Ask about your transcript, credits and what’s left.</div>
+                  <div style={{ fontSize: 15, lineHeight: 1.5, color: T.n800, textWrap: "pretty" }}>Answers come only from what’s in Context, and each one names the documents it used.</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", borderTop: `2px solid ${T.divider}` }}>
+                  {STARTERS.map((q) => (
+                    <button
+                      key={q}
+                      className="dd-row"
+                      onClick={() => send(q)}
+                      disabled={onCount === 0}
+                      style={{ ...bare, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", padding: "12px 4px", borderBottom: `1px solid ${T.divider}`, textAlign: "left", fontSize: 15, color: T.text }}
+                    >
+                      {q}
+                      <ArrowUpRight style={{ width: 16, height: 16, flex: "none" }} />
+                    </button>
+                  ))}
+                </div>
+                {onCount === 0 && <div style={{ fontSize: 13, color: T.a700 }}>Add a transcript to Context to start asking.</div>}
+              </div>
+            )}
+
+            {messages.map((m, i) => (
+              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 640 }}>
+                {m.role === "user" ? (
+                  <>
+                    <span style={{ ...eyebrow, color: T.n700 }}>You</span>
+                    <div style={heading(18, 1.3)}>{m.text}</div>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ ...eyebrow, color: T.a700 }}>Signal</span>
+                    <div style={{ fontSize: 15, lineHeight: 1.55, whiteSpace: "pre-wrap", textWrap: "pretty" }}>{m.text}</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                      {(m.cites || []).map((c, j) => (
+                        <span key={j} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, letterSpacing: "0.02em", padding: "3px 8px", background: T.n200, color: T.n800 }}>
+                          <FileText style={{ width: 12, height: 12 }} />
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+
+            {pending && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ ...eyebrow, color: T.a700 }}>Signal</span>
+                <div style={{ fontSize: 15, color: T.n700 }}>Reading your context…</div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ borderTop: `2px solid ${T.divider}`, padding: "14px 32px 18px", display: "flex", flexDirection: "column", gap: 10, flex: "none" }}>
+            {messages.length > 0 && !pending && followups.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {followups.map((f) => (
+                  <button key={f} className="dd-chip" onClick={() => send(f)} style={{ ...bare, fontSize: 12, padding: "4px 10px", border: `1px solid ${T.accent}`, color: T.a700 }}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+              <textarea
+                className="dd-field"
+                value={draft}
+                rows={2}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                placeholder={onCount ? "Ask about your degree…" : "Add a transcript first, then ask…"}
+                style={{ flex: 1, resize: "none", padding: "8px 10px", fontFamily: T.body, fontSize: 15, lineHeight: 1.4, color: T.text, background: T.surface, border: `1px solid ${T.divider}`, caretColor: T.accent, outline: "none" }}
+              />
+              <button className="dd-accent-btn" onClick={() => send()} style={{ ...bare, display: "flex", alignItems: "flex-end", justifyContent: "flex-start", gap: 6, padding: "8px 16px", minWidth: 96, background: T.accent, color: T.bg, fontFamily: T.head, fontWeight: 800, fontSize: 14 }}>
+                Ask
+                <ArrowUp style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
           </div>
         </div>
 
-        {state.courses.length === 0 ? (
-          <div className="mt-3 rounded-xl border border-dashed border-white/[0.09] py-14 text-center">
-            <GraduationCap className="mx-auto mb-3 h-8 w-8 text-gray-700" />
-            <p className="text-sm text-gray-400">No courses yet</p>
-            <p className="mt-1 text-[12px] text-gray-600">Add the classes you have taken and the ones you still need — GPA and credits update as you go.</p>
-            <button
-              onClick={() => addCourse("completed")}
-              className="mt-4 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 py-1.5 text-[12px] text-gray-300 hover:bg-white/[0.06]"
-            >
-              Add your first course
-            </button>
-          </div>
-        ) : (
-          <div className="mt-3 space-y-5">
-            {groups.map((g) => (
-              <div key={g.key}>
-                <div className="mb-1.5 flex items-baseline gap-2">
-                  <h3 className="text-[12.5px] font-medium text-gray-300">{g.label}</h3>
-                  <span className="text-[11px] text-gray-600">{g.meta}</span>
+        {/* ── Progress ──────────────────────────────────────────────────── */}
+        <div style={{ borderLeft: `2px solid ${T.divider}`, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
+          <span style={eyebrow}>Progress</span>
+
+          <div style={{ display: "grid", gridTemplateColumns: "136px minmax(0, 1fr)", gap: 16, alignItems: "center" }}>
+            <div style={{ position: "relative", width: 136, height: 136 }}>
+              <svg width="136" height="136" viewBox="0 0 136 136" style={{ transform: "rotate(-90deg)", display: "block" }}>
+                <circle cx="68" cy="68" r="58" fill="none" stroke="#d7d3d3" strokeWidth="14" />
+                <circle cx="68" cy="68" r="58" fill="none" stroke="#ffc4b8" strokeWidth="14" style={{ strokeDasharray: `${iLen} ${C}`, strokeDashoffset: -eLen }} />
+                <circle cx="68" cy="68" r="58" fill="none" stroke="#ec3013" strokeWidth="14" style={{ strokeDasharray: `${eLen} ${C}` }} />
+              </svg>
+              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ ...heading(32, 1), letterSpacing: "-0.02em" }}>{st.hasCourses ? `${st.pct}%` : "0%"}</span>
+                <span style={{ fontSize: 11, color: T.n700, marginTop: 4 }}>of degree</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 13 }}>
+              {[
+                ["#ec3013", "Earned", `${fmtCr(st.earned)} cr`],
+                ["#ffc4b8", "In progress", `${fmtCr(st.ip)} cr`],
+                ["#d7d3d3", "Remaining", `${fmtCr(Math.max(0, st.target - st.earned - st.ip))} cr`],
+              ].map(([color, label, value]) => (
+                <div key={label} style={{ display: "grid", gridTemplateColumns: "10px minmax(0, 1fr) auto", gap: 8, alignItems: "center" }}>
+                  <span style={{ width: 10, height: 10, background: color }} />
+                  <span>{label}</span>
+                  <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</span>
                 </div>
-                <CourseTable courses={g.courses} onChange={updateCourse} onDelete={deleteCourse} />
+              ))}
+              <span style={{ fontSize: 12, color: T.n700, paddingTop: 4, borderTop: `1px solid ${T.divider}` }}>
+                {st.req && st.req.total ? `${st.target} credits · from degree list` : `${st.target} credits · default`}
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: `2px solid ${T.divider}`, borderBottom: `1px solid ${T.divider}` }}>
+            <div style={{ padding: "12px 12px 12px 0", borderRight: `1px solid ${T.divider}`, display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: T.n700 }}>GPA</span>
+              <span style={{ ...heading(26, 1.1), fontVariantNumeric: "tabular-nums" }}>{st.gpa == null ? "—" : st.gpa.toFixed(2)}</span>
+              <span style={{ fontSize: 12, color: T.n700 }}>{st.gpa == null ? "No graded classes yet" : `${fmtCr(st.gcr)} graded cr`}</span>
+            </div>
+            <div style={{ padding: "12px 0 12px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: T.n700 }}>Required left</span>
+              <span style={{ ...heading(26, 1.1), fontVariantNumeric: "tabular-nums" }}>{st.req ? String(st.reqLeft) : "—"}</span>
+              <span style={{ fontSize: 12, color: T.n700 }}>{st.req ? (st.reqIp ? `+${st.reqIp} in progress` : "classes") : "No degree list"}</span>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={eyebrow}>Required classes</span>
+              <span style={{ fontSize: 12, color: T.n700 }}>{st.req ? `${st.reqDone} of ${st.reqNeed} done` : ""}</span>
+            </div>
+            {!st.req && (
+              <div style={{ fontSize: 13, lineHeight: 1.5, color: T.n700, borderTop: `1px solid ${T.divider}`, paddingTop: 10 }}>
+                Add your degree requirements to Context and pick it as the degree list. Each class gets checked against your transcript.
+              </div>
+            )}
+            {st.groups.map((g) => (
+              <div key={g.name} style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, paddingBottom: 6, borderBottom: `2px solid ${T.divider}` }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{g.name}</span>
+                  <span style={{ fontSize: 12, color: T.n700 }}>{g.meta}</span>
+                </div>
+                {g.items.map((it) => (
+                  <div key={it.code} style={{ display: "grid", gridTemplateColumns: "72px minmax(0, 1fr) auto", gap: 8, alignItems: "center", padding: "7px 0", borderBottom: `1px solid ${T.divider}`, fontSize: 13 }}>
+                    <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{it.code}</span>
+                    <span style={{ color: T.n800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+                    {it.st === "done" && (
+                      <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 8px", background: T.n200, color: T.n800 }}>
+                        <Check style={{ width: 11, height: 11 }} />{it.grade}
+                      </span>
+                    )}
+                    {it.st === "ip" && <span style={{ fontSize: 11, padding: "2px 8px", background: T.a100, color: T.a800 }}>In progress</span>}
+                    {it.st === "missing" && <span style={{ fontSize: 11, padding: "1px 7px", border: `1px solid ${T.accent}`, color: T.a700 }}>Missing</span>}
+                    {it.st === "skip" && <span style={{ fontSize: 11, padding: "2px 0", color: T.n600 }}>Not needed</span>}
+                  </div>
+                ))}
               </div>
             ))}
           </div>
-        )}
-
-        {/* Category rollup */}
-        {stats.byCategory.length > 0 ? (
-          <div className="mt-7">
-            <h2 className="mb-2 text-sm font-medium text-gray-200">By category</h2>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {stats.byCategory.map((c) => (
-                <div key={c.category} className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3.5 py-2.5">
-                  <p className="text-[12.5px] text-gray-200">{c.category}</p>
-                  <p className="mt-1 text-[11px] text-gray-500">
-                    <span className="text-emerald-300">{c.earned} earned</span>
-                    {c.inProgress ? <span className="text-blue-300"> · {c.inProgress} in progress</span> : null}
-                    {c.planned ? <span> · {c.planned} planned</span> : null}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <p className="mt-8 text-[11px] leading-relaxed text-gray-600">
-          GPA uses the standard unweighted 4.0 scale with +/− (A = 4.0, A− = 3.7, B+ = 3.3 … F = 0.0).
-          Honors and AP courses are not weighted above 4.0. P/CR/TR earn credit but stay out of the GPA;
-          W, I, NP, NC and AU affect neither. Nothing here syncs with a school registrar — it is what you enter.
-        </p>
+        </div>
       </div>
     </div>
   );
