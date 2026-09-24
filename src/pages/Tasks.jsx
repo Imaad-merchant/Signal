@@ -926,13 +926,10 @@ export default function Tasks() {
                 </>
               );
             }
+            // The dashboard draws its own header (eyebrow + title + saved state),
+            // so the generic dark page header is deliberately not rendered here.
             if (pageType === "dashboard") {
-              return (
-                <>
-                  {header}
-                  <DashboardView key={selectedPage.id} page={selectedPage} onSave={updatePageById} />
-                </>
-              );
+              return <DashboardView key={selectedPage.id} page={selectedPage} onSave={updatePageById} />;
             }
             // Default: whiteboard
             return (
