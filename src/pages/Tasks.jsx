@@ -16,6 +16,7 @@ import MemoriesView from "../components/tasks/MemoriesView";
 const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
+import DashboardView from "../components/tasks/DashboardView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
 import { ICON_MAP } from "../components/tasks/NotionSidebar";
 import { useNavigate } from "react-router-dom";
@@ -291,6 +292,7 @@ export default function Tasks() {
       type: template.type || "whiteboard",
       content: template.content || "",
       whiteboard: template.whiteboard || "",
+      dashboard: template.dashboard || "",
       source: "user", // made by you in the workspace (vs Donna's memories)
     };
     const newPage = await base44.entities.Page.create(payload);
@@ -890,7 +892,7 @@ export default function Tasks() {
                   className="flex-1 bg-transparent text-sm font-medium text-gray-100 placeholder-gray-600 focus:outline-none"
                 />
                 <span className="text-[10px] text-gray-600 uppercase tracking-wider">
-                  {pageType === "notion" ? "Page" : pageType === "document" ? "Document" : "Whiteboard"}
+                  {pageType === "notion" ? "Page" : pageType === "document" ? "Document" : pageType === "dashboard" ? "Dashboard" : "Whiteboard"}
                 </span>
               </div>
             );
@@ -924,6 +926,14 @@ export default function Tasks() {
                 </>
               );
             }
+            if (pageType === "dashboard") {
+              return (
+                <>
+                  {header}
+                  <DashboardView key={selectedPage.id} page={selectedPage} onSave={updatePageById} />
+                </>
+              );
+            }
             // Default: whiteboard
             return (
               <Suspense key={selectedPage.id} fallback={<div className="flex h-full items-center justify-center text-sm text-gray-500">Loading whiteboard…</div>}>
@@ -935,7 +945,7 @@ export default function Tasks() {
               pages={activePages}
               user={user}
               onOpen={(p) => { setSelectedPageId(p.id); setView("page"); }}
-              onCreate={(type) => handleCreateFromTemplate({ type, icon: "file", title: "" })}
+              onCreate={(type) => handleCreateFromTemplate({ type, icon: type === "dashboard" ? "grad" : "file", title: "" })}
               onDelete={handleDeletePage}
               onUpdate={handleUpdatePageById}
               onCreateFolder={handleCreateFolder}
