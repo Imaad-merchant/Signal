@@ -13,6 +13,13 @@ import { Card, catMeta, Empty } from "@/components/money/ui";
 const today = () => new Date().toISOString().slice(0, 10);
 const PAGE = 100;
 
+// "Sep 25" — the phone layout folds the date into the row's sub-line.
+function shortDate(d) {
+  if (!d) return "";
+  const dt = new Date(`${String(d).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export default function TransactionsView({ data, onChange = () => {} }) {
   const { transactions, accounts, rules } = data;
   const [filters, setFilters] = useState(emptyFilters);
@@ -100,18 +107,18 @@ export default function TransactionsView({ data, onChange = () => {} }) {
             const isSel = selected.has(t.id);
             return (
               <div key={t.id} className={`group flex items-center gap-2 rounded-lg px-1 py-1.5 ${isSel ? "bg-[#d81b48]/5" : "hover:bg-[#f7f8fa]"}`}>
-                <button onClick={() => toggle(t.id)} className="p-1 text-[#a8aeb8] hover:text-[#454b54]">
+                <button onClick={() => toggle(t.id)} aria-label={isSel ? "Deselect" : "Select"} className="-my-1 p-2 text-[#a8aeb8] hover:text-[#454b54] sm:my-0 sm:p-1">
                   {isSel ? <CheckSquare className="h-3.5 w-3.5 text-[#d81b48]" /> : <Square className="h-3.5 w-3.5" />}
                 </button>
                 <button onClick={() => setOpenTx(t)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                  <span className="w-9 shrink-0 text-[10px] text-[#8b929c]">{String(t.date || "").slice(5)}</span>
+                  <span className="hidden w-9 shrink-0 text-[10px] text-[#8b929c] sm:inline">{String(t.date || "").slice(5)}</span>
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: `${m.c}22` }}>
                     <m.Icon className="h-4 w-4" style={{ color: m.c }} />
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm">
                     <span className={t.ignored ? "text-[#8b929c] line-through" : ""}>{t.merchant}</span>
                     <span className="block truncate text-[10px] text-[#8b929c]">
-                      {c}{t.pending ? " · pending" : ""}{t.tax_deductible ? " · tax" : ""}{t.note ? ` · ${t.note}` : ""}
+                      <span className="sm:hidden">{shortDate(t.date)}{t.date ? " · " : ""}</span>{c}{t.pending ? " · pending" : ""}{t.tax_deductible ? " · tax" : ""}{t.note ? ` · ${t.note}` : ""}
                     </span>
                   </span>
                   <span className={`shrink-0 text-sm ${Number(t.amount) < 0 ? "text-[#16191d]" : "text-[#0f7b53]"}`}>{fmtMoney(t.amount)}</span>

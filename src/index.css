@@ -86,3 +86,12 @@
     @apply bg-background text-foreground;
   }
 }
+/* Money on phones: iOS Safari zooms the page when a focused field's text is
+   under 16px, so give Money's inputs 16px there. */
+@media (max-width: 767px) {
+  .money-root input:not([type="checkbox"]):not([type="radio"]),
+  .money-root select,
+  .money-root textarea {
+    font-size: 16px;
+  }
+}

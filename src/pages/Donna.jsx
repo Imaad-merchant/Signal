@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Mic, MicOff, Send, AlertTriangle, RotateCcw, RotateCw, X, Check, Bell, Settings2, Volume2, Brain, Mail, Paperclip, SlidersHorizontal, Minimize2, LayoutGrid } from "lucide-react";
@@ -20,7 +20,7 @@ import {
   parseOpenSettings, parseAddQuestion, parseRemoveQuestion, parseAddHabit, parseRemoveHabit,
   parsePersonaTweak, parseNudgeTweak, addCheckinQuestion, removeCheckinQuestionByText,
 } from "@/components/donna/settings";
-import { useVoice } from "@/components/donna/useVoice";
+import { useVoice, isTouchDevice } from "@/components/donna/useVoice";
 import { useWakeWord } from "@/components/donna/useWakeWord";
 import { reverseMany } from "@/components/donna/undo";
 import { getBriefingParts, briefingSlotKey } from "@/components/donna/checkinUtils";
@@ -294,7 +294,7 @@ export default function Donna() {
     if (chatMode) {
       try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
       try { if (ttsAudioRef.current) { ttsAudioRef.current.pause(); } } catch { /* ignore */ }
-      try { voice.stop(); } catch { /* ignore */ }
+      try { voice.cancel(); } catch { /* ignore */ }
       setMode("idle"); setNudgeReady(false);
     }
   }, [chatMode]);
@@ -310,9 +310,9 @@ export default function Donna() {
   }, []);
 
   // Handle a finished transcript (from voice or the type box).
-  const handleTranscript = useCallback(async (text) => {
+  const handleTranscript = useCallback(async (text, meta) => {
     const t = (text || "").trim();
-    if (!t) { setMode("idle"); if (!chatModeRef.current) setNote("Didn't catch that — tap the orb and try again."); return; }
+    if (!t) { setMode("idle"); if (!chatModeRef.current && !meta?.error) setNote("Didn't catch that — tap the orb and try again."); return; }
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch { /* interrupt any current speech */ }
 
     // ---- Logging helpers (Page-backed logs; entries condensed by the server `log`
@@ -1102,6 +1102,7 @@ export default function Donna() {
   }, [queryClient, pushTurn]);
 
   const voice = useVoice({ onFinalTranscript: handleTranscript });
+  const touchDevice = useMemo(() => isTouchDevice(), []);
 
   // Always listening (unless muted) — no wake word: anything you say is a command.
   // The mic pauses whenever Donna isn't idle: while a command is being captured or
@@ -1109,8 +1110,11 @@ export default function Donna() {
   // during speech is essential on phones — an open mic holds the audio session and
   // her reply comes out inaudible, and it also stops the recognizer from mishearing
   // her own voice and cutting her off. To interrupt her, tap the orb.
+  // Phones: tap-to-talk only. Mobile browsers can't hold a continuous recognizer
+  // open (iOS refuses to start one outside a tap; Android beeps and restarts it
+  // every few seconds) and it hogs the one mic the tap-to-talk capture needs.
   useWakeWord({
-    enabled: !muted && !chatMode,
+    enabled: !muted && !chatMode && !touchDevice,
     active: mode !== "idle" || briefingActive,
     onCommand: handleTranscript,
     echoText: spoken.text,   // ignore her own audio echoing back through the mic
@@ -1145,7 +1149,7 @@ export default function Donna() {
       } else {
         // Muting must release the mic completely — no orange dot while muted.
         try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
-        try { voice.stop(); } catch { /* ignore */ }   // release any push-to-talk capture
+        try { voice.cancel(); } catch { /* ignore */ }   // release any push-to-talk capture
         setBriefingActive(false);                        // stop the briefing's recognizer
         setMode("idle");                                 // tears down the always-on wake word
       }
@@ -1871,6 +1875,15 @@ export default function Donna() {
     }
   };
 
+  // Stop Donna's server voice now, and settle speak()'s pending playback so its
+  // late "done → idle" can't land on top of the next turn.
+  const stopServerAudio = () => {
+    const a = ttsAudioRef.current;
+    if (!a) return;
+    try { a.pause(); } catch { /* ignore */ }
+    try { a.onended?.(); } catch { /* ignore */ }
+  };
+
   const onOrbAction = () => {
     if (mode === "idle") {
       // If the orb is pulsing to talk, a tap hears the nudge instead of listening.
@@ -1886,8 +1899,26 @@ export default function Donna() {
       voice.stop(); // → onFinalTranscript → processing
     } else if (mode === "speaking") {
       try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+      stopServerAudio();
       setMode("idle");
     }
+  };
+
+  // Phone mic button: tap to talk, tap again to send. (On desktop the same button
+  // mutes/unmutes the always-on listener instead.)
+  const onMicTap = () => {
+    if (mode === "listening") { primeTTS(); voice.stop(); return; }
+    if (mode === "processing") return;
+    if (mode === "speaking") {
+      try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
+      stopServerAudio();
+      setMode("idle");
+      return;
+    }
+    if (!voice.supported) return;
+    setHeard(""); setReply(""); setNote("");
+    setMode("listening");
+    voice.start();
   };
 
   const submitTyped = (e) => {
@@ -1909,7 +1940,9 @@ export default function Donna() {
 
   const statusLabel = {
     idle: !voice.supported
-      ? "Voice needs Chrome — type below"
+      ? "Voice isn't available in this browser — type below"
+      : touchDevice
+      ? "Tap the orb or the mic to talk"
       : muted
       ? ""
       : "Listening — just talk, no need to say “Donna”",
@@ -2107,7 +2140,7 @@ export default function Donna() {
           type="button"
           onClick={onOrbAction}
           aria-label="Talk to Donna"
-          className="relative outline-none"
+          className="relative touch-manipulation outline-none [-webkit-tap-highlight-color:transparent]"
           style={{ width: "min(66vw, 42vh)", height: "min(66vw, 42vh)" }}
         >
           <Orb state={mode} amplitudeRef={voice.amplitudeRef} attention={orbAlert || (mode === "idle" && nudgeReady)} />
@@ -2215,7 +2248,23 @@ export default function Donna() {
           >
             <Paperclip className="h-4 w-4" />
           </button>
-          {voice.supported && (
+          {voice.supported && touchDevice && (
+            <button
+              type="button"
+              onClick={onMicTap}
+              disabled={mode === "processing"}
+              className={`relative flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-xl transition-all disabled:opacity-50 ${
+                mode === "listening" ? "border border-rose-400/50 bg-rose-500/20 text-rose-100 shadow-[0_0_16px_-4px_rgba(244,63,94,0.7)]" : "border border-cyan-400/40 bg-cyan-500/15 text-cyan-200"
+              }`}
+              title={mode === "listening" ? "Tap to send" : "Tap to talk"}
+              aria-label={mode === "listening" ? "Stop and send" : "Talk to Donna"}
+              aria-pressed={mode === "listening"}
+            >
+              <Mic className="h-5 w-5" />
+              {mode === "listening" && <span className="absolute right-1 top-1 h-1.5 w-1.5 animate-pulse rounded-full bg-rose-400" />}
+            </button>
+          )}
+          {voice.supported && !touchDevice && (
             <button
               type="button"
               onClick={toggleMute}

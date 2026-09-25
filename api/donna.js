@@ -1065,8 +1065,12 @@ async function transcribe(auth, body, res) {
   if (!b64) return res.status(400).json({ error: "audio required" });
   try {
     const buf = Buffer.from(b64, "base64");
+    // Whisper picks the decoder from the file extension, so it must match the
+    // container: iOS Safari records audio/mp4, Chrome/Android audio/webm.
+    const mime = String(body.mime || "audio/webm").split(";")[0].trim().toLowerCase();
+    const ext = { "audio/mp4": "mp4", "audio/x-m4a": "m4a", "audio/m4a": "m4a", "audio/aac": "m4a", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav", "audio/mpeg": "mp3" }[mime] || "webm";
     const form = new FormData();
-    form.append("file", new Blob([buf], { type: body.mime || "audio/webm" }), "memo.webm");
+    form.append("file", new Blob([buf], { type: mime }), `memo.${ext}`);
     form.append("model", "whisper-1");
     const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",

@@ -9,7 +9,7 @@ import { base44 } from "@/api/base44Client";
 import { detectSubscriptions, monthlyCost, normMerchant } from "@/components/money/money";
 import { monthKey, spendingWithDelta, totalsForMonth, shiftMonth } from "@/components/money/analytics";
 import { connectBank, syncBanks } from "@/components/money/plaidLink";
-import MoneyNav, { isView, viewLabel } from "@/components/money/MoneyNav";
+import MoneyNav, { MoneyTabs, isView, viewLabel } from "@/components/money/MoneyNav";
 import Overview from "@/components/money/Overview";
 import BudgetsView from "@/components/money/BudgetsView";
 import NetWorthView from "@/components/money/NetWorthView";
@@ -138,38 +138,53 @@ export default function Money() {
   return (
     // Full-bleed two-column app frame: fixed left rail, scrolling content — the
     // Money section owns the whole viewport (registered in Layout's isFullHeight).
-    <div className="flex h-full w-full overflow-hidden bg-[#f5f6f8] text-[#16191d]">
+    <div className="money-root flex h-full w-full overflow-hidden bg-[#f5f6f8] text-[#16191d]">
       <MoneyNav view={view} onChange={setView} />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[#e6e8ec] bg-white px-4 py-3 md:px-8">
-          <h1 className="flex items-center gap-2 text-[17px] font-semibold">
+        {/* Top bar — on phones the view switcher sits directly under it. */}
+        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#e6e8ec] bg-white px-3 py-2.5 md:gap-3 md:px-8 md:py-3">
+          <h1 className="flex min-w-0 items-center gap-1.5 text-[17px] font-semibold md:gap-2">
             <button
               onClick={() => navigate(-1)}
               aria-label="Back"
-              className="-ml-1 rounded-full p-1 text-[#8b929c] hover:bg-[#f2f4f7] hover:text-[#16191d]"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#8b929c] hover:bg-[#f2f4f7] hover:text-[#16191d] md:-ml-1 md:h-auto md:w-auto md:p-1"
             >
               <ArrowLeft className="h-4 w-4" />
             </button>
-            <Wallet className="h-4 w-4 text-[#d81b48] md:hidden" />
-            {viewLabel(view)}
+            <Wallet className="h-4 w-4 shrink-0 text-[#d81b48] md:hidden" />
+            <span className="truncate">{viewLabel(view)}</span>
           </h1>
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             {hasPlaid && (
-              <button onClick={doSync} disabled={!!banking} className="inline-flex items-center gap-1 rounded-full border border-[#dcdfe4] px-3 py-1.5 text-xs text-[#454b54] hover:border-[#16191d] disabled:opacity-50">
-                {banking === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Sync now
+              <button
+                onClick={doSync}
+                disabled={!!banking}
+                aria-label="Sync now"
+                title="Sync now"
+                className="inline-flex h-9 w-9 items-center justify-center gap-1 rounded-full border border-[#dcdfe4] text-xs text-[#454b54] hover:border-[#16191d] disabled:opacity-50 md:h-auto md:w-auto md:px-3 md:py-1.5"
+              >
+                {banking === "sync" ? <Loader2 className="h-4 w-4 animate-spin md:h-3.5 md:w-3.5" /> : <RefreshCw className="h-4 w-4 md:h-3.5 md:w-3.5" />}
+                <span className="hidden md:inline">Sync now</span>
               </button>
             )}
-            <button onClick={doConnect} disabled={!!banking} className="inline-flex items-center gap-1.5 rounded-full bg-[#16191d] px-4 py-1.5 text-xs font-medium text-white hover:bg-[#2b3038] disabled:opacity-50">
-              {banking === "connect" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Landmark className="h-3.5 w-3.5" />} Add Account
+            <button
+              onClick={doConnect}
+              disabled={!!banking}
+              aria-label="Add account"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#16191d] px-3.5 text-xs font-medium text-white hover:bg-[#2b3038] disabled:opacity-50 md:h-auto md:px-4 md:py-1.5"
+            >
+              {banking === "connect" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Landmark className="h-3.5 w-3.5" />}
+              <span className="md:hidden">Add</span>
+              <span className="hidden md:inline">Add Account</span>
             </button>
           </div>
         </header>
+        <MoneyTabs view={view} onChange={setView} />
 
         {/* Scrolling content */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:px-8 md:pb-8">
-          <div className="w-full py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-4 md:px-8 md:pb-8">
+          <div className="w-full py-3 md:py-4">
             {bankMsg && <p className="mb-3 text-[11px] text-[#d81b48]">{bankMsg}</p>}
             {loadError && (
               <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[12px] text-amber-800">
