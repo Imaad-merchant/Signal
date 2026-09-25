@@ -50,7 +50,6 @@
 import Dashboard from './pages/Dashboard';
 import Donna from './pages/Donna';
 import Focus from './pages/Focus';
-import Markets from './pages/Markets';
 import Money from './pages/Money';
 import Settings from './pages/Settings';
 import Tasks from './pages/Tasks';
@@ -61,7 +60,6 @@ export const PAGES = {
     "Dashboard": Dashboard,
     "Donna": Donna,
     "Focus": Focus,
-    "Markets": Markets,
     "Money": Money,
     "Settings": Settings,
     "Tasks": Tasks,
