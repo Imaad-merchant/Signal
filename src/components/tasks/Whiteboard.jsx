@@ -27,6 +27,10 @@ import WhiteboardContextMenu from "./whiteboard/WhiteboardContextMenu";
 import { useAutosave } from "./useAutosave";
 
 // Generate a stable id
+// Signature for whiteboard objects placed on the system clipboard, so a paste
+// can tell our own payload from arbitrary copied text.
+const WB_CLIPBOARD_PREFIX = "signal-whiteboard:v1:";
+
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 // Sanitize stored/pasted text HTML — allow only basic formatting tags/attrs and
@@ -161,26 +165,56 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   }, [selectedIds, groupMembers]);
 
   // Copy / Paste / Duplicate
+  //
+  // The in-memory ref is the fast path, but a copy that only lives in a ref can't
+  // reach another board, another tab, or a reload — so the same objects also go to
+  // the system clipboard under a signature the paste path recognises.
   const copySelection = useCallback(() => {
     const sel = objects.filter(o => effectiveSelectionIds.includes(o.id));
-    if (sel.length === 0) return;
-    clipboardRef.current = sel.map(o => JSON.parse(JSON.stringify(o)));
+    if (sel.length === 0) return false;
+    const copied = sel.map(o => JSON.parse(JSON.stringify(o)));
+    clipboardRef.current = copied;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        // Fire and forget: a blocked clipboard must not break in-board copy/paste.
+        navigator.clipboard.writeText(WB_CLIPBOARD_PREFIX + JSON.stringify(copied)).catch(() => {});
+      }
+    } catch { /* ignore */ }
+    return true;
   }, [objects, effectiveSelectionIds]);
 
   const pasteClipboard = useCallback((atWorldX = null, atWorldY = null) => {
     if (clipboardRef.current.length === 0) return;
     pushHistory(objects);
     const idMap = {};
-    const offset = 16;
+    // "Paste here" passes the point that was right-clicked. The whole selection
+    // moves as a unit, so shift by the distance from its top-left corner to that
+    // point; with no point given, fall back to a small nudge off the original.
+    let dx = 16;
+    let dy = 16;
+    if (atWorldX !== null && atWorldY !== null) {
+      let minX = Infinity;
+      let minY = Infinity;
+      for (const o of clipboardRef.current) {
+        const xs = [o.x, o.x1, o.x2, ...(o.points || []).map(p => p.x)].filter(v => typeof v === "number");
+        const ys = [o.y, o.y1, o.y2, ...(o.points || []).map(p => p.y)].filter(v => typeof v === "number");
+        if (xs.length) minX = Math.min(minX, ...xs);
+        if (ys.length) minY = Math.min(minY, ...ys);
+      }
+      if (Number.isFinite(minX) && Number.isFinite(minY)) {
+        dx = atWorldX - minX;
+        dy = atWorldY - minY;
+      }
+    }
     const newObjs = clipboardRef.current.map(o => {
       const newId = uid();
       idMap[o.id] = newId;
       const clone = { ...JSON.parse(JSON.stringify(o)), id: newId };
       // Shift positions
-      if (clone.x !== undefined) clone.x += offset;
-      if (clone.y !== undefined) clone.y += offset;
-      if (clone.x1 !== undefined) { clone.x1 += offset; clone.y1 += offset; clone.x2 += offset; clone.y2 += offset; }
-      if (clone.points) clone.points = clone.points.map(p => ({ x: p.x + offset, y: p.y + offset }));
+      if (clone.x !== undefined) clone.x += dx;
+      if (clone.y !== undefined) clone.y += dy;
+      if (clone.x1 !== undefined) { clone.x1 += dx; clone.y1 += dy; clone.x2 += dx; clone.y2 += dy; }
+      if (clone.points) clone.points = clone.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
       return clone;
     });
     // Reassign group ids so pasted group stays a group of its own
@@ -194,6 +228,21 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     setObjects(prev => [...prev, ...newObjs]);
     setSelectedIds(newObjs.map(o => o.id));
   }, [objects]);
+
+  // Paste from the system clipboard when this board has nothing of its own yet —
+  // this is what makes copying from one whiteboard into another work.
+  const pasteAnywhere = useCallback(async (atWorldX = null, atWorldY = null) => {
+    if (clipboardRef.current.length === 0) {
+      try {
+        const text = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : "";
+        if (text && text.startsWith(WB_CLIPBOARD_PREFIX)) {
+          const parsed = JSON.parse(text.slice(WB_CLIPBOARD_PREFIX.length));
+          if (Array.isArray(parsed) && parsed.length) clipboardRef.current = parsed;
+        }
+      } catch { /* clipboard unreadable — nothing to paste */ }
+    }
+    pasteClipboard(atWorldX, atWorldY);
+  }, [pasteClipboard]);
 
   const duplicateSelection = useCallback(() => {
     copySelection();
@@ -1070,6 +1119,19 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       if (tag === "input" || tag === "textarea" || t?.isContentEditable) return;
       const dt = e.clipboardData;
       if (!dt) return;
+      // Objects copied from another whiteboard arrive as our signed payload.
+      try {
+        const raw = dt.getData ? dt.getData("text/plain") : "";
+        if (raw && raw.startsWith(WB_CLIPBOARD_PREFIX)) {
+          const parsed = JSON.parse(raw.slice(WB_CLIPBOARD_PREFIX.length));
+          if (Array.isArray(parsed) && parsed.length) {
+            e.preventDefault();
+            clipboardRef.current = parsed;
+            pasteClipboard();
+            return;
+          }
+        }
+      } catch { /* not our payload — carry on to the image path */ }
       // Prefer the DataTransferItemList (Chrome/Firefox), fall back to .files (Safari).
       let file = null;
       for (const it of Array.from(dt.items || [])) {
@@ -1083,7 +1145,7 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [processImageFile, insertImageObject]);
+  }, [processImageFile, insertImageObject, pasteClipboard]);
 
   // Drag-and-drop image files onto the canvas.
   useEffect(() => {
@@ -1527,8 +1589,8 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                   break;
                 case "copy": copySelection(); break;
                 case "cut": copySelection(); deleteSelection(); break;
-                case "paste": pasteClipboard(); break;
-                case "pasteAt": pasteClipboard(ctxMenu.worldX, ctxMenu.worldY); break;
+                case "paste": pasteAnywhere(); break;
+                case "pasteAt": pasteAnywhere(ctxMenu.worldX, ctxMenu.worldY); break;
                 case "duplicate": duplicateSelection(); break;
                 case "delete": deleteSelection(); break;
                 case "bringToFront": bringToFront(); break;

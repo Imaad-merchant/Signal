@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Wand2, Undo2, Pencil, Palette, CornerUpLeft, Orbit } from "lucide-react";
+import { ChevronRight, ChevronDown, Plus, Home, Search, FileText, MoreHorizontal, Trash2, GraduationCap, Briefcase, Heart, Sparkles, Calendar as CalendarIcon, Star, Folder, FolderOpen, Pencil, Palette, CornerUpLeft, Orbit } from "lucide-react";
 
 const ICON_OPTIONS = [
   { key: "file", icon: FileText, color: "text-gray-400" },
@@ -323,12 +323,6 @@ export default function NotionSidebar({
   onUpdatePage,
   selectedPageId,
   trashCount = 0,
-  aiAutoOrganize,
-  onToggleAutoOrganize,
-  onOrganizeNow,
-  onUndoAI,
-  canUndoAI,
-  aiOrganizing,
 }) {
   const rootPages = useMemo(() => pages.filter(p => !p.parent_id), [pages]);
   const recents = useMemo(() => {
@@ -460,43 +454,6 @@ export default function NotionSidebar({
           )}
         </div>
       )}
-
-      {/* AI Organizer Banner */}
-      <div className="mx-2 mb-2 rounded-lg border border-purple-500/15 bg-purple-500/[0.05] px-2 py-1.5">
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <div className="flex items-center gap-1.5">
-            <Wand2 className="h-3 w-3 text-purple-400" />
-            <span className="text-[11px] font-medium text-purple-300">AI Organizer</span>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer" title="Auto-organize on changes">
-            <input
-              type="checkbox"
-              checked={!!aiAutoOrganize}
-              onChange={(e) => onToggleAutoOrganize(e.target.checked)}
-              className="sr-only peer"
-            />
-            <div className="w-6 h-3.5 bg-gray-700 peer-checked:bg-purple-500 rounded-full peer-checked:after:translate-x-2.5 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-2.5 after:w-2.5 after:transition-all" />
-          </label>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onOrganizeNow}
-            disabled={aiOrganizing || pages.length < 2}
-            className="flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded text-[10.5px] font-medium bg-purple-500/15 text-purple-300 hover:bg-purple-500/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            <Sparkles className="h-2.5 w-2.5" />
-            {aiOrganizing ? "Organizing..." : "Organize now"}
-          </button>
-          <button
-            onClick={onUndoAI}
-            disabled={!canUndoAI}
-            className="px-2 py-1 rounded text-[10.5px] font-medium bg-white/[0.04] text-gray-400 hover:bg-white/[0.08] hover:text-gray-200 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            title="Undo last AI organization"
-          >
-            <Undo2 className="h-2.5 w-2.5" />
-          </button>
-        </div>
-      </div>
 
       {/* Scrollable content */}
       <div
