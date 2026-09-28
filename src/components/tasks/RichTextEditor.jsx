@@ -1,5 +1,29 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { isDataImageUri, dataUriToFile } from "./pageStorage";
+
+// Firebase retries a failing upload for about two minutes before rejecting, so give
+// every upload a deadline rather than letting the editor wait on it.
+const UPLOAD_TIMEOUT_MS = 30000;
+async function withDeadline(promise) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("upload timed out")), UPLOAD_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function readAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 import { useEditor, EditorContent } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
@@ -154,28 +178,6 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
   useEffect(() => { uploadRef.current = uploadImage; }, [uploadImage]);
   const fileInputRef = useRef(null);
 
-  // Upload image files to storage, then insert them at `pos` (or the caret).
-  // Paste/drop handlers below claim the event synchronously and call this async.
-  const uploadAndInsert = useCallback(async (view, files, pos) => {
-    const imgs = Array.from(files || []).filter((f) => f.type && f.type.startsWith("image/"));
-    for (const file of imgs) {
-      if (file.size > 20 * 1024 * 1024) { window.alert(`"${file.name}" is over 20MB — too large to embed.`); continue; }
-      let url = null;
-      try {
-        url = uploadRef.current ? await uploadRef.current(file) : URL.createObjectURL(file);
-      } catch (err) {
-        window.alert(`Couldn't upload "${file.name}": ${err?.message || "failed"}`);
-        continue;
-      }
-      if (!url) continue;
-      const schema = view.state.schema;
-      if (!schema.nodes.image) continue;
-      const node = schema.nodes.image.create({ src: url });
-      const at = typeof pos === "number" ? Math.min(pos, view.state.doc.content.size) : view.state.selection.from;
-      view.dispatch(view.state.tr.insert(at, node).scrollIntoView());
-    }
-  }, []);
-
   // An image copied from a web page arrives as HTML with the bytes inline in the src,
   // not as a clipboard file, so it slips past the upload path above. Lift any such
   // image out to storage after the paste lands — inline bytes can push the document
@@ -189,7 +191,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
     for (const src of new Set(targets)) {
       let url = null;
       try {
-        url = uploadRef.current ? await uploadRef.current(dataUriToFile(src, "pasted-image")) : null;
+        url = uploadRef.current ? await withDeadline(uploadRef.current(dataUriToFile(src, "pasted-image"))) : null;
       } catch { url = null; }
       if (url) uploaded.set(src, url);
     }
@@ -206,6 +208,33 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
       view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: url }));
     }
   }, []);
+
+  // Upload image files to storage, then insert them at `pos` (or the caret).
+  // Paste/drop handlers below claim the event synchronously and call this async.
+  const uploadAndInsert = useCallback(async (view, files, pos) => {
+    const imgs = Array.from(files || []).filter((f) => f.type && f.type.startsWith("image/"));
+    let inserted = 0;
+    for (const file of imgs) {
+      if (file.size > 20 * 1024 * 1024) { window.alert(`"${file.name}" is over 20MB — too large to embed.`); continue; }
+      const schema = view.state.schema;
+      if (!schema.nodes.image) continue;
+      // Place the image from its local bytes right away, then let the sweep below
+      // swap in the uploaded URL. Waiting on the upload first meant a slow or failing
+      // one inserted nothing at all.
+      let src = null;
+      try {
+        src = await readAsDataURL(file);
+      } catch {
+        src = URL.createObjectURL(file);
+      }
+      if (!src) continue;
+      const node = schema.nodes.image.create({ src });
+      const at = typeof pos === "number" ? Math.min(pos, view.state.doc.content.size) : view.state.selection.from;
+      view.dispatch(view.state.tr.insert(at, node).scrollIntoView());
+      inserted++;
+    }
+    if (inserted) sweepDataImages(view);
+  }, [sweepDataImages]);
 
   const [margins, setMargins] = useState(loadMargins);
 
