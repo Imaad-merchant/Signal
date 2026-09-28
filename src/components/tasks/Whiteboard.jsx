@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import AIPromptDialog from "./AIPromptDialog";
 import { base44 } from "@/api/base44Client";
 import { useIsMobile } from "@/components/useIsMobile";
+import { WB_MAX_CHARS, hasDataImage, migrateBoardImages, rewriteBoardImages } from "./pageStorage";
 import {
   MIN_ZOOM,
   MAX_ZOOM,
@@ -31,6 +32,14 @@ import { useAutosave } from "./useAutosave";
 // can tell our own payload from arbitrary copied text.
 const WB_CLIPBOARD_PREFIX = "signal-whiteboard:v1:";
 
+// Upload an image to storage and return its URL. Board objects store the URL, never
+// the bytes: a base64 data URI inside the board JSON overflows the 1 MiB cap on a
+// page document and the whole save is rejected.
+async function uploadImage(file) {
+  const { file_url } = await base44.integrations.Core.UploadFile({ file });
+  return file_url;
+}
+
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 // Sanitize stored/pasted text HTML — allow only basic formatting tags/attrs and
@@ -56,7 +65,7 @@ const sanitizeTextHtml = (html) => {
 };
 
 // ─── Main Whiteboard ──────────────────────────────────────────────
-export default function Whiteboard({ page, onSave, headerSlot }) {
+export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   const containerRef = useRef(null);
   const isMobile = useIsMobile();
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
@@ -516,6 +525,7 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   // Latest-state refs so the flush-on-exit path can read current values without
   // waiting on a re-render (critical: setObjects won't apply on an unmounting box).
   const objectsRef = useRef(objects); objectsRef.current = objects;
+  const pageIdRef = useRef(page.id); pageIdRef.current = page.id;
   const viewportRef = useRef(viewport); viewportRef.current = viewport;
   const editingTextIdRef = useRef(editingTextId); editingTextIdRef.current = editingTextId;
   const saveRef = useRef(save); useEffect(() => { saveRef.current = save; }, [save]);
@@ -548,8 +558,41 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   useEffect(() => {
     if (!loadedRef.current) return;
     if (skipSaveRef.current) { skipSaveRef.current = false; return; }
-    scheduleSave({ whiteboard: JSON.stringify(objects), viewport: JSON.stringify(viewport) }, save);
-  }, [objects, viewport, scheduleSave, save]);
+    const json = JSON.stringify(objects);
+    // Refuse a write that the server would reject anyway, and say so, rather than
+    // letting it fail silently and leave this device showing unsaved work.
+    if (json.length > WB_MAX_CHARS) {
+      onSaveIssue?.({
+        message: "This board is too large to save — an image didn't upload. Undo the last image you added, then try again.",
+      });
+      return;
+    }
+    scheduleSave({ whiteboard: json, viewport: JSON.stringify(viewport) }, save);
+  }, [objects, viewport, scheduleSave, save, onSaveIssue]);
+
+  // Repair boards written before images moved to storage: lift each inline data URI
+  // out to storage so the board fits under the page size cap again. Runs once per
+  // page; the setObjects below is what saves the shrunk board. The uploads take a
+  // moment, and the user may edit the board while they run — so the results are
+  // applied as a URI -> URL map over whatever the board holds when they land, and
+  // only a page change abandons them.
+  const migratedRef = useRef("");
+  useEffect(() => {
+    if (migratedRef.current === page.id) return;
+    if (!hasDataImage(objects)) return;
+    migratedRef.current = page.id;
+    const forPage = page.id;
+    (async () => {
+      const { replacements } = await migrateBoardImages(objects, uploadImage);
+      // migratedRef still names this page only until another page claims it, so test
+      // the page actually on screen: results must never land on a different board.
+      if (!replacements.size || pageIdRef.current !== forPage) return;
+      setObjects((prev) => {
+        const { objects: fixed, changed } = rewriteBoardImages(prev, replacements);
+        return changed ? fixed : prev;
+      });
+    })();
+  }, [page.id, objects]);
 
   // Container size
   useEffect(() => {
@@ -1064,22 +1107,33 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const maxDim = 1200;
         const nw = img.naturalWidth || 300, nh = img.naturalHeight || 200;
         const scale = Math.min(1, maxDim / Math.max(nw, nh));
         const big = typeof reader.result === "string" && reader.result.length > 700000;
+        let outW = nw, outH = nh, dataUrl = reader.result, toUpload = file;
         if (scale < 1 || big) {
-          const outW = Math.max(1, Math.round(nw * scale));
-          const outH = Math.max(1, Math.round(nh * scale));
+          outW = Math.max(1, Math.round(nw * scale));
+          outH = Math.max(1, Math.round(nh * scale));
           const canvas = document.createElement("canvas");
           canvas.width = outW; canvas.height = outH;
           canvas.getContext("2d").drawImage(img, 0, 0, outW, outH);
-          const isPng = /png/i.test(file.type || "");
-          resolve({ url: canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.82), w: outW, h: outH });
-        } else {
-          resolve({ url: reader.result, w: nw, h: nh });
+          const type = /png/i.test(file.type || "") ? "image/png" : "image/jpeg";
+          dataUrl = canvas.toDataURL(type, 0.82);
+          const blob = await new Promise((r) => canvas.toBlob(r, type, 0.82));
+          if (blob) {
+            const ext = type === "image/png" ? "png" : "jpg";
+            toUpload = new File([blob], `image.${ext}`, { type });
+          }
         }
+        // Store the uploaded URL. Only if the upload fails do we fall back to an
+        // inline data URI, which risks pushing the page past its save limit.
+        try {
+          const url = await uploadImage(toUpload);
+          if (url) { resolve({ url, w: outW, h: outH }); return; }
+        } catch { /* fall through to the inline copy */ }
+        resolve({ url: dataUrl, w: outW, h: outH });
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -2103,8 +2157,9 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                 }
               }}
               onPaste={(e) => {
-                // If the clipboard holds an image, embed it inline at the caret as a
-                // data URL instead of letting the browser drop it.
+                // If the clipboard holds an image, place it inline at the caret. It
+                // shows immediately from the data URL, then the src is swapped for the
+                // uploaded one — the bytes must not stay in the saved text.
                 const items = e.clipboardData?.items;
                 if (!items) return;
                 const imgItem = Array.from(items).find(it => it.type.startsWith("image/"));
@@ -2112,10 +2167,20 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                 const file = imgItem.getAsFile();
                 if (!file) return;
                 e.preventDefault();
+                const host = e.currentTarget;
+                const token = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
                 const reader = new FileReader();
                 reader.onload = () => {
-                  const html = `<img src="${reader.result}" style="max-width:100%;height:auto;display:inline-block;border-radius:4px;" />`;
+                  const html = `<img data-wb-pending="${token}" src="${reader.result}" style="max-width:100%;height:auto;display:inline-block;border-radius:4px;" />`;
                   document.execCommand("insertHTML", false, html);
+                  editingHtmlRef.current = host.innerHTML;
+                  uploadImage(file).then((url) => {
+                    const node = url && host.querySelector(`img[data-wb-pending="${token}"]`);
+                    if (!node) return;
+                    node.setAttribute("src", url);
+                    node.removeAttribute("data-wb-pending");
+                    editingHtmlRef.current = host.innerHTML;
+                  }).catch(() => {});
                 };
                 reader.readAsDataURL(file);
               }}

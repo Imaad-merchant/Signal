@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,6 +16,7 @@ import MemoriesView from "../components/tasks/MemoriesView";
 const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
+import { saveFailMessage } from "../components/tasks/pageStorage";
 import DashboardView from "../components/tasks/DashboardView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
 import { ICON_MAP } from "../components/tasks/NotionSidebar";
@@ -290,6 +291,9 @@ export default function Tasks() {
     setView("page");
   };
 
+  // { pageId, patch, message } when the server rejected a page write.
+  const [saveIssue, setSaveIssue] = useState(null);
+
   // Wrapped in useCallback so the reference is stable across renders — otherwise
   // a fresh closure each render resets Whiteboard's 600ms save debounce and thrashes saves.
   const handleUpdatePage = useCallback(async (patch) => {
@@ -309,8 +313,33 @@ export default function Tasks() {
     queryClient.setQueryData(["pages", user?.email], (old = []) =>
       old.map(p => p.id === pageId ? { ...p, ...patch, updated_date: new Date().toISOString() } : p)
     );
-    return base44.entities.Page.update(pageId, patch).catch((e) => console.error(e));
+    return base44.entities.Page.update(pageId, patch)
+      .then(() => setSaveIssue((prev) => (prev && prev.pageId === pageId ? null : prev)))
+      .catch((e) => {
+        // This rejection used to be swallowed. Combined with the optimistic cache
+        // update above, the editing device kept rendering content the server never
+        // accepted — so the same page on a phone was missing the image and every edit
+        // made after it. Surface it, and keep the patch so it can be retried.
+        console.error(e);
+        setSaveIssue({ pageId, patch, message: saveFailMessage(e) });
+      });
   }, [queryClient, user?.email]);
+
+  // Re-send the patch the server rejected. Only offered when we still hold one.
+  const retrySaveIssue = useCallback(() => {
+    const issue = saveIssue;
+    if (!issue?.patch) return;
+    setSaveIssue(null);
+    updatePageById(issue.pageId, issue.patch);
+  }, [saveIssue, updatePageById]);
+
+  // An editor reporting that it refused to even attempt a save. Stable reference:
+  // an inline arrow here would change identity every render and retrigger the
+  // editors' autosave effects.
+  const reportSaveIssue = useCallback((issue) => {
+    if (!selectedPageId) return;
+    setSaveIssue({ pageId: selectedPageId, patch: null, ...issue });
+  }, [selectedPageId]);
 
   // Generic version for sidebar actions (rename, move, change icon)
   const handleUpdatePageById = async (pageId, patch) => {
@@ -780,11 +809,28 @@ export default function Tasks() {
                 </span>
               </div>
             );
+            // Shown only for the page that actually failed to save, so the user finds
+            // out here rather than on another device that's missing the content.
+            const saveBanner = saveIssue && saveIssue.pageId === selectedPage.id ? (
+              <div className="flex items-start gap-2 px-4 py-2 border-b border-amber-500/20 bg-amber-500/[0.08] shrink-0">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-400 mt-[2px] shrink-0" />
+                <span className="flex-1 text-[12px] leading-snug text-amber-200/90">{saveIssue.message}</span>
+                {saveIssue.patch ? (
+                  <button
+                    onClick={retrySaveIssue}
+                    className="text-[11px] font-medium text-amber-200 hover:text-white px-2 py-0.5 rounded border border-amber-500/30 hover:bg-amber-500/20 shrink-0"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            ) : null;
 
             if (pageType === "notion") {
               return (
                 <>
                   {header}
+                  {saveBanner}
                   <div className="flex-1 overflow-y-auto">
                     <NotionPageView key={selectedPage.id} page={selectedPage} onSave={updatePageById} onDelete={() => handleDeletePage(selectedPage)} />
                   </div>
@@ -795,6 +841,7 @@ export default function Tasks() {
               return (
                 <>
                   {header}
+                  {saveBanner}
                   <DocumentView
                     key={selectedPage.id}
                     page={selectedPage}
@@ -818,7 +865,7 @@ export default function Tasks() {
             // Default: whiteboard
             return (
               <Suspense key={selectedPage.id} fallback={<div className="flex h-full items-center justify-center text-sm text-gray-500">Loading whiteboard…</div>}>
-                <Whiteboard page={selectedPage} onSave={updatePageById} headerSlot={header} />
+                <Whiteboard page={selectedPage} onSave={updatePageById} onSaveIssue={reportSaveIssue} headerSlot={<>{header}{saveBanner}</>} />
               </Suspense>
             );
           })() : (
