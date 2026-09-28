@@ -539,7 +539,10 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           let x = e.clientX, y = e.clientY;
           if (x + 220 > window.innerWidth) x = window.innerWidth - 230;
           if (y + 420 > window.innerHeight) y = window.innerHeight - 430;
-          setCtxMenu({ x, y });
+          // Snapshot the selection NOW. Clicking a menu item moves focus out of the
+          // editor and collapses the DOM selection, so by the time Copy runs there is
+          // nothing left for execCommand to copy — which is why it silently did nothing.
+          setCtxMenu({ x, y, ...snapshotSelection(editor) });
         }}
       >
         <div className="flex items-start">
@@ -617,8 +620,18 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           className="w-56 bg-[#2a2b2d] border border-white/[0.1] rounded-xl shadow-2xl py-1"
           onClick={(e) => e.stopPropagation()}
         >
-          <MenuItem onClick={() => { document.execCommand("cut"); setCtxMenu(null); }} label="Cut" shortcut="⌘X" />
-          <MenuItem onClick={() => { document.execCommand("copy"); setCtxMenu(null); }} label="Copy" shortcut="⌘C" />
+          <MenuItem
+            onClick={async () => {
+              await writeToClipboard(ctxMenu.text, ctxMenu.html);
+              if (ctxMenu.from !== ctxMenu.to) editor.chain().focus().deleteRange({ from: ctxMenu.from, to: ctxMenu.to }).run();
+              setCtxMenu(null);
+            }}
+            label="Cut" shortcut="⌘X" disabled={!ctxMenu.text}
+          />
+          <MenuItem
+            onClick={async () => { await writeToClipboard(ctxMenu.text, ctxMenu.html); setCtxMenu(null); }}
+            label="Copy" shortcut="⌘C" disabled={!ctxMenu.text}
+          />
           <MenuItem onClick={async () => {
             try {
               const text = await navigator.clipboard.readText();
@@ -738,12 +751,66 @@ function AIMenuItem({ icon, label, desc, onClick }) {
   );
 }
 
-function MenuItem({ onClick, label, shortcut, active, danger }) {
+// Read what is selected right now, as both plain text and HTML, plus the
+// ProseMirror range it came from. Taken at right-click time: opening a menu and
+// clicking an item blurs the editor and collapses the selection, so anything
+// read later is empty.
+function snapshotSelection(editor) {
+  let text = "";
+  let html = "";
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed) {
+      text = sel.toString();
+      const holder = document.createElement("div");
+      holder.appendChild(sel.getRangeAt(0).cloneContents());
+      html = holder.innerHTML;
+    }
+  } catch { /* fall through to an empty snapshot */ }
+  const range = editor && editor.state ? editor.state.selection : null;
+  return { text, html, from: range ? range.from : 0, to: range ? range.to : 0 };
+}
+
+// Write to the system clipboard, keeping formatting when the browser allows it.
+// Falls back to plain text, then to execCommand for older browsers.
+async function writeToClipboard(text, html) {
+  if (!text) return false;
+  try {
+    if (html && typeof ClipboardItem !== "undefined" && navigator.clipboard && navigator.clipboard.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ]);
+      return true;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* clipboard blocked — try the legacy path */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function MenuItem({ onClick, label, shortcut, active, danger, disabled }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-xs transition-colors ${danger ? "text-rose-400 hover:bg-rose-500/15" : active ? "text-blue-200 bg-blue-500/15" : "text-gray-200 hover:bg-white/[0.06]"}`}
+      disabled={disabled}
+      className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-xs transition-colors disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent ${danger ? "text-rose-400 hover:bg-rose-500/15" : active ? "text-blue-200 bg-blue-500/15" : "text-gray-200 hover:bg-white/[0.06]"}`}
     >
       <span className="flex-1 text-left">{label}</span>
       {shortcut && <span className="text-[10px] text-gray-600">{shortcut}</span>}
