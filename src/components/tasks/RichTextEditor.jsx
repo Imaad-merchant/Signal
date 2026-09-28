@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { isDataImageUri, dataUriToFile } from "./pageStorage";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
@@ -175,6 +176,37 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
     }
   }, []);
 
+  // An image copied from a web page arrives as HTML with the bytes inline in the src,
+  // not as a clipboard file, so it slips past the upload path above. Lift any such
+  // image out to storage after the paste lands — inline bytes can push the document
+  // past the size limit on a page, which makes the save fail outright.
+  const sweepDataImages = useCallback(async (view) => {
+    const targets = [];
+    view.state.doc.descendants((node) => {
+      if (node.type.name === "image" && isDataImageUri(node.attrs?.src)) targets.push(node.attrs.src);
+    });
+    const uploaded = new Map();
+    for (const src of new Set(targets)) {
+      let url = null;
+      try {
+        url = uploadRef.current ? await uploadRef.current(dataUriToFile(src, "pasted-image")) : null;
+      } catch { url = null; }
+      if (url) uploaded.set(src, url);
+    }
+    if (!uploaded.size) return;
+    // Re-locate each node: the user may have kept typing while the upload ran.
+    for (const [src, url] of uploaded) {
+      let pos = null;
+      view.state.doc.descendants((node, at) => {
+        if (pos == null && node.type.name === "image" && node.attrs?.src === src) pos = at;
+      });
+      if (pos == null) continue;
+      const node = view.state.doc.nodeAt(pos);
+      if (!node) continue;
+      view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: url }));
+    }
+  }, []);
+
   const [margins, setMargins] = useState(loadMargins);
 
   const editor = useEditor({
@@ -213,6 +245,12 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           event.preventDefault();
           uploadAndInsert(view, files, null);
           return true;
+        }
+        const html = event.clipboardData?.getData("text/html") || "";
+        if (/<img\b[^>]*?src="data:image\//i.test(html)) {
+          // Let ProseMirror insert it normally, then swap the inline bytes for a
+          // storage URL once the paste is in the document.
+          setTimeout(() => sweepDataImages(view), 0);
         }
         return false;
       },
