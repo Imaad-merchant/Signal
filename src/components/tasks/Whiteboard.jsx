@@ -40,6 +40,21 @@ async function uploadImage(file) {
   return file_url;
 }
 
+// Firebase retries a failing upload for about two minutes before it rejects, so an
+// upload is never allowed to gate anything the user is waiting on.
+const UPLOAD_TIMEOUT_MS = 30000;
+async function uploadImageBounded(file) {
+  let timer;
+  try {
+    return await Promise.race([
+      uploadImage(file),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("upload timed out")), UPLOAD_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 // Sanitize stored/pasted text HTML — allow only basic formatting tags/attrs and
@@ -583,7 +598,7 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     migratedRef.current = page.id;
     const forPage = page.id;
     (async () => {
-      const { replacements } = await migrateBoardImages(objects, uploadImage);
+      const { replacements } = await migrateBoardImages(objects, uploadImageBounded);
       // migratedRef still names this page only until another page claims it, so test
       // the page actually on screen: results must never land on a different board.
       if (!replacements.size || pageIdRef.current !== forPage) return;
@@ -1103,37 +1118,37 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   // ─── Image paste / drag-drop ─────────────────────────────────────
   // Load a dropped/pasted image file, downscale large ones (keeps the board's JSON
   // under Firestore's 1MB doc limit), and return a data URL + dimensions.
+  // Prepare an image for the board: downscale it if it's huge, and hand back both the
+  // inline bytes (shown immediately) and the file to upload. The insert must never wait
+  // on the network — making it wait meant a slow or failing upload showed no image at
+  // all, which is worse than the problem it was fixing.
   const processImageFile = useCallback((file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
-      img.onload = async () => {
+      img.onload = () => {
         const maxDim = 1200;
         const nw = img.naturalWidth || 300, nh = img.naturalHeight || 200;
         const scale = Math.min(1, maxDim / Math.max(nw, nh));
         const big = typeof reader.result === "string" && reader.result.length > 700000;
-        let outW = nw, outH = nh, dataUrl = reader.result, toUpload = file;
         if (scale < 1 || big) {
-          outW = Math.max(1, Math.round(nw * scale));
-          outH = Math.max(1, Math.round(nh * scale));
+          const outW = Math.max(1, Math.round(nw * scale));
+          const outH = Math.max(1, Math.round(nh * scale));
           const canvas = document.createElement("canvas");
           canvas.width = outW; canvas.height = outH;
           canvas.getContext("2d").drawImage(img, 0, 0, outW, outH);
           const type = /png/i.test(file.type || "") ? "image/png" : "image/jpeg";
-          dataUrl = canvas.toDataURL(type, 0.82);
-          const blob = await new Promise((r) => canvas.toBlob(r, type, 0.82));
-          if (blob) {
+          const dataUrl = canvas.toDataURL(type, 0.82);
+          canvas.toBlob((blob) => {
             const ext = type === "image/png" ? "png" : "jpg";
-            toUpload = new File([blob], `image.${ext}`, { type });
-          }
+            resolve({
+              url: dataUrl, w: outW, h: outH,
+              file: blob ? new File([blob], `image.${ext}`, { type }) : file,
+            });
+          }, type, 0.82);
+        } else {
+          resolve({ url: reader.result, w: nw, h: nh, file });
         }
-        // Store the uploaded URL. Only if the upload fails do we fall back to an
-        // inline data URI, which risks pushing the page past its save limit.
-        try {
-          const url = await uploadImage(toUpload);
-          if (url) { resolve({ url, w: outW, h: outH }); return; }
-        } catch { /* fall through to the inline copy */ }
-        resolve({ url: dataUrl, w: outW, h: outH });
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -1142,9 +1157,25 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     reader.readAsDataURL(file);
   }), []);
 
+  // Upload in the background and swap the object's inline bytes for the storage URL.
+  // If the upload never lands the inline copy stays — the board still works, and the
+  // user is told it may not reach their other devices, because inline bytes are what
+  // push a board past the size a page can hold.
+  const uploadImageFor = useCallback((objId, file) => {
+    if (!file) return;
+    uploadImageBounded(file).then((url) => {
+      if (!url) throw new Error("no URL returned");
+      setObjects((prev) => prev.map((o) => (o.id === objId ? { ...o, src: url } : o)));
+    }).catch((err) => {
+      onSaveIssue?.({
+        message: `Couldn't upload that image (${err?.message || "upload failed"}). It's on the board, but it may not show up on your phone.`,
+      });
+    });
+  }, [onSaveIssue]);
+
   // Drop an image onto the canvas as an auto-sized box (reuses text-box rendering,
   // so it's selectable/movable/resizable like anything else).
-  const insertImageObject = useCallback(({ url, w, h }, worldX, worldY) => {
+  const insertImageObject = useCallback(({ url, w, h, file }, worldX, worldY) => {
     const maxW = 460;
     const dispW = Math.min(w || 300, maxW);
     const dispH = Math.max(1, Math.round(dispW * ((h || 200) / (w || 300))));
@@ -1161,7 +1192,8 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     pushHistory(objectsRef.current);
     setObjects(prev => [...prev, obj]);
     setSelectedIds([obj.id]);
-  }, [viewport, containerSize, pushHistory]);
+    uploadImageFor(obj.id, file);
+  }, [viewport, containerSize, pushHistory, uploadImageFor]);
 
   // Paste an image from the system clipboard onto the canvas (unless a text box is
   // being edited, which has its own inline-image paste).
@@ -1245,7 +1277,13 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   const resetCrop = () => updateSelectedImage({ crop: { l: 0, t: 0, r: 0, b: 0 } });
   const onReplaceFile = (e) => {
     const f = e.target.files?.[0];
-    if (f && selectedImage) processImageFile(f).then(({ url }) => updateSelectedImage({ src: url })).catch(() => {});
+    if (f && selectedImage) {
+      const targetId = selectedImage.id;
+      processImageFile(f).then(({ url, file }) => {
+        updateSelectedImage({ src: url });
+        uploadImageFor(targetId, file);
+      }).catch(() => {});
+    }
     if (e.target) e.target.value = "";
   };
 
@@ -2174,7 +2212,7 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
                   const html = `<img data-wb-pending="${token}" src="${reader.result}" style="max-width:100%;height:auto;display:inline-block;border-radius:4px;" />`;
                   document.execCommand("insertHTML", false, html);
                   editingHtmlRef.current = host.innerHTML;
-                  uploadImage(file).then((url) => {
+                  uploadImageBounded(file).then((url) => {
                     const node = url && host.querySelector(`img[data-wb-pending="${token}"]`);
                     if (!node) return;
                     node.setAttribute("src", url);
