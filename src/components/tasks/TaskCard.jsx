@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { handleTextareaTab } from "./tabInTextarea";
 import { motion, AnimatePresence } from "framer-motion";
 import { CheckCircle2, Circle, Clock, ArrowUpCircle, MoreHorizontal, Trash2, Play, ChevronRight, Plus, ListChecks } from "lucide-react";
 import {
@@ -213,8 +214,9 @@ export default function TaskCard({ task, onStatusChange, onDelete, onStartFocus,
               value={descValue}
               onChange={handleDescChange}
               onBlur={closeDesc}
-              onKeyDown={(e) => { if (e.key === "Escape") closeDesc(); }}
+              onKeyDown={(e) => { if (e.key === "Escape") closeDesc(); else handleTextareaTab(e); }}
               rows={2}
+              style={{ tabSize: 4 }}
               placeholder="Add a note..."
               className="w-full mt-1.5 ml-3.5 bg-[#1e1f20] border border-white/10 rounded-md px-2 py-1.5 text-xs text-gray-400 placeholder-gray-600 focus:outline-none focus:border-blue-500/30 resize-none"
             />

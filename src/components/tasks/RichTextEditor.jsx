@@ -44,6 +44,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { ResizableImage } from "./ResizableImage";
+import ColorPicker from "./color/ColorPicker";
+import { DEFAULT_TEXT_COLOR } from "./color/palette";
 import {
   Undo2, Redo2, Bold, Italic, Underline as UIcon, Strikethrough, Code,
   List, ListOrdered, CheckSquare, Quote, Code2, Minus, Link as LinkIcon,
@@ -72,6 +74,64 @@ const FontSize = Extension.create({
     return {
       setFontSize: (size) => ({ chain }) => chain().setMark("textStyle", { fontSize: size }).run(),
       unsetFontSize: () => ({ chain }) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+    };
+  },
+});
+
+
+// Tab indents instead of moving focus out of the editor. Lists and tables bind
+// Tab themselves (sink/lift item, next cell); this runs after them (priority 50)
+// as the fallback: inside a list item that couldn't sink we just swallow the
+// key, anywhere else we insert a tab character (rendered at tab-size 4 — the
+// editor is white-space: break-spaces, and content is parsed with
+// preserveWhitespace: "full", so it survives save/reload). With a range selected,
+// each selected block is indented rather than replaced.
+const TabIndent = Extension.create({
+  name: "tabIndent",
+  priority: 50,
+  addKeyboardShortcuts() {
+    const inList = () => this.editor.isActive("listItem") || this.editor.isActive("taskItem");
+    return {
+      Tab: () => {
+        if (inList()) return true;
+        const { state } = this.editor;
+        const { from, to, empty } = state.selection;
+        if (state.selection.node) return true; // image/table node selected: don't replace it
+        return this.editor.commands.command(({ tr }) => {
+          if (empty) { tr.insertText("\t", from, from); return true; }
+          const starts = [];
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (node.isTextblock) { starts.push(pos + 1); return false; }
+            return true;
+          });
+          starts.reverse().forEach((pos) => tr.insertText("\t", pos, pos));
+          return true;
+        });
+      },
+      "Shift-Tab": () => {
+        if (inList()) return true;
+        const { state } = this.editor;
+        const { from, to, empty } = state.selection;
+        if (state.selection.node) return true;
+        return this.editor.commands.command(({ tr }) => {
+          if (empty) {
+            const $from = state.selection.$from;
+            const before = state.doc.textBetween(Math.max($from.start(), from - 1), from, "\0");
+            if (before === "\t") tr.delete(from - 1, from);
+            return true;
+          }
+          const starts = [];
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (node.isTextblock) {
+              if (node.textContent.startsWith("\t")) starts.push(pos + 1);
+              return false;
+            }
+            return true;
+          });
+          starts.reverse().forEach((pos) => tr.delete(pos, pos + 1));
+          return true;
+        });
+      },
     };
   },
 });
@@ -124,10 +184,8 @@ const WikiLink = Extension.create({
   },
 });
 
-const TEXT_COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
-const HIGHLIGHT_COLORS = ["#fef08a", "#bef264", "#fda4af", "#a5f3fc", "#c4b5fd", "#fdba74"];
 
-function Dropdown({ trigger, children, width = "min-w-[160px]" }) {
+function Dropdown({ trigger, children, width = "min-w-[160px]", panelClass = "max-h-72 overflow-y-auto" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -148,7 +206,7 @@ function Dropdown({ trigger, children, width = "min-w-[160px]" }) {
         <ChevronDown className="h-2.5 w-2.5" />
       </button>
       {open && (
-        <div className={`absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 ${width} z-50 max-h-72 overflow-y-auto`}>
+        <div className={`absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 ${width} z-50 ${panelClass}`}>
           {typeof children === "function" ? children(() => setOpen(false)) : children}
         </div>
       )}
@@ -247,6 +305,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
       Color,
       FontFamily,
       FontSize,
+      TabIndent,
       Highlight.configure({ multicolor: true }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Link.configure({ openOnClick: false, HTMLAttributes: { class: "text-blue-400 underline" } }),
@@ -449,43 +508,34 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
         <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
 
         {/* Text color */}
-        <Dropdown trigger={<div className="flex flex-col items-center"><span className="text-[9px] font-bold leading-none text-gray-300">A</span><div className="h-1 w-3 rounded-sm" style={{ backgroundColor: editor.getAttributes("textStyle").color || "#e5e7eb" }} /></div>}>
+        <Dropdown panelClass="" trigger={<div className="flex flex-col items-center"><span className="text-[9px] font-bold leading-none text-gray-300">A</span><div className="h-1 w-3 rounded-sm" style={{ backgroundColor: editor.getAttributes("textStyle").color || DEFAULT_TEXT_COLOR }} /></div>}>
           {(close) => (
             <div className="p-2">
-              <div className="grid grid-cols-5 gap-1.5">
-                {TEXT_COLORS.map(c => (
-                  <button
-                    key={c}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => { editor.chain().focus().setColor(c).run(); close(); }}
-                    className="h-5 w-5 rounded-full hover:scale-110 transition-transform"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { editor.chain().focus().unsetColor().run(); close(); }} className="block w-full mt-2 text-[10px] text-gray-500 hover:text-gray-300">Remove color</button>
+              <ColorPicker
+                kind="text"
+                value={editor.getAttributes("textStyle").color || null}
+                onPick={(c) => editor.chain().focus().setColor(c).run()}
+                onClear={() => editor.chain().focus().unsetColor().run()}
+                clearLabel="Remove"
+                onClose={close}
+              />
             </div>
           )}
         </Dropdown>
 
         {/* Highlight */}
-        <Dropdown trigger={<Highlighter className="h-3.5 w-3.5 text-gray-300" />}>
+        <Dropdown panelClass="" trigger={<div className="flex flex-col items-center"><Highlighter className="h-3.5 w-3.5 text-gray-300" /><div className="h-1 w-3 rounded-sm" style={{ backgroundColor: editor.getAttributes("highlight").color || "transparent", border: editor.getAttributes("highlight").color ? "none" : "1px solid rgba(255,255,255,0.25)" }} /></div>}>
           {(close) => (
             <div className="p-2">
-              <div className="grid grid-cols-3 gap-1.5">
-                {HIGHLIGHT_COLORS.map(c => (
-                  <button
-                    key={c}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => { editor.chain().focus().toggleHighlight({ color: c }).run(); close(); }}
-                    className="h-5 w-12 rounded hover:scale-105 transition-transform"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { editor.chain().focus().unsetHighlight().run(); close(); }} className="block w-full mt-2 text-[10px] text-gray-500 hover:text-gray-300">Remove highlight</button>
+              <ColorPicker
+                kind="highlight"
+                shape="square"
+                value={editor.getAttributes("highlight").color || null}
+                onPick={(c) => editor.chain().focus().setHighlight({ color: c }).run()}
+                onClear={() => editor.chain().focus().unsetHighlight().run()}
+                clearLabel="None"
+                onClose={close}
+              />
             </div>
           )}
         </Dropdown>
@@ -622,7 +672,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
               onClick={(e) => { if (e.target === e.currentTarget) editor.chain().focus("end").run(); }}
             >
           <style>{`
-            .ProseMirror { outline: none; }
+            .ProseMirror { outline: none; tab-size: 4; -moz-tab-size: 4; }
             .ProseMirror p.is-editor-empty:first-child::before {
               content: attr(data-placeholder);
               float: left;
