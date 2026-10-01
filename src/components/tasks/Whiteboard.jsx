@@ -657,6 +657,24 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     setHistoryVersion(v => v + 1);
   }, [objects]);
 
+  // Focus the text-edit box as soon as it mounts (React's autoFocus only applies
+  // to form controls, not a contentEditable div) and put the caret at the end, so
+  // typing — and Tab — go into the box rather than the page.
+  useEffect(() => {
+    if (!editingTextId) return;
+    const el = editingTextRef.current;
+    if (!el || document.activeElement === el) return;
+    el.focus();
+    try {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch { /* ignore */ }
+  }, [editingTextId]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
@@ -1555,6 +1573,10 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
                   textObject={focusedText}
                   isEditing={editingTextId === focusedTextId}
                   editingTextRef={editingTextRef}
+                  onFinishEdit={() => {
+                    const el = editingTextRef.current;
+                    if (el && editingTextId === focusedTextId) finishTextEdit(focusedTextId, el.innerHTML);
+                  }}
                   isMobile={isMobile}
                   onUpdate={(patch) => {
                     pushHistory(objects);
@@ -2160,7 +2182,12 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
               suppressContentEditableWarning
               autoFocus
               onInput={(e) => { editingHtmlRef.current = e.currentTarget.innerHTML; }}
-              onBlur={(e) => finishTextEdit(o.id, e.currentTarget.innerHTML)}
+              onBlur={(e) => {
+                // Typing in the ribbon's hex color field shouldn't end the edit —
+                // the ribbon hands focus back (or blurs us for real) afterwards.
+                if (e.relatedTarget?.closest?.("[data-keep-text-edit]")) return;
+                finishTextEdit(o.id, e.currentTarget.innerHTML);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") { e.currentTarget.blur(); }
                 // Cmd/Ctrl + Enter to commit (Enter alone allows new paragraphs)

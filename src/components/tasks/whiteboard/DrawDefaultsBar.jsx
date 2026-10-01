@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ChevronDown } from "lucide-react";
-import { COLORS, STROKE_WIDTHS } from "./geometry";
+import { STROKE_WIDTHS } from "./geometry";
+import ColorPicker from "../color/ColorPicker";
 import FontSizeStepper from "./FontSizeStepper";
 
 // Row-2 contextual bar shown when a draw tool is active with no selection.
@@ -17,7 +18,6 @@ export default function DrawDefaultsBar({ tool, color, setColor, strokeWidth, se
   }, [colorOpen]);
 
   const isText = tool === "text";
-  const swatch = isMobile ? "h-7 w-7" : "h-6 w-6";
 
   return (
     <div
@@ -39,28 +39,7 @@ export default function DrawDefaultsBar({ tool, color, setColor, strokeWidth, se
         </button>
         {colorOpen && (
           <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-xl shadow-2xl p-2 z-50 max-w-[90vw]">
-            <div className="grid grid-cols-5 gap-1.5">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => { e.stopPropagation(); setColor(c); setColorOpen(false); }}
-                  className={`${swatch} rounded-full transition-transform hover:scale-110 ${color === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
-                  style={{ backgroundColor: c }}
-                  title={c}
-                />
-              ))}
-            </div>
-            <div className="mt-2 flex items-center gap-2 px-1">
-              <span className="text-[10px] text-gray-500">Custom:</span>
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
-              />
-            </div>
+            <ColorPicker kind="draw" value={color} onPick={(c) => setColor(c)} onClose={() => setColorOpen(false)} />
           </div>
         )}
       </div>

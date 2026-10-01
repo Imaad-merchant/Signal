@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { handleTextareaTab } from "./tabInTextarea";
 import { Calendar as CalendarIcon, Type, Flag, Activity, MessageCircle, Plus, FileText } from "lucide-react";
 import { ICON_MAP } from "./NotionSidebar";
 import { useAutosave } from "./useAutosave";
@@ -377,6 +378,8 @@ export default function NotionPageView({ page, onSave, onDelete }) {
             onChange={handleContent}
             placeholder="Press 'enter' to continue with an empty page, or pick a template (use ↑ and ↓ to select)"
             rows={Math.max(3, (content || "").split("\n").length)}
+            onKeyDown={handleTextareaTab}
+            style={{ tabSize: 4 }}
             className="w-full bg-transparent text-[14px] text-gray-300 placeholder-gray-700 focus:outline-none resize-none leading-relaxed"
           />
         </div>

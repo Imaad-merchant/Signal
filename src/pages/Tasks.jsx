@@ -16,6 +16,7 @@ import MemoriesView from "../components/tasks/MemoriesView";
 const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
+import { handleTextareaTab } from "../components/tasks/tabInTextarea";
 import { saveFailMessage } from "../components/tasks/pageStorage";
 import DashboardView from "../components/tasks/DashboardView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
@@ -628,6 +629,8 @@ export default function Tasks() {
               onChange={handleNotepadChange}
               placeholder="Jot something down..."
               rows={4}
+              onKeyDown={handleTextareaTab}
+              style={{ tabSize: 4 }}
               className="w-full bg-[#1e1f20] border border-white/5 rounded-md px-3 py-2 text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/10 resize-y min-h-[80px]"
             />
           </div>

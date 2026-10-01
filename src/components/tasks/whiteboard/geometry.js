@@ -1,5 +1,4 @@
 // ─── Constants ─────────────────────────────────────────────────────
-export const COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
 export const STROKE_WIDTHS = [1.5, 3, 5, 8];
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5;

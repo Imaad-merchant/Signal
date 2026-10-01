@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from "react";
-import { ChevronDown, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Highlighter, X } from "lucide-react";
-import { COLORS, FONT_FAMILIES, execCmd } from "./geometry";
+import { ChevronDown, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight, Highlighter } from "lucide-react";
+import { FONT_FAMILIES, execCmd } from "./geometry";
 import FontSizeStepper from "./FontSizeStepper";
+import ColorPicker from "../color/ColorPicker";
 
 // ─── Text Ribbon (Google Docs-style formatting) ───────────────────
 // Trimmed to the essentials: font family, size, bold/italic/underline,
 // alignment, text color, and highlight.
-export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing, isMobile = false }) {
+export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing, onFinishEdit, isMobile = false }) {
   const [fontOpen, setFontOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const fontRef = useRef(null);
+  const ribbonRef = useRef(null);
   const colorRef = useRef(null);
   const bgRef = useRef(null);
   // Last non-collapsed selection inside the editing box. Native <input type=color>
@@ -22,15 +24,27 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
   // box default. null → fall back to the object-level size.
   const [selFontSize, setSelFontSize] = useState(null);
 
+  // Latest edit state for the one-time document listener below.
+  const latest = useRef({});
+  latest.current = { isEditing, onFinishEdit };
+
   useEffect(() => {
     const handler = (e) => {
+      // A click outside while the picker's hex field has focus: closing the panel
+      // unmounts the field before its blur reaches React, so finish the edit here.
+      const { isEditing, onFinishEdit } = latest.current;
+      const root = editingTextRef?.current;
+      if (isEditing && root && document.activeElement?.hasAttribute?.("data-keep-text-edit") &&
+          !root.contains(e.target) && !ribbonRef.current?.contains(e.target)) {
+        onFinishEdit?.();
+      }
       if (fontRef.current && !fontRef.current.contains(e.target)) setFontOpen(false);
       if (colorRef.current && !colorRef.current.contains(e.target)) setColorOpen(false);
       if (bgRef.current && !bgRef.current.contains(e.target)) setBgOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [editingTextRef]);
 
   // Continuously remember the live selection while editing, and reflect the size at
   // the selection so the stepper shows the selected text's actual size.
@@ -199,6 +213,17 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     if (isEditing) editingTextRef?.current?.focus();
   };
 
+  // The hex field is the one picker control that takes focus. The editing box
+  // ignores that blur (see Whiteboard), so when focus leaves the field for anywhere
+  // other than the box or this ribbon, finish the edit explicitly.
+  const handleHexBlur = (e) => {
+    const root = editingTextRef?.current;
+    if (!isEditing || !root) return;
+    const to = e.relatedTarget;
+    if (to && (root.contains(to) || ribbonRef.current?.contains(to))) return;
+    onFinishEdit?.();
+  };
+
   const RbBtn = ({ onClick, active, title, children }) => (
     <button
       type="button"
@@ -213,6 +238,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
 
   return (
     <div
+      ref={ribbonRef}
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
       className="flex flex-wrap items-center justify-center gap-0.5 bg-[#252628] border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]"
@@ -276,27 +302,13 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
         </button>
         {colorOpen && (
           <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl p-2 z-50">
-            <div className="grid grid-cols-5 gap-1.5">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={(e) => { e.stopPropagation(); handleColorPick(c); setColorOpen(false); }}
-                  className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${textObject.color === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
-            <div className="mt-2 flex items-center gap-2 px-1">
-              <span className="text-[10px] text-gray-500">Custom:</span>
-              <input
-                type="color"
-                value={textObject.color || "#e5e7eb"}
-                onChange={(e) => handleColorPick(e.target.value)}
-                className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
-              />
-            </div>
+            <ColorPicker
+              kind="text"
+              value={textObject.color || null}
+              onPick={(c) => handleColorPick(c)}
+              onClose={() => setColorOpen(false)}
+              onInputBlur={handleHexBlur}
+            />
           </div>
         )}
       </div>
@@ -318,38 +330,16 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
         </button>
         {bgOpen && (
           <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl p-2 z-50">
-            <div className="grid grid-cols-5 gap-1.5">
-              {COLORS.map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                  onClick={(e) => { e.stopPropagation(); handleHighlight(c); setBgOpen(false); }}
-                  className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${currentBg === c ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-[#2d2e30]" : ""}`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 px-1">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-gray-500">Custom:</span>
-                <input
-                  type="color"
-                  value={currentBg || "#000000"}
-                  onChange={(e) => handleHighlight(e.target.value)}
-                  className="h-5 w-7 rounded cursor-pointer bg-transparent border border-white/[0.1]"
-                />
-              </div>
-              <button
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onClick={(e) => { e.stopPropagation(); handleHighlight("none"); setBgOpen(false); }}
-                className="flex items-center gap-1 px-1.5 py-1 rounded text-[10px] text-gray-300 hover:bg-white/[0.07]"
-                title="No highlight"
-              >
-                <X className="h-3 w-3" /> Clear
-              </button>
-            </div>
+            <ColorPicker
+              kind="highlight"
+              shape="square"
+              value={currentBg}
+              onPick={(c) => handleHighlight(c)}
+              onClear={() => handleHighlight("none")}
+              clearLabel="None"
+              onClose={() => setBgOpen(false)}
+              onInputBlur={handleHexBlur}
+            />
           </div>
         )}
       </div>
