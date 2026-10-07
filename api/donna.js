@@ -6,12 +6,12 @@
 // Google connect/disconnect kickoff) are merged here and dispatched on `body.route`.
 // Each route keeps its original request/response shape.
 import { verifyAuth } from "./_auth.js";
-import { callLLM, parseJSON, embed, cosine } from "./_llm.js";
+import { callLLM, parseJSON, rerank } from "./_llm.js";
 import { buildAuthUrl, refreshAccessToken, searchMail, searchDrive, exportFileText, insertEvent, patchEvent, deleteEvent } from "./google/_client.js";
 import { syncCalendarForUser } from "./google/_sync.js";
 import { plaidConfigured, plaidFetch, plaidId, syncPlaidItem } from "./plaid/_client.js";
 
-// Larger body limit so the voice-recorder can POST base64 audio for transcription.
+// Larger body limit for syllabus/document uploads passed through as base64.
 export const config = { api: { bodyParser: { sizeLimit: "12mb" } } };
 import { signState } from "./google/_state.js";
 import { getAdminDb, isAdminConfigured } from "./_firebaseAdmin.js";
@@ -202,7 +202,7 @@ Produce exactly one payback object now.`;
 
 // Retrieve the notes/memories most RELEVANT to a question from the user's `notes`
 // store (indexed Obsidian vault + Donna's captured memories) — keyword prefilter
-// then embedding cosine rank. Best-effort: returns [] on any failure so the answer
+// then a Claude relevance rerank. Best-effort: returns [] on any failure so the answer
 // never depends on it. Gated by the caller to reflective/personal questions.
 async function retrieveRelevantNotes(uid, query) {
   if (!uid || !isAdminConfigured()) return [];
@@ -221,13 +221,13 @@ async function retrieveRelevantNotes(uid, query) {
       .sort((a, b) => b.s - a.s)
       .map((x) => x.n)
       .slice(0, 18);
-    const vecs = await embed([query, ...pre.map((c) => `${c.title || ""}\n${(c.content || "").slice(0, 1500)}`)]);
-    const qv = vecs[0];
-    return pre
-      .map((c, i) => ({ title: c.title || "Untitled", folder: c.folder || "", excerpt: (c.content || "").replace(/\s+/g, " ").trim().slice(0, 600), score: cosine(qv, vecs[i + 1]) }))
-      .sort((a, b) => b.score - a.score)
-      .filter((r) => r.score > 0.15)
-      .slice(0, 6);
+    // Semantic pass without an embeddings API: Claude ranks the keyword-prefiltered
+    // candidates by meaning and drops the irrelevant ones.
+    const idx = await rerank({ query, items: pre.map((c) => `${c.title || ""}\n${(c.content || "").slice(0, 1500)}`), top: 6 });
+    return idx.map((i, rank) => {
+      const c = pre[i];
+      return { title: c.title || "Untitled", folder: c.folder || "", excerpt: (c.content || "").replace(/\s+/g, " ").trim().slice(0, 600), score: 1 - rank / 10 };
+    });
   } catch {
     return [];
   }
@@ -384,23 +384,18 @@ Context (JSON): ${JSON.stringify({
 
 Parse it now.`;
 
-  // Don't let a provider hiccup surface as a scary raw error. Try once, retry once,
-  // then return a friendly, retryable reply (200) instead of a 500 — and never any
-  // actions, so a failed parse can't accidentally delete or create anything.
+  // Don't let a provider hiccup surface as a scary raw error (callLLM already
+  // retries once): return a friendly, retryable reply (200) instead of a 500 — and
+  // never any actions, so a failed parse can't accidentally delete or create anything.
   let raw = "";
   try {
     raw = await callLLM({ system, user, json: true });
-  } catch (err1) {
-    console.error("intent LLM failed (1st):", err1?.message);
-    try {
-      raw = await callLLM({ system, user, json: true });
-    } catch (err2) {
-      console.error("intent LLM failed (2nd):", err2?.message);
-      return res.status(200).json({
-        reply: "I'm having trouble reaching my brain for a second — give that another go.",
-        intent: "none", actions: [],
-      });
-    }
+  } catch (err) {
+    console.error("intent LLM failed:", err?.message);
+    return res.status(200).json({
+      reply: "I'm having trouble reaching my brain for a second — give that another go.",
+      intent: "none", actions: [],
+    });
   }
   const parsed = parseJSON(raw);
 
@@ -608,7 +603,7 @@ Categorise and tidy it.`;
   return res.status(200).json({ bucket, title, spoken, duplicate });
 }
 
-// ---- route: semantic-search (embed the query + candidate notes, cosine rank) ----
+// ---- route: semantic-search (keyword prefilter + Claude relevance rerank) ----
 async function semanticSearch(auth, body, res) {
   const q = typeof body.query === "string" ? body.query.trim() : "";
   if (!q) return res.status(400).json({ error: "Query required" });
@@ -632,12 +627,9 @@ async function semanticSearch(auth, body, res) {
 
   let results;
   try {
-    const vecs = await embed([q, ...pool.map((c) => `${c.title}\n${(c.content || "").slice(0, 1500)}`)]);
-    const qv = vecs[0];
-    results = pool
-      .map((c, i) => ({ title: c.title, folder: c.folder, path: c.path, score: cosine(qv, vecs[i + 1]) }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
+    const idx = await rerank({ query: q, items: pool.map((c) => `${c.title}\n${(c.content || "").slice(0, 1500)}`), top: 5 });
+    results = idx.map((i, rank) => ({ title: pool[i].title, folder: pool[i].folder, path: pool[i].path, score: 1 - rank / 10 }));
+    if (!results.length) results = pool.slice(0, 5).map((c) => ({ title: c.title, folder: c.folder, path: c.path, score: 0 }));
   } catch {
     results = pool.slice(0, 5).map((c) => ({ title: c.title, folder: c.folder, path: c.path, score: 0 }));
   }
@@ -670,7 +662,7 @@ async function listNotes(auth, res) {
 
 // ---- route: extract-syllabus (read an uploaded syllabus PDF/image → category + dated assignments) ----
 // The generic invoke-llm endpoint never attaches the file, so this reads it directly:
-// Claude reads PDFs and images via base64 content blocks; images fall back to gpt-4o
+// Claude reads PDFs and images via base64 content blocks
 // vision. Returns { category:{name,color}, assignments:[{title,due_date}] } or { error }.
 // Fetch an uploaded file and pull its text layer out with pdf.js. Shared by
 // extract-syllabus and the extract-pdf-text route below, which exists because
@@ -745,12 +737,11 @@ Return JSON ONLY:
   "assignments": [ { "title": string, "due_date": "YYYY-MM-DD" } ] }
 Resolve EVERY date to a full ISO date; infer the year from the syllabus, else use ${year}. Include ONLY items that have a real due date. Keep titles short ("HW 3", "Midterm", "Essay 1"). If it isn't a syllabus or has no dated items, return an empty assignments array.`;
 
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
   let lastErr = "";
+  const jsonSystem = "Respond with valid JSON only. No markdown, no prose.";
 
-  // PDFs: pull the text out (works with any LLM provider, and most syllabi are
-  // text PDFs), then let the shared callLLM parse it. This is the reliable path —
-  // it doesn't depend on Anthropic being reachable.
+  // PDFs: pull the text out first (most syllabi are text PDFs) and let the model
+  // parse that — far fewer tokens than sending the whole document.
   if (isPdf) {
     let text = "";
     try {
@@ -759,59 +750,31 @@ Resolve EVERY date to a full ISO date; infer the year from the syllabus, else us
 
     if (text && text.trim().length > 40) {
       try {
-        const raw = await callLLM({ system: "Respond with valid JSON only. No markdown, no prose.", user: `${instructions}\n\nSYLLABUS TEXT:\n"""${text.slice(0, 30000)}"""`, json: true });
+        const raw = await callLLM({ system: jsonSystem, user: `${instructions}\n\nSYLLABUS TEXT:\n"""${text.slice(0, 30000)}"""`, json: true });
         return res.status(200).json(parseJSON(raw));
       } catch (e) { lastErr = `llm: ${e.message}`; console.error("extract-syllabus pdf llm:", e.message); }
     }
 
-    // Text extraction found little/nothing (scanned PDF) — try Claude's native PDF
-    // reader if we have a key; otherwise ask for a screenshot.
-    if (anthropicKey) {
-      try {
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
-            system: "Respond with valid JSON only. No markdown, no prose.",
-            messages: [{ role: "user", content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }, { type: "text", text: instructions }] }],
-          }),
-        });
-        if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d?.content?.[0]?.text || "{}")); }
-        lastErr = `anthropic ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
-      } catch (e) { lastErr = `anthropic: ${e.message}`; }
-    }
+    // Text extraction found little/nothing (scanned PDF) — hand Claude the PDF
+    // itself; if that fails too, ask for a screenshot.
+    try {
+      const raw = await callLLM({
+        system: jsonSystem, json: true,
+        content: [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }, { type: "text", text: instructions }],
+      });
+      return res.status(200).json(parseJSON(raw));
+    } catch (e) { lastErr = `anthropic: ${e.message}`; }
     return res.status(200).json({ error: text ? "pdf-unreadable" : "pdf-scanned", detail: lastErr.slice(0, 200) });
   }
 
-  // Images: gpt-4o vision (or Claude's image block if only Anthropic is configured).
-  if (isImage && process.env.OPENAI_API_KEY) {
+  // Images: Claude reads the screenshot directly.
+  if (isImage) {
     try {
-      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
-        body: JSON.stringify({
-          model: "gpt-4o", max_tokens: 4000, response_format: { type: "json_object" },
-          messages: [{ role: "user", content: [{ type: "text", text: instructions }, { type: "image_url", image_url: { url: fileUrl } }] }],
-        }),
+      const raw = await callLLM({
+        system: jsonSystem, json: true,
+        content: [{ type: "image", source: { type: "base64", media_type: imgType, data: b64 } }, { type: "text", text: instructions }],
       });
-      if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d.choices?.[0]?.message?.content || "{}")); }
-      lastErr = `openai ${resp.status}`;
-    } catch (e) { lastErr = `openai: ${e.message}`; }
-  }
-  if (isImage && anthropicKey) {
-    try {
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": anthropicKey, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5", max_tokens: 4000,
-          system: "Respond with valid JSON only. No markdown, no prose.",
-          messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: imgType, data: b64 } }, { type: "text", text: instructions }] }],
-        }),
-      });
-      if (resp.ok) { const d = await resp.json(); return res.status(200).json(parseJSON(d?.content?.[0]?.text || "{}")); }
-      lastErr = `anthropic ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
+      return res.status(200).json(parseJSON(raw));
     } catch (e) { lastErr = `anthropic: ${e.message}`; }
   }
 
@@ -1003,27 +966,10 @@ Content: ${(text || "(could not read the content)").slice(0, 6000)}`;
   }
 }
 
-// ---- Server-side TTS (OpenAI) — reliable audio the browser plays via <audio>,
-//      sidestepping the flaky Web Speech API. Returns base64 MP3. ----
+// ---- Server-side TTS — retired. Anthropic has no speech API, and the app runs on
+//      Anthropic only; the client falls back to the browser's speech engine on 503. ----
 async function ttsSpeak(auth, body, res) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return res.status(503).json({ error: "TTS not configured (no OPENAI_API_KEY)" });
-  const text = String(body.text || "").trim().slice(0, 1200);
-  if (!text) return res.status(400).json({ error: "text required" });
-  // Map the user's voice prefs to an OpenAI voice. "fable" reads British-ish.
-  const voice = body.voice === "male" ? "onyx" : body.british ? "fable" : "nova";
-  try {
-    const r = await fetch("https://api.openai.com/v1/audio/speech", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "tts-1", voice, input: text, response_format: "mp3" }),
-    });
-    if (!r.ok) { const t = await r.text(); return res.status(502).json({ error: `TTS ${r.status}: ${t.slice(0, 200)}` }); }
-    const buf = Buffer.from(await r.arrayBuffer());
-    return res.status(200).json({ audio: buf.toString("base64"), mime: "audio/mpeg" });
-  } catch (err) {
-    return res.status(502).json({ error: err.message || "TTS failed" });
-  }
+  return res.status(503).json({ error: "TTS not available (browser speech is used instead)" });
 }
 
 // ---- Two-way Google Calendar sync. App events (Tasks with a due_date) push to
@@ -1057,28 +1003,10 @@ async function gcalSync(auth, res) {
   return res.status(200).json({ ok: !r.error, ...r });
 }
 
-// ---- Speech-to-text (OpenAI Whisper) — transcribe a recorded voice memo. ----
+// ---- Speech-to-text — retired. Voice memos are transcribed live in the browser
+//      (SpeechRecognition) instead; see ThoughtsPanel. ----
 async function transcribe(auth, body, res) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return res.status(503).json({ error: "Transcription not configured (no OPENAI_API_KEY)" });
-  const b64 = String(body.audio || "");
-  if (!b64) return res.status(400).json({ error: "audio required" });
-  try {
-    const buf = Buffer.from(b64, "base64");
-    const form = new FormData();
-    form.append("file", new Blob([buf], { type: body.mime || "audio/webm" }), "memo.webm");
-    form.append("model", "whisper-1");
-    const r = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-    });
-    if (!r.ok) { const t = await r.text(); return res.status(502).json({ error: `Transcribe ${r.status}: ${t.slice(0, 200)}` }); }
-    const data = await r.json();
-    return res.status(200).json({ text: data.text || "" });
-  } catch (err) {
-    return res.status(502).json({ error: err.message || "Transcription failed" });
-  }
+  return res.status(503).json({ error: "Transcription happens in the browser now — update the app." });
 }
 
 // ---- Plaid: connect banks + sync accounts/transactions into the Money tab. ----

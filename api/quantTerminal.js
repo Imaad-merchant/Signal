@@ -252,7 +252,7 @@ export default async function handler(req, res) {
     } catch (err) {
       return res.status(200).json({
         error: String(err?.message || err).includes("No LLM provider")
-          ? "The research chat needs an LLM key on this deployment (ANTHROPIC_API_KEY or OPENAI_API_KEY)."
+          ? "The research chat needs an LLM key on this deployment (ANTHROPIC_API_KEY)."
           : "The research chat is unavailable right now — try again.",
       });
     }

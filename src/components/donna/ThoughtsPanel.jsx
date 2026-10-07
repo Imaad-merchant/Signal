@@ -1,58 +1,64 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Mic, Square, Upload, Loader2, X, Brain, Check } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 
-// Brain-dump inbox: capture vocal thoughts (recorded → Whisper), paste text, or
-// import text/markdown documents, then organize + save into the same notes Donna
-// writes to (the `cleanup` route → a Page). One "Organize & save" action for all
-// three input methods.
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result || "").split(",")[1] || "");
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  });
-}
+// Brain-dump inbox: capture vocal thoughts (dictated live via the browser's
+// SpeechRecognition — no audio leaves the device), paste text, or import
+// text/markdown documents, then organize + save into the same notes Donna writes
+// to (the `cleanup` route → a Page). One "Organize & save" action for all three.
+const speechSupported = () =>
+  typeof window !== "undefined" && ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
 
 export default function ThoughtsPanel({ onClose, onSaved }) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
-  const [busy, setBusy] = useState("");     // "transcribing" | "saving"
+  const [busy, setBusy] = useState("");     // "saving"
   const [msg, setMsg] = useState("");
+  const [partial, setPartial] = useState("");
   const recRef = useRef(null);
-  const chunksRef = useRef([]);
-  const streamRef = useRef(null);
+  const finalRef = useRef("");
   const fileRef = useRef(null);
+  const canDictate = speechSupported();
 
-  const startRec = async () => {
+  // Live dictation: final phrases are appended to the text as they're recognised,
+  // the in-progress phrase shows underneath the box.
+  const startRec = () => {
     setMsg("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const rec = new MediaRecorder(stream);
-      recRef.current = rec;
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunksRef.current.push(e.data); };
-      rec.onstop = async () => {
-        try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* ignore */ }
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        if (!blob.size) { setMsg("Nothing recorded."); return; }
-        setBusy("transcribing"); setMsg("Transcribing…");
-        try {
-          const b64 = await blobToBase64(blob);
-          const res = await base44.functions.invoke("donna", { route: "transcribe", audio: b64, mime: "audio/webm" });
-          const data = (res && res.data) ? res.data : res || {};
-          if (data.text) { setText((t) => (t ? `${t}\n\n${data.text}` : data.text)); setMsg("Added your transcript below — edit or Organize & save."); }
-          else setMsg(data.error || "Couldn't transcribe that.");
-        } catch { setMsg("Transcription failed — try again."); }
-        setBusy("");
-      };
-      rec.start();
-      setRecording(true);
-    } catch { setMsg("Microphone access is off — allow it, or paste/import instead."); }
+    if (!canDictate) { setMsg("Dictation isn't supported in this browser — paste or import instead."); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-GB";
+    recRef.current = rec;
+    finalRef.current = "";
+    rec.onresult = (event) => {
+      let interim = "";
+      let added = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript;
+        if (event.results[i].isFinal) added += (added ? " " : "") + t.trim();
+        else interim = t;
+      }
+      if (added) {
+        finalRef.current += (finalRef.current ? " " : "") + added;
+        setText((prev) => (prev ? `${prev.replace(/\s+$/, "")} ${added}` : added));
+      }
+      setPartial(interim);
+    };
+    rec.onerror = (e) => {
+      setRecording(false); setPartial("");
+      if (e?.error === "not-allowed") setMsg("Microphone access is off — allow it, or paste/import instead.");
+    };
+    rec.onend = () => {
+      setRecording(false); setPartial("");
+      if (!finalRef.current) setMsg((m) => m || "Nothing heard — try again, or paste/import.");
+    };
+    try { rec.start(); setRecording(true); }
+    catch { setRecording(false); setMsg("Couldn't start dictation — try again."); }
   };
   const stopRec = () => { try { recRef.current?.stop(); } catch { /* ignore */ } setRecording(false); };
+  useEffect(() => () => { try { recRef.current?.stop(); } catch { /* ignore */ } }, []);
 
   const onFile = async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
@@ -91,7 +97,7 @@ export default function ThoughtsPanel({ onClose, onSaved }) {
           <button onClick={onClose} className="p-1 text-gray-500 hover:text-gray-200" aria-label="Close"><X className="h-5 w-5" /></button>
         </div>
 
-        <p className="mb-2 text-[11px] text-gray-500">Record out loud, paste, or import a document — I'll organize it and file it with your notes.</p>
+        <p className="mb-2 text-[11px] text-gray-500">Dictate out loud, paste, or import a document — I'll organize it and file it with your notes.</p>
 
         <div className="mb-2 flex items-center gap-2">
           {recording ? (
@@ -100,15 +106,15 @@ export default function ThoughtsPanel({ onClose, onSaved }) {
               <span className="ml-1 h-2 w-2 animate-pulse rounded-full bg-white" />
             </button>
           ) : (
-            <button onClick={startRec} disabled={!!busy} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50">
-              <Mic className="h-3.5 w-3.5" /> Record
+            <button onClick={startRec} disabled={!!busy || !canDictate} title={canDictate ? "Dictate" : "Dictation isn't supported in this browser"} className="inline-flex items-center gap-1.5 rounded-lg border border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs font-medium text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-50">
+              <Mic className="h-3.5 w-3.5" /> Dictate
             </button>
           )}
           <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-gray-300 hover:border-white/25">
             <Upload className="h-3.5 w-3.5" /> Import file
             <input ref={fileRef} type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={onFile} className="hidden" />
           </label>
-          {busy === "transcribing" && <span className="inline-flex items-center gap-1 text-[11px] text-cyan-300"><Loader2 className="h-3 w-3 animate-spin" /> transcribing</span>}
+          {recording && <span className="inline-flex items-center gap-1 text-[11px] text-cyan-300"><Loader2 className="h-3 w-3 animate-spin" /> listening</span>}
         </div>
 
         <textarea
@@ -119,6 +125,7 @@ export default function ThoughtsPanel({ onClose, onSaved }) {
           className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-sm text-gray-100 placeholder-gray-600 outline-none focus:border-white/25"
         />
 
+        {partial && <p className="mt-1 text-[11px] italic text-gray-500">{partial}…</p>}
         {msg && <p className="mt-2 text-[11px] text-cyan-300">{msg}</p>}
 
         <div className="mt-3 flex justify-end">

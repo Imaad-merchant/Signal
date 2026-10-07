@@ -1,4 +1,5 @@
 import { verifyAuth } from "./_auth.js";
+import { callLLM, llmConfigured, imageBlock, parseJSON } from "./_llm.js";
 
 export const config = {
   api: {
@@ -17,8 +18,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_API_KEY) return res.status(500).json({ error: "OpenAI API key not configured" });
+  if (!llmConfigured()) return res.status(500).json({ error: "LLM not configured (ANTHROPIC_API_KEY)" });
 
   try {
     const { fileBase64, textContent, fileName, fileType } = req.body;
@@ -33,7 +33,7 @@ export default async function handler(req, res) {
 
 Be thorough — extract EVERY task/event you can find. Respond with valid JSON only, no markdown.`;
 
-    const messages = [{ role: "system", content: systemPrompt }];
+    let userContent = null;
     let contentToSend = "";
 
     if (textContent) {
@@ -59,58 +59,30 @@ Be thorough — extract EVERY task/event you can find. Respond with valid JSON o
           contentToSend = rawText.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s{3,}/g, " ");
         }
       } else if (isImage) {
-        messages.push({
-          role: "user",
-          content: [
-            { type: "text", text: `Extract ALL tasks/events from this image (${fileName}). Return every single task as JSON.` },
-            { type: "image_url", image_url: { url: fileBase64, detail: "high" } },
-          ],
-        });
+        userContent = [
+          imageBlock(fileBase64),
+          { type: "text", text: `Extract ALL tasks/events from this image (${fileName}). Return every single task as JSON.` },
+        ];
       }
     }
 
-    if (contentToSend && messages.length === 1) {
-      messages.push({
-        role: "user",
-        content: `Extract all tasks from this file (${fileName}):\n\n${contentToSend.slice(0, 30000)}`,
-      });
+    if (contentToSend && !userContent) {
+      userContent = [{ type: "text", text: `Extract all tasks from this file (${fileName}):\n\n${contentToSend.slice(0, 30000)}` }];
     }
 
-    if (messages.length < 2) {
+    if (!userContent) {
       return res.status(400).json({ error: "No parseable content found" });
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages,
-        temperature: 0.2,
-        max_tokens: 16000,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("OpenAI error:", response.status, errText);
-      return res.status(500).json({ error: `AI processing failed (${response.status})` });
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '{"tasks":[]}';
-
-    let parsed;
+    let content;
     try {
-      parsed = JSON.parse(content);
-    } catch {
-      parsed = { tasks: [] };
+      content = await callLLM({ system: systemPrompt, content: userContent, json: true, maxTokens: 16000 });
+    } catch (err) {
+      console.error("Smart import LLM error:", err.message);
+      return res.status(500).json({ error: "AI processing failed" });
     }
 
+    const parsed = parseJSON(content);
     const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : Array.isArray(parsed) ? parsed : [];
 
     return res.status(200).json({ tasks });
