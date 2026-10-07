@@ -1,4 +1,5 @@
 import { verifyAuth } from "./_auth.js";
+import { callLLM, llmConfigured, parseJSON } from "./_llm.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -9,8 +10,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_API_KEY) return res.status(500).json({ error: "OpenAI API key not configured" });
+  if (!llmConfigured()) return res.status(500).json({ error: "LLM not configured (ANTHROPIC_API_KEY)" });
 
   try {
     const { prompt, existingObjects, mode } = req.body;
@@ -60,40 +60,20 @@ VISUAL DESIGN:
 - Arrows for flow, lines for relationships.
 - Aim for 8-30 objects total. Make it look intentional and pretty.
 
-USER PROMPT:
-${prompt}
-
 ${task}
 
 JSON ONLY. No markdown, no explanation.`;
+    const userPrompt = `USER PROMPT:\n${prompt}`;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENAI_API_KEY}` },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "system", content: systemPrompt }],
-        temperature: 0.4,
-        max_tokens: 8000,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("OpenAI error:", response.status, errText);
+    let content;
+    try {
+      content = await callLLM({ system: systemPrompt, user: userPrompt, json: true, maxTokens: 8000, effort: "medium" });
+    } catch (err) {
+      console.error("aiCanvas LLM error:", err.message);
       return res.status(500).json({ error: "AI request failed" });
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '{"actions":[]}';
-
-    let parsed;
-    try { parsed = JSON.parse(content); }
-    catch {
-      const match = content.match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : { actions: [] };
-    }
+    const parsed = parseJSON(content);
     if (!Array.isArray(parsed.actions)) parsed.actions = [];
 
     // Assign ids to new objects

@@ -1,4 +1,5 @@
 import { verifyAuth } from "./_auth.js";
+import { callLLM, llmConfigured, imageBlock, parseJSON } from "./_llm.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -9,42 +10,31 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_API_KEY) return res.status(500).json({ error: "OpenAI API key not configured" });
+  if (!llmConfigured()) return res.status(500).json({ error: "LLM not configured (ANTHROPIC_API_KEY)" });
 
   try {
     const { prompt, file_urls, response_json_schema } = req.body;
 
-    const messages = [{ role: "user", content: prompt }];
+    let text = String(prompt || "");
+    if (response_json_schema) {
+      text += `\n\nRespond with valid JSON matching this schema: ${JSON.stringify(response_json_schema)}`;
+    }
+    // Attach any image URLs so the model can read them alongside the prompt.
+    const images = (Array.isArray(file_urls) ? file_urls : [])
+      .filter((u) => typeof u === "string" && /\.(png|jpe?g|webp|gif)(\?|$)|^data:image\//i.test(u))
+      .map(imageBlock);
+    const content = [...images, { type: "text", text }];
 
-    const body = {
-      model: "gpt-4o",
-      messages,
-      temperature: 0.3,
-      max_tokens: 4000,
-    };
+    const out = await callLLM({ content, json: !!response_json_schema, maxTokens: 4000 });
 
     if (response_json_schema) {
-      body.response_format = { type: "json_object" };
-      messages[0].content += `\n\nRespond with valid JSON matching this schema: ${JSON.stringify(response_json_schema)}`;
+      const parsed = parseJSON(out);
+      return res.status(200).json(Object.keys(parsed).length ? parsed : { result: out });
     }
-
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || "{}";
-
     try {
-      return res.status(200).json(JSON.parse(content));
+      return res.status(200).json(JSON.parse(out));
     } catch {
-      return res.status(200).json({ result: content });
+      return res.status(200).json({ result: out });
     }
   } catch (err) {
     console.error("InvokeLLM error:", err);

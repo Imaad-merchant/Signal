@@ -1,4 +1,5 @@
 import { verifyAuth } from "./_auth.js";
+import { callLLM, llmConfigured, imageBlock, parseJSON } from "./_llm.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -9,8 +10,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  if (!OPENAI_API_KEY) return res.status(500).json({ error: "OpenAI API key not configured" });
+  if (!llmConfigured()) return res.status(500).json({ error: "LLM not configured (ANTHROPIC_API_KEY)" });
 
   try {
     const { messages, tasks, imageUrls, categories } = req.body;
@@ -86,67 +86,33 @@ CRITICAL RULES:
 7. When creating a project, aim for 5-15 well-structured tasks that cover the full scope.
 8. Make your reply friendly and brief — summarize what you created, don't list every task.`;
 
-    const openaiMessages = [
-      { role: "system", content: systemPrompt },
-    ];
-
+    // Conversation → Anthropic messages. Images (Firebase download URLs) go in
+    // as url image blocks ahead of the text of that turn.
+    const llmMessages = [];
     for (const msg of (messages || [])) {
+      const role = msg.role === "assistant" ? "assistant" : "user";
       const content = [];
-      if (msg.content) content.push({ type: "text", text: msg.content });
-      if (msg.imageUrls?.length) {
-        for (const url of msg.imageUrls) {
-          content.push({ type: "image_url", image_url: { url, detail: "high" } });
-        }
+      if (role === "user" && msg.imageUrls?.length) {
+        for (const url of msg.imageUrls) content.push(imageBlock(url));
       }
-      openaiMessages.push({
-        role: msg.role,
-        content: content.length === 1 && content[0].type === "text" ? content[0].text : content,
-      });
+      if (msg.content) content.push({ type: "text", text: String(msg.content) });
+      if (!content.length) continue;
+      llmMessages.push({ role, content });
+    }
+    if (!llmMessages.length || llmMessages[0].role !== "user") {
+      llmMessages.unshift({ role: "user", content: [{ type: "text", text: "Hello." }] });
     }
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: openaiMessages,
-        temperature: 0.3,
-        max_tokens: 16000,
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("OpenAI error:", response.status, errText);
+    let content;
+    try {
+      content = await callLLM({ system: systemPrompt, messages: llmMessages, json: true, maxTokens: 16000, effort: "medium" });
+    } catch (err) {
+      console.error("AI Assistant LLM error:", err.message);
       return res.status(500).json({ reply: "Sorry, AI processing failed. Please try again.", actions: [] });
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '{"reply": "Sorry, I couldn\'t process that.", "actions": []}';
-
-    let parsed;
-    try {
-      // Try direct parse first
-      parsed = JSON.parse(content);
-    } catch {
-      // Fallback: strip markdown code fences
-      try {
-        const cleaned = content.replace(/^```json\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-        parsed = JSON.parse(cleaned);
-      } catch {
-        // Fallback: extract first JSON object from mixed text
-        const match = content.match(/\{[\s\S]*\}/);
-        if (match) {
-          try { parsed = JSON.parse(match[0]); } catch { parsed = { reply: content, actions: [] }; }
-        } else {
-          parsed = { reply: content, actions: [] };
-        }
-      }
-    }
+    let parsed = parseJSON(content);
+    if (!parsed || typeof parsed !== "object" || !Object.keys(parsed).length) parsed = { reply: content || "Sorry, I couldn't process that.", actions: [] };
 
     // Ensure shape is correct
     if (!parsed.reply) parsed.reply = "Done!";
