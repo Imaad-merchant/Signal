@@ -32,11 +32,11 @@ export function Avatar({ name, color = null }) {
   );
 }
 
-export function Card({ title, children, right = null }) {
+export function Card({ title, children, right = null, className = "" }) {
   return (
-    <section className="mt-4 rounded-2xl border border-[#e6e8ec] bg-white p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-[#16191d]">{title}</h2>
+    <section className={`mt-4 min-w-0 rounded-2xl border border-[#e6e8ec] bg-white p-4 ${className}`}>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="min-w-0 truncate text-sm font-semibold text-[#16191d]">{title}</h2>
         {right}
       </div>
       {children}

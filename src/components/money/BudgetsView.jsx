@@ -98,7 +98,7 @@ export default function BudgetsView({ data, onChange = () => {} }) {
         {adding ? (
           <AddBudget available={available} onDone={() => { setAdding(false); onChange(); }} onCancel={() => setAdding(false)} />
         ) : available.length > 0 && (
-          <button onClick={() => setAdding(true)} className="mt-2 w-full rounded-lg border border-[#dcdfe4] py-2 text-[11px] text-[#454b54] hover:border-[#d81b48]/45">
+          <button onClick={() => setAdding(true)} className="mt-2 w-full rounded-lg border border-[#dcdfe4] py-2.5 text-xs sm:py-2 sm:text-[11px] text-[#454b54] hover:border-[#d81b48]/45">
             <Plus className="mr-1 inline h-3 w-3" /> Add Budget
           </button>
         )}
@@ -116,7 +116,7 @@ function BudgetTable({ title, rows, empty, onChange, children = null }) {
 
   return (
     <Card title={title}>
-      <div className="mb-1 flex items-center gap-2 px-1 text-[9px] uppercase tracking-wide text-[#a8aeb8]">
+      <div className="mb-1 hidden items-center gap-2 px-1 text-[9px] uppercase tracking-wide text-[#a8aeb8] sm:flex">
         <span className="flex-1">Name</span>
         <span className="w-16 text-right">Budgeted</span>
         <span className="w-16 text-right">Actual</span>
@@ -131,23 +131,57 @@ function BudgetTable({ title, rows, empty, onChange, children = null }) {
           const pct = b.budgeted > 0 ? (b.actual / b.budgeted) * 100 : 0;
           const short = b.remaining < 0;
           return (
-            <div key={b.id} className="flex items-center gap-2 py-2">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
-                <m.Icon className="h-3.5 w-3.5" style={{ color: m.c }} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs text-[#16191d]">{b.isEarnings ? "Earnings" : b.category}</span>
-              <input
-                defaultValue={b.budgeted}
-                onBlur={(e) => update(b, e.target.value)}
-                type="number"
-                className="w-16 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-right text-xs text-[#454b54] outline-none hover:border-[#dcdfe4] focus:border-[#16191d]"
-              />
-              <span className="w-16 shrink-0 text-right text-xs text-[#454b54]">{fmtMoney(b.actual)}</span>
-              <span className={`w-20 shrink-0 text-right text-xs ${short ? "text-[#b54708]" : "text-[#0f7b53]"}`}>{fmtMoney(b.remaining)}</span>
-              <span className="flex w-11 shrink-0 items-center justify-end gap-1">
-                <Ring pct={pct} over={short} color={m.c} />
-                <button onClick={() => del(b)} className="p-0.5 text-[#a8aeb8] hover:text-[#c01530]"><Trash2 className="h-3.5 w-3.5" /></button>
-              </span>
+            <div key={b.id} className="py-2">
+              {/* Phone: name row, then a labelled Budgeted / Actual / Left row. */}
+              <div className="flex flex-col gap-2 sm:hidden">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
+                    <m.Icon className="h-4 w-4" style={{ color: m.c }} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#16191d]">{b.isEarnings ? "Earnings" : b.category}</span>
+                  <Ring pct={pct} over={short} color={m.c} size={20} />
+                  <button onClick={() => del(b)} aria-label={`Delete ${b.category} budget`} className="flex h-8 w-8 items-center justify-center rounded-lg text-[#a8aeb8] active:bg-[#f2f4f7]"><Trash2 className="h-4 w-4" /></button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 pl-[42px]">
+                  <label className="flex min-w-0 flex-col">
+                    <span className="text-[9px] uppercase tracking-wide text-[#a8aeb8]">Budgeted</span>
+                    <input
+                      defaultValue={b.budgeted}
+                      onBlur={(e) => update(b, e.target.value)}
+                      type="number"
+                      inputMode="decimal"
+                      className="w-full min-w-0 rounded-md border border-[#e6e8ec] bg-white px-1.5 py-1 text-sm text-[#454b54] outline-none focus:border-[#16191d]"
+                    />
+                  </label>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-[9px] uppercase tracking-wide text-[#a8aeb8]">Actual</span>
+                    <span className="truncate py-1 text-sm text-[#454b54]">{fmtMoney(b.actual)}</span>
+                  </span>
+                  <span className="flex min-w-0 flex-col text-right">
+                    <span className="text-[9px] uppercase tracking-wide text-[#a8aeb8]">{short ? "Over" : "Left"}</span>
+                    <span className={`truncate py-1 text-sm font-medium ${short ? "text-[#b54708]" : "text-[#0f7b53]"}`}>{fmtMoney(b.remaining)}</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="hidden items-center gap-2 sm:flex">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${m.c}22` }}>
+                  <m.Icon className="h-3.5 w-3.5" style={{ color: m.c }} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs text-[#16191d]">{b.isEarnings ? "Earnings" : b.category}</span>
+                <input
+                  defaultValue={b.budgeted}
+                  onBlur={(e) => update(b, e.target.value)}
+                  type="number"
+                  className="w-16 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-right text-xs text-[#454b54] outline-none hover:border-[#dcdfe4] focus:border-[#16191d]"
+                />
+                <span className="w-16 shrink-0 text-right text-xs text-[#454b54]">{fmtMoney(b.actual)}</span>
+                <span className={`w-20 shrink-0 text-right text-xs ${short ? "text-[#b54708]" : "text-[#0f7b53]"}`}>{fmtMoney(b.remaining)}</span>
+                <span className="flex w-11 shrink-0 items-center justify-end gap-1">
+                  <Ring pct={pct} over={short} color={m.c} />
+                  <button onClick={() => del(b)} className="p-0.5 text-[#a8aeb8] hover:text-[#c01530]"><Trash2 className="h-3.5 w-3.5" /></button>
+                </span>
+              </div>
             </div>
           );
         })}

@@ -84,7 +84,7 @@ export default function Filters({ filters, onChange, accounts = [] }) {
           <input
             value={filters.q}
             onChange={(e) => set({ q: e.target.value })}
-            placeholder="Search transactions…"
+            placeholder="Search…"
             className="w-full rounded-lg border border-[#dcdfe4] bg-white py-1.5 pl-8 pr-2 text-xs text-[#16191d] outline-none focus:border-[#d81b48]/45"
           />
         </div>

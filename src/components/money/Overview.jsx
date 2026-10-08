@@ -56,19 +56,20 @@ export default function Overview({ data, onGoToView = () => {} }) {
     .slice(0, 4);
 
   return (
-    // Rocket Money's dashboard is a wide main column plus a right rail;
-    // it collapses to a single stacked column below `lg`.
-    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <div className="flex min-w-0 flex-col">
+    // Rocket Money's dashboard is a wide main column plus a right rail. Below
+    // `lg` both columns dissolve (`contents`) into one stack ordered for a
+    // phone: spend, balances, what's due, budgets — then the long activity list.
+    <div className="grid grid-cols-1 items-start gap-x-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="contents lg:flex lg:min-w-0 lg:flex-col">
           {/* Current spend hero */}
-        <section className="mt-1 rounded-2xl border border-[#e6e8ec] bg-white p-4">
-          <div className="flex items-start justify-between gap-3">
+        <section className="order-1 mt-1 rounded-2xl border border-[#e6e8ec] bg-white p-4 lg:order-none">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-wide text-[#6b727e]">Current spend</div>
               <div className="mt-0.5 text-3xl font-bold text-[#16191d]">{fmtMoney(monthSpend)}</div>
             </div>
             {lastTotals.spend > 0 && (
-              <span className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium ${under ? "bg-emerald-500/10 text-[#0f7b53]" : "bg-rose-500/10 text-[#c01530]"}`}>
+              <span className={`inline-flex w-fit items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium ${under ? "bg-emerald-500/10 text-[#0f7b53]" : "bg-rose-500/10 text-[#c01530]"}`}>
                 {under ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
                 {fmtMoney(Math.abs(diff))} {under ? "less" : "more"} than last month
               </span>
@@ -100,6 +101,7 @@ export default function Overview({ data, onGoToView = () => {} }) {
           </div>
         </section>
         <Card
+          className="order-5 lg:order-none"
           title="Recent transactions"
           right={
             <button onClick={() => onGoToView("transactions")} className="text-[11px] text-[#d81b48] hover:text-[#a81438]">
@@ -111,8 +113,9 @@ export default function Overview({ data, onGoToView = () => {} }) {
         </Card>
       </div>
 
-      <aside className="flex min-w-0 flex-col lg:sticky lg:top-4">
-          <Card
+      <aside className="contents lg:sticky lg:top-4 lg:flex lg:min-w-0 lg:flex-col">
+        <Card
+          className="order-2 lg:order-none"
           title="Accounts"
           right={synced && (
             <span className="inline-flex items-center gap-1 text-[10px] text-[#8b929c]">
@@ -143,6 +146,7 @@ export default function Overview({ data, onGoToView = () => {} }) {
         </Card>
         {/* Upcoming 7 days */}
         <Card
+          className="order-3 lg:order-none"
           title="Upcoming"
           right={<span className="inline-flex items-center gap-1 text-[10px] text-[#8b929c]"><CalendarClock className="h-3 w-3" /> next 7 days</span>}
         >
@@ -167,7 +171,7 @@ export default function Overview({ data, onGoToView = () => {} }) {
           </div>
         </Card>
         {/* Budget pacing */}
-        <Card title="Budget" right={paced.length > 0 && <span className="text-[10px] text-[#8b929c]">this month</span>}>
+        <Card className="order-4 lg:order-none" title="Budget" right={paced.length > 0 && <span className="text-[10px] text-[#8b929c]">this month</span>}>
           {paced.length === 0 ? <Empty>No budgets set — add one from the Budgets view.</Empty> : (
             <div className="flex flex-col gap-2.5">
               {paced.map((b) => {
@@ -184,7 +188,7 @@ export default function Overview({ data, onGoToView = () => {} }) {
                           {over ? `${fmtMoney(b.spent - b.limit)} over` : `${fmtMoney(b.limit - b.spent)} left`}
                         </span>
                       </div>
-                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white">
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#eef0f3]">
                         <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(3, pct))}%`, background: over ? "#fb923c" : m.c }} />
                       </div>
                     </div>
