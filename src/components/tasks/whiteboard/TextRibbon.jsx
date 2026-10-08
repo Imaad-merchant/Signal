@@ -4,11 +4,34 @@ import { FONT_FAMILIES, execCmd } from "./geometry";
 import FontSizeStepper from "./FontSizeStepper";
 import ColorPicker from "../color/ColorPicker";
 
+// Quick text styles (Google Docs' "Normal text" menu). Sizes are board px at 100%.
+export const TEXT_STYLES = [
+  { key: "title", label: "Title", fontSize: 40, fontWeight: 700, lineHeight: 1.15 },
+  { key: "h1", label: "Heading 1", fontSize: 32, fontWeight: 700, lineHeight: 1.2 },
+  { key: "h2", label: "Heading 2", fontSize: 26, fontWeight: 600, lineHeight: 1.25 },
+  { key: "h3", label: "Heading 3", fontSize: 22, fontWeight: 600, lineHeight: 1.3 },
+  { key: "body1", label: "Body 1", fontSize: 18, fontWeight: 400, lineHeight: 1.4 },
+  { key: "body2", label: "Body 2", fontSize: 15, fontWeight: 400, lineHeight: 1.4 },
+  { key: "caption", label: "Caption", fontSize: 12, fontWeight: 400, lineHeight: 1.35 },
+];
+
+// Drop inline font-size/weight so a whole-box style isn't overridden by spans
+// left from earlier per-word sizing. <b>/<strong> bold is kept.
+const INLINE_SIZE_WEIGHT = /\s*font-(?:size|weight)\s*:\s*[^;"]+;?/gi;
+function stripInlineSizeWeight(html) {
+  return String(html || "").replace(/style="([^"]*)"/gi, (m, css) => {
+    const rest = css.replace(INLINE_SIZE_WEIGHT, "").trim();
+    return rest ? `style="${rest}"` : "";
+  });
+}
+
 // ─── Text Ribbon (Google Docs-style formatting) ───────────────────
-// Trimmed to the essentials: font family, size, bold/italic/underline,
+// Trimmed to the essentials: text style, font family, size, bold/italic/underline,
 // alignment, text color, and highlight.
 export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEditing, onFinishEdit, isMobile = false }) {
   const [fontOpen, setFontOpen] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
+  const styleRef = useRef(null);
   const [colorOpen, setColorOpen] = useState(false);
   const [bgOpen, setBgOpen] = useState(false);
   const fontRef = useRef(null);
@@ -39,6 +62,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
         onFinishEdit?.();
       }
       if (fontRef.current && !fontRef.current.contains(e.target)) setFontOpen(false);
+      if (styleRef.current && !styleRef.current.contains(e.target)) setStyleOpen(false);
       if (colorRef.current && !colorRef.current.contains(e.target)) setColorOpen(false);
       if (bgRef.current && !bgRef.current.contains(e.target)) setBgOpen(false);
     };
@@ -139,7 +163,7 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     if (isEditing) editingTextRef?.current?.focus();
   };
 
-  const handleSizePick = (size) => {
+  const handleSizePick = (size, weight = null) => {
     if (ensureSelection()) {
       editingTextRef.current.focus();
       // styleWithCSS must be OFF here: it makes execCommand("fontSize") emit the
@@ -153,11 +177,13 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       root.querySelectorAll('font[size="7"]').forEach(f => {
         const span = document.createElement("span");
         span.style.fontSize = `${size}px`;
+        if (weight != null) span.style.fontWeight = String(weight);
         span.innerHTML = f.innerHTML;
         // Clear any nested font-size left from a previous resize — otherwise an
         // inner span's size wins and the text appears "stuck" at one size.
-        span.querySelectorAll('[style*="font-size"]').forEach(el => {
+        span.querySelectorAll('[style*="font-size"], [style*="font-weight"]').forEach(el => {
           el.style.fontSize = "";
+          if (weight != null) el.style.fontWeight = "";
           if (!el.getAttribute("style")) el.removeAttribute("style");
         });
         f.replaceWith(span);
@@ -184,6 +210,25 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
     setProp({ fontSize: size });
     if (isEditing) editingTextRef?.current?.focus();
   };
+
+  // Text style: with characters selected, style just those (inline span);
+  // otherwise restyle the whole box — size, weight and line height — clearing
+  // inline size/weight overrides so the style actually shows.
+  const handleStylePick = (st) => {
+    setStyleOpen(false);
+    if (ensureSelection()) { handleSizePick(st.fontSize, st.fontWeight); return; }
+    const root = isEditing ? editingTextRef?.current : null;
+    if (root) {
+      root.innerHTML = stripInlineSizeWeight(root.innerHTML);
+      root.dispatchEvent(new Event("input", { bubbles: true }));
+      setProp({ fontSize: st.fontSize, fontWeight: st.fontWeight, lineHeight: st.lineHeight });
+      root.focus();
+    } else {
+      setProp({ fontSize: st.fontSize, fontWeight: st.fontWeight, lineHeight: st.lineHeight, text: stripInlineSizeWeight(textObject.text) });
+    }
+  };
+  const currentStyle = TEXT_STYLES.find((st) =>
+    st.fontSize === currentSize && st.fontWeight === (textObject.fontWeight || 400)) || null;
 
   // Panel-closing is handled by the swatch onClicks, NOT here — so the custom
   // <input type=color> can keep firing onChange while its picker stays open.
@@ -243,6 +288,36 @@ export default function TextRibbon({ textObject, onUpdate, editingTextRef, isEdi
       onPointerDown={(e) => e.stopPropagation()}
       className="flex flex-wrap items-center justify-center gap-0.5 bg-[#252628] border border-white/[0.1] rounded-xl px-1.5 py-1 shadow-2xl max-w-[calc(100vw-1.5rem)]"
     >
+      {/* Text style */}
+      <div className="relative" ref={styleRef}>
+        <button
+          type="button"
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          onClick={(e) => { e.stopPropagation(); setStyleOpen(o => !o); }}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-gray-200 hover:bg-white/[0.07] min-w-[82px]"
+          title="Text style"
+        >
+          <span className="truncate flex-1 text-left">{currentStyle ? currentStyle.label : "Style"}</span>
+          <ChevronDown className="h-2.5 w-2.5" />
+        </button>
+        {styleOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[180px] z-50 max-h-[60vh] overflow-y-auto">
+            {TEXT_STYLES.map(st => (
+              <button
+                key={st.key}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onClick={(e) => { e.stopPropagation(); handleStylePick(st); }}
+                className={`flex w-full items-baseline justify-between gap-3 px-3 py-1.5 text-left hover:bg-white/[0.05] ${currentStyle?.key === st.key ? "text-blue-300" : "text-gray-200"}`}
+              >
+                <span style={{ fontSize: Math.min(22, Math.max(11, st.fontSize * 0.6)), fontWeight: st.fontWeight, lineHeight: 1.2 }}>{st.label}</span>
+                <span className="text-[10px] text-gray-500 tabular-nums">{st.fontSize}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Font family */}
       <div className="relative" ref={fontRef}>
         <button
