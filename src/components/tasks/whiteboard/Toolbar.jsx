@@ -1,9 +1,22 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, Undo2, Redo2, Minus, Grid3x3, ChevronDown, Sparkles, SlidersHorizontal } from "lucide-react";
+import { MousePointer2, Hand, Pencil, Type, Square, Circle, ArrowRight, Eraser, Trash2, Undo2, Redo2, Minus, Grid3x3, ChevronDown, Sparkles, SlidersHorizontal, Triangle, Diamond, Star, RectangleHorizontal } from "lucide-react";
 
-// More shapes dropdown
-function MoreShapesDropdown({ moreShapes, tool, setTool, isMobile }) {
+// Every shape lives in one dropdown so it doesn't eat the toolbar. The button
+// shows the shape you're on (or last used), so a re-pick is one glance away.
+export const SHAPES = [
+  { key: "rect", icon: Square, label: "Rectangle", hint: "R" },
+  { key: "roundedRect", icon: RectangleHorizontal, label: "Rounded rect" },
+  { key: "ellipse", icon: Circle, label: "Ellipse", hint: "O" },
+  { key: "triangle", icon: Triangle, label: "Triangle" },
+  { key: "diamond", icon: Diamond, label: "Diamond" },
+  { key: "star", icon: Star, label: "Star" },
+  { key: "arrow", icon: ArrowRight, label: "Arrow", hint: "A" },
+  { key: "line", icon: Minus, label: "Line", hint: "L" },
+];
+
+function ShapesDropdown({ tool, setTool, isMobile }) {
   const [open, setOpen] = useState(null); // null | { left, top } of the fixed menu
+  const [last, setLast] = useState("rect");
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -12,36 +25,45 @@ function MoreShapesDropdown({ moreShapes, tool, setTool, isMobile }) {
     document.addEventListener("touchstart", h);
     return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
   }, [open]);
-  const active = moreShapes.some(s => s.key === tool);
+  const activeShape = SHAPES.find(s => s.key === tool);
+  useEffect(() => { if (activeShape) setLast(activeShape.key); }, [activeShape]);
+  const shown = activeShape || SHAPES.find(s => s.key === last) || SHAPES[0];
+  const Icon = shown.icon;
   // The menu is position:fixed at the button so the (horizontally scrolling)
   // toolbar row can't clip it.
   const toggle = (e) => {
     e.stopPropagation();
     if (open) { setOpen(null); return; }
     const r = e.currentTarget.getBoundingClientRect();
-    setOpen({ left: Math.min(r.left, window.innerWidth - 150), top: r.bottom + 4 });
+    setOpen({ left: Math.min(r.left, window.innerWidth - 176), top: r.bottom + 4 });
   };
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative shrink-0" ref={ref}>
       <button
         type="button"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={toggle}
-        className={`shrink-0 rounded-md transition-all ${isMobile ? "p-2" : "p-1.5"} ${active ? "bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
-        title="More shapes"
+        className={`flex items-center gap-0.5 rounded-md transition-all ${isMobile ? "p-2" : "p-1.5"} ${activeShape ? "bg-blue-500/25 text-blue-200 ring-1 ring-blue-400/40" : "text-gray-400 hover:bg-white/[0.07] hover:text-gray-100"}`}
+        title="Shapes"
+        aria-label="Shapes"
+        aria-expanded={!!open}
       >
-        <span className="text-[10px] font-bold">◇</span>
+        <Icon className="h-3.5 w-3.5" />
+        <ChevronDown className="h-2.5 w-2.5 opacity-70" />
       </button>
       {open && (
-        <div className="fixed bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 min-w-[140px] max-w-[90vw] z-50" style={{ left: open.left, top: open.top }}>
-          {moreShapes.map(s => (
+        <div className="fixed bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 w-[168px] max-w-[90vw] z-50" style={{ left: open.left, top: open.top }}>
+          {SHAPES.map(sh => (
             <button
-              key={s.key}
+              key={sh.key}
               type="button"
-              onClick={(e) => { e.stopPropagation(); setTool(s.key); setOpen(null); }}
-              className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.05] ${tool === s.key ? "text-blue-300" : "text-gray-300"}`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); setTool(sh.key); setOpen(null); }}
+              className={`flex w-full items-center gap-2.5 px-3 ${isMobile ? "py-2.5" : "py-1.5"} text-left text-xs hover:bg-white/[0.05] ${tool === sh.key ? "text-blue-300" : "text-gray-300"}`}
             >
-              {s.label}
+              <sh.icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1">{sh.label}</span>
+              {sh.hint && !isMobile && <span className="text-[10px] text-gray-500">{sh.hint}</span>}
             </button>
           ))}
         </div>
@@ -103,10 +125,10 @@ function ZoomDropdown({ zoomPercent, onSetZoom, onZoomFit, isMobile }) {
 
 // ─── Toolbar (Google Docs–inspired, horizontal Row 1) ──────────────
 const TOOL_ICONS = {
-  select: MousePointer2, hand: Hand, pen: Pencil, text: Type, rect: Square, ellipse: Circle,
-  arrow: ArrowRight, line: Minus, eraser: Eraser,
+  select: MousePointer2, hand: Hand, pen: Pencil, text: Type, eraser: Eraser,
+  ...Object.fromEntries(SHAPES.map(sh => [sh.key, sh.icon])),
 };
-// The active tool's icon, for the collapsed dock pill (extra shapes fall back to ◇).
+// The active tool's icon, for the collapsed dock pill.
 export function ActiveToolIcon({ tool }) {
   const Icon = TOOL_ICONS[tool];
   return (
@@ -128,17 +150,6 @@ export default function Toolbar({ tool, setTool, onClear, onUndo, onRedo, canUnd
   const drawTools = [
     { key: "pen", icon: Pencil, label: "Pen (P)" },
     { key: "text", icon: Type, label: "Text (T)" },
-    { key: "rect", icon: Square, label: "Rectangle (R)" },
-    { key: "ellipse", icon: Circle, label: "Ellipse (O)" },
-    { key: "arrow", icon: ArrowRight, label: "Arrow (A)" },
-    { key: "line", icon: Minus, label: "Line (L)" },
-    { key: "eraser", icon: Eraser, label: "Eraser (E)" },
-  ];
-  const moreShapes = [
-    { key: "triangle", label: "Triangle" },
-    { key: "diamond", label: "Diamond" },
-    { key: "roundedRect", label: "Rounded rect" },
-    { key: "star", label: "Star" },
   ];
 
   const btnPad = isMobile ? "p-2" : "p-1.5";
@@ -208,7 +219,8 @@ export default function Toolbar({ tool, setTool, onClear, onUndo, onRedo, canUnd
 
       {/* Drawing tools */}
       {drawTools.map(t => <ToolBtn key={t.key} t={t} />)}
-      <MoreShapesDropdown moreShapes={moreShapes} tool={tool} setTool={setTool} isMobile={isMobile} />
+      <ShapesDropdown tool={tool} setTool={setTool} isMobile={isMobile} />
+      <ToolBtn t={{ key: "eraser", icon: Eraser, label: "Eraser (E)" }} />
 
       {formatAvailable && onToggleFormat && (
         <button
