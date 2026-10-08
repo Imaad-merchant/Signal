@@ -1,128 +1,134 @@
-// Provider-abstracted LLM helper.
+// Anthropic-only LLM helper. Every AI route in the app goes through callLLM so
+// there is exactly one place that knows about the provider, the model, retries
+// and response parsing.
 //
-// If ANTHROPIC_API_KEY is set, calls the Anthropic Messages API; otherwise falls
-// back to the OpenAI Chat Completions path (the same one api/invoke-llm.js uses).
-// This lets routes run today on the already-configured OpenAI key and auto-upgrade
-// to Anthropic once ANTHROPIC_API_KEY is added to the environment.
-//
-// No secrets are hardcoded — keys come only from process.env.
+// No secrets are hardcoded — the key comes only from process.env.ANTHROPIC_API_KEY.
+// Model defaults to Claude Opus 5; override with ANTHROPIC_MODEL (e.g. claude-sonnet-5).
 
-// Call Anthropic's Messages API. Returns the assistant's text content.
-async function callAnthropic({ system, user, json }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+const DEFAULT_MODEL = "claude-opus-5";
+const API_URL = "https://api.anthropic.com/v1/messages";
 
-  // Anthropic has no native JSON response_format; instruct via the system prompt.
-  const sys = json
-    ? `${system || ""}\n\nRespond with valid JSON only. No markdown, no code fences, no prose.`
-    : system || "";
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4000,
-      temperature: 0.4,
-      system: sys,
-      messages: [{ role: "user", content: user }],
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Anthropic request failed (${response.status}): ${errText.slice(0, 300)}`);
-  }
-
-  const data = await response.json();
-  return data?.content?.[0]?.text || "";
+export function llmConfigured() {
+  return !!process.env.ANTHROPIC_API_KEY;
 }
 
-// Call OpenAI's Chat Completions API. Returns the assistant's text content.
-async function callOpenAI({ system, user, json }) {
-  const apiKey = process.env.OPENAI_API_KEY;
+export function llmModel() {
+  return process.env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+}
 
-  const messages = [];
-  if (system) messages.push({ role: "system", content: system });
-  messages.push({ role: "user", content: user });
+// Pull a data: URL apart into { mediaType, data } for base64 content blocks.
+export function parseDataUrl(url) {
+  const m = /^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/i.exec(String(url || ""));
+  return m ? { mediaType: m[1], data: m[2] } : null;
+}
+
+// Build an image content block from either a data: URL or an http(s) URL.
+export function imageBlock(url) {
+  const d = parseDataUrl(url);
+  if (d) return { type: "image", source: { type: "base64", media_type: d.mediaType, data: d.data } };
+  return { type: "image", source: { type: "url", url: String(url) } };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// callLLM({ system, user | content | messages, json, maxTokens, effort }) -> string
+//
+//   system    system prompt (string)
+//   user      a single user turn as plain text
+//   content   a single user turn as an array of content blocks (text/image/document)
+//   messages  full Anthropic-shaped messages array (multi-turn); wins over user/content
+//   json      when true, instructs the model to answer with JSON only (parse with parseJSON)
+//   maxTokens output cap (default 8000 — thinking tokens count against it too)
+//   effort    "low" | "medium" | "high" — thinking depth; low keeps extraction-style
+//             routes well inside the 60s function limit (default "low")
+//
+// Retries once on rate-limit / server / network errors. Throws on anything else.
+export async function callLLM({ system, user, content, messages, json = false, maxTokens = 8000, effort = "low" }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("No LLM provider configured (set ANTHROPIC_API_KEY)");
+
+  const sys = json
+    ? `${system || ""}\n\nRespond with valid JSON only. No markdown, no code fences, no prose.`.trim()
+    : (system || "");
+
+  let msgs = messages;
+  if (!Array.isArray(msgs) || !msgs.length) {
+    if (Array.isArray(content) && content.length) msgs = [{ role: "user", content }];
+    else msgs = [{ role: "user", content: String(user ?? "") }];
+  }
 
   const body = {
-    model: "gpt-4o",
-    messages,
-    temperature: 0.4,
-    max_tokens: 4000,
+    model: llmModel(),
+    max_tokens: maxTokens,
+    output_config: { effort },
+    messages: msgs,
   };
-  if (json) body.response_format = { type: "json_object" };
+  if (sys) body.system = sys;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenAI request failed (${response.status}): ${errText.slice(0, 300)}`);
-  }
-
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content || "";
-}
-
-// callLLM({ system, user, json }) -> string
-// Picks Anthropic when ANTHROPIC_API_KEY exists, else OpenAI. Throws if neither key
-// is configured. When json is true, returns a string the caller should JSON.parse.
-export async function callLLM({ system, user, json = false }) {
-  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
-  const hasOpenAI = !!process.env.OPENAI_API_KEY;
-  if (!hasAnthropic && !hasOpenAI) {
-    throw new Error("No LLM provider configured (set ANTHROPIC_API_KEY or OPENAI_API_KEY)");
-  }
-  // Prefer Anthropic when its key is set, but never let a provider-side failure
-  // (missing credits, bad key, model error, outage) take the whole feature down:
-  // fall back to OpenAI if it's available. The check-in keeps working on OpenAI
-  // and automatically uses Claude again once the Anthropic call succeeds.
-  if (hasAnthropic) {
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response;
     try {
-      return await callAnthropic({ system, user, json });
+      response = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
+      });
     } catch (err) {
-      if (!hasOpenAI) throw err;
-      console.error("Anthropic call failed; falling back to OpenAI:", err.message);
-      return await callOpenAI({ system, user, json });
+      lastErr = new Error(`Anthropic request failed (network): ${err.message}`);
+      if (attempt === 0) { await sleep(800); continue; }
+      throw lastErr;
     }
+
+    if (!response.ok) {
+      const errText = await response.text();
+      lastErr = new Error(`Anthropic request failed (${response.status}): ${errText.slice(0, 300)}`);
+      const retryable = response.status === 429 || response.status >= 500;
+      if (retryable && attempt === 0) { await sleep(800); continue; }
+      throw lastErr;
+    }
+
+    const data = await response.json();
+    if (data?.stop_reason === "refusal") {
+      throw new Error(`Anthropic declined the request (${data?.stop_details?.category || "refusal"})`);
+    }
+    // A truncated answer is worse than none: half-JSON parses to {} and a route
+    // would quietly act on nothing. Callers catch and degrade.
+    if (data?.stop_reason === "max_tokens") {
+      throw new Error("Anthropic response truncated (max_tokens) — raise maxTokens for this call");
+    }
+    // Thinking is on by default, so the first block may be a thinking block —
+    // always pick the text block rather than content[0].
+    const text = (data?.content || []).filter((b) => b && b.type === "text").map((b) => b.text).join("");
+    return text || "";
   }
-  return callOpenAI({ system, user, json });
+  throw lastErr || new Error("Anthropic request failed");
 }
 
-// Embed one or more strings with OpenAI (text-embedding-3-small). Returns an array
-// of vectors. Used for semantic note search. Requires OPENAI_API_KEY.
-export async function embed(texts) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("No OPENAI_API_KEY configured for embeddings");
-  const input = (Array.isArray(texts) ? texts : [texts]).map((t) => String(t || "").slice(0, 8000) || " ");
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: "text-embedding-3-small", input }),
+// Semantic rerank without an embeddings API: ask Claude which candidates best
+// answer the query. `items` are short strings (title + excerpt); returns the
+// indices of the `top` most relevant, best first. Throws on failure — callers
+// catch and fall back.
+export async function rerank({ query, items, top = 6 }) {
+  if (!Array.isArray(items) || !items.length) return [];
+  const list = items.map((t, i) => `[${i}] ${String(t || "").replace(/\s+/g, " ").slice(0, 700)}`).join("\n\n");
+  const raw = await callLLM({
+    system: "You rank candidate notes by how relevant they are to a question. Judge by meaning, not keyword overlap.",
+    user: `QUESTION: ${query}\n\nCANDIDATES:\n${list}\n\nReturn JSON: { "ranked": [indices of the ${Math.min(top, items.length)} most relevant candidates, best first] }. Include ONLY candidates that are actually relevant; an empty list is fine.`,
+    json: true,
+    maxTokens: 1500,
+    effort: "low",
   });
-  if (!response.ok) throw new Error(`Embeddings failed (${response.status}): ${(await response.text()).slice(0, 200)}`);
-  const data = await response.json();
-  return (data.data || []).map((d) => d.embedding);
-}
-
-// Cosine similarity between two equal-length vectors.
-export function cosine(a, b) {
-  if (!a || !b || a.length !== b.length) return 0;
-  let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+  const parsed = parseJSON(raw);
+  const seen = new Set();
+  return (Array.isArray(parsed?.ranked) ? parsed.ranked : [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < items.length && !seen.has(n) && seen.add(n))
+    .slice(0, top);
 }
 
 // Parse a model's JSON response defensively: strips accidental code fences and
@@ -130,7 +136,6 @@ export function cosine(a, b) {
 export function parseJSON(text) {
   if (!text || typeof text !== "string") return {};
   let cleaned = text.trim();
-  // Strip markdown code fences if present.
   cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
     return JSON.parse(cleaned);
@@ -138,14 +143,9 @@ export function parseJSON(text) {
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
     if (start !== -1 && end !== -1 && end > start) {
-      try {
-        return JSON.parse(cleaned.slice(start, end + 1));
-      } catch {
-        return {};
-      }
+      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return {}; }
     }
     return {};
   }
 }
-
 export default callLLM;

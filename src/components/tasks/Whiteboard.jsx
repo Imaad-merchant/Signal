@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import AIPromptDialog from "./AIPromptDialog";
 import { base44 } from "@/api/base44Client";
 import { useIsMobile } from "@/components/useIsMobile";
+import { WB_MAX_CHARS, hasDataImage, migrateBoardImages, rewriteBoardImages } from "./pageStorage";
 import {
   MIN_ZOOM,
   MAX_ZOOM,
@@ -27,6 +28,33 @@ import WhiteboardContextMenu from "./whiteboard/WhiteboardContextMenu";
 import { useAutosave } from "./useAutosave";
 
 // Generate a stable id
+// Signature for whiteboard objects placed on the system clipboard, so a paste
+// can tell our own payload from arbitrary copied text.
+const WB_CLIPBOARD_PREFIX = "signal-whiteboard:v1:";
+
+// Upload an image to storage and return its URL. Board objects store the URL, never
+// the bytes: a base64 data URI inside the board JSON overflows the 1 MiB cap on a
+// page document and the whole save is rejected.
+async function uploadImage(file) {
+  const { file_url } = await base44.integrations.Core.UploadFile({ file });
+  return file_url;
+}
+
+// Firebase retries a failing upload for about two minutes before it rejects, so an
+// upload is never allowed to gate anything the user is waiting on.
+const UPLOAD_TIMEOUT_MS = 30000;
+async function uploadImageBounded(file) {
+  let timer;
+  try {
+    return await Promise.race([
+      uploadImage(file),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("upload timed out")), UPLOAD_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 // Sanitize stored/pasted text HTML — allow only basic formatting tags/attrs and
@@ -52,7 +80,7 @@ const sanitizeTextHtml = (html) => {
 };
 
 // ─── Main Whiteboard ──────────────────────────────────────────────
-export default function Whiteboard({ page, onSave, headerSlot }) {
+export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   const containerRef = useRef(null);
   const isMobile = useIsMobile();
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
@@ -161,26 +189,56 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   }, [selectedIds, groupMembers]);
 
   // Copy / Paste / Duplicate
+  //
+  // The in-memory ref is the fast path, but a copy that only lives in a ref can't
+  // reach another board, another tab, or a reload — so the same objects also go to
+  // the system clipboard under a signature the paste path recognises.
   const copySelection = useCallback(() => {
     const sel = objects.filter(o => effectiveSelectionIds.includes(o.id));
-    if (sel.length === 0) return;
-    clipboardRef.current = sel.map(o => JSON.parse(JSON.stringify(o)));
+    if (sel.length === 0) return false;
+    const copied = sel.map(o => JSON.parse(JSON.stringify(o)));
+    clipboardRef.current = copied;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        // Fire and forget: a blocked clipboard must not break in-board copy/paste.
+        navigator.clipboard.writeText(WB_CLIPBOARD_PREFIX + JSON.stringify(copied)).catch(() => {});
+      }
+    } catch { /* ignore */ }
+    return true;
   }, [objects, effectiveSelectionIds]);
 
   const pasteClipboard = useCallback((atWorldX = null, atWorldY = null) => {
     if (clipboardRef.current.length === 0) return;
     pushHistory(objects);
     const idMap = {};
-    const offset = 16;
+    // "Paste here" passes the point that was right-clicked. The whole selection
+    // moves as a unit, so shift by the distance from its top-left corner to that
+    // point; with no point given, fall back to a small nudge off the original.
+    let dx = 16;
+    let dy = 16;
+    if (atWorldX !== null && atWorldY !== null) {
+      let minX = Infinity;
+      let minY = Infinity;
+      for (const o of clipboardRef.current) {
+        const xs = [o.x, o.x1, o.x2, ...(o.points || []).map(p => p.x)].filter(v => typeof v === "number");
+        const ys = [o.y, o.y1, o.y2, ...(o.points || []).map(p => p.y)].filter(v => typeof v === "number");
+        if (xs.length) minX = Math.min(minX, ...xs);
+        if (ys.length) minY = Math.min(minY, ...ys);
+      }
+      if (Number.isFinite(minX) && Number.isFinite(minY)) {
+        dx = atWorldX - minX;
+        dy = atWorldY - minY;
+      }
+    }
     const newObjs = clipboardRef.current.map(o => {
       const newId = uid();
       idMap[o.id] = newId;
       const clone = { ...JSON.parse(JSON.stringify(o)), id: newId };
       // Shift positions
-      if (clone.x !== undefined) clone.x += offset;
-      if (clone.y !== undefined) clone.y += offset;
-      if (clone.x1 !== undefined) { clone.x1 += offset; clone.y1 += offset; clone.x2 += offset; clone.y2 += offset; }
-      if (clone.points) clone.points = clone.points.map(p => ({ x: p.x + offset, y: p.y + offset }));
+      if (clone.x !== undefined) clone.x += dx;
+      if (clone.y !== undefined) clone.y += dy;
+      if (clone.x1 !== undefined) { clone.x1 += dx; clone.y1 += dy; clone.x2 += dx; clone.y2 += dy; }
+      if (clone.points) clone.points = clone.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
       return clone;
     });
     // Reassign group ids so pasted group stays a group of its own
@@ -194,6 +252,21 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     setObjects(prev => [...prev, ...newObjs]);
     setSelectedIds(newObjs.map(o => o.id));
   }, [objects]);
+
+  // Paste from the system clipboard when this board has nothing of its own yet —
+  // this is what makes copying from one whiteboard into another work.
+  const pasteAnywhere = useCallback(async (atWorldX = null, atWorldY = null) => {
+    if (clipboardRef.current.length === 0) {
+      try {
+        const text = navigator.clipboard && navigator.clipboard.readText ? await navigator.clipboard.readText() : "";
+        if (text && text.startsWith(WB_CLIPBOARD_PREFIX)) {
+          const parsed = JSON.parse(text.slice(WB_CLIPBOARD_PREFIX.length));
+          if (Array.isArray(parsed) && parsed.length) clipboardRef.current = parsed;
+        }
+      } catch { /* clipboard unreadable — nothing to paste */ }
+    }
+    pasteClipboard(atWorldX, atWorldY);
+  }, [pasteClipboard]);
 
   const duplicateSelection = useCallback(() => {
     copySelection();
@@ -467,6 +540,7 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   // Latest-state refs so the flush-on-exit path can read current values without
   // waiting on a re-render (critical: setObjects won't apply on an unmounting box).
   const objectsRef = useRef(objects); objectsRef.current = objects;
+  const pageIdRef = useRef(page.id); pageIdRef.current = page.id;
   const viewportRef = useRef(viewport); viewportRef.current = viewport;
   const editingTextIdRef = useRef(editingTextId); editingTextIdRef.current = editingTextId;
   const saveRef = useRef(save); useEffect(() => { saveRef.current = save; }, [save]);
@@ -499,8 +573,41 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   useEffect(() => {
     if (!loadedRef.current) return;
     if (skipSaveRef.current) { skipSaveRef.current = false; return; }
-    scheduleSave({ whiteboard: JSON.stringify(objects), viewport: JSON.stringify(viewport) }, save);
-  }, [objects, viewport, scheduleSave, save]);
+    const json = JSON.stringify(objects);
+    // Refuse a write that the server would reject anyway, and say so, rather than
+    // letting it fail silently and leave this device showing unsaved work.
+    if (json.length > WB_MAX_CHARS) {
+      onSaveIssue?.({
+        message: "This board is too large to save — an image didn't upload. Undo the last image you added, then try again.",
+      });
+      return;
+    }
+    scheduleSave({ whiteboard: json, viewport: JSON.stringify(viewport) }, save);
+  }, [objects, viewport, scheduleSave, save, onSaveIssue]);
+
+  // Repair boards written before images moved to storage: lift each inline data URI
+  // out to storage so the board fits under the page size cap again. Runs once per
+  // page; the setObjects below is what saves the shrunk board. The uploads take a
+  // moment, and the user may edit the board while they run — so the results are
+  // applied as a URI -> URL map over whatever the board holds when they land, and
+  // only a page change abandons them.
+  const migratedRef = useRef("");
+  useEffect(() => {
+    if (migratedRef.current === page.id) return;
+    if (!hasDataImage(objects)) return;
+    migratedRef.current = page.id;
+    const forPage = page.id;
+    (async () => {
+      const { replacements } = await migrateBoardImages(objects, uploadImageBounded);
+      // migratedRef still names this page only until another page claims it, so test
+      // the page actually on screen: results must never land on a different board.
+      if (!replacements.size || pageIdRef.current !== forPage) return;
+      setObjects((prev) => {
+        const { objects: fixed, changed } = rewriteBoardImages(prev, replacements);
+        return changed ? fixed : prev;
+      });
+    })();
+  }, [page.id, objects]);
 
   // Container size
   useEffect(() => {
@@ -549,6 +656,24 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     setSelectedIds([]);
     setHistoryVersion(v => v + 1);
   }, [objects]);
+
+  // Focus the text-edit box as soon as it mounts (React's autoFocus only applies
+  // to form controls, not a contentEditable div) and put the caret at the end, so
+  // typing — and Tab — go into the box rather than the page.
+  useEffect(() => {
+    if (!editingTextId) return;
+    const el = editingTextRef.current;
+    if (!el || document.activeElement === el) return;
+    el.focus();
+    try {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch { /* ignore */ }
+  }, [editingTextId]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -1011,6 +1136,10 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   // ─── Image paste / drag-drop ─────────────────────────────────────
   // Load a dropped/pasted image file, downscale large ones (keeps the board's JSON
   // under Firestore's 1MB doc limit), and return a data URL + dimensions.
+  // Prepare an image for the board: downscale it if it's huge, and hand back both the
+  // inline bytes (shown immediately) and the file to upload. The insert must never wait
+  // on the network — making it wait meant a slow or failing upload showed no image at
+  // all, which is worse than the problem it was fixing.
   const processImageFile = useCallback((file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -1026,10 +1155,17 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
           const canvas = document.createElement("canvas");
           canvas.width = outW; canvas.height = outH;
           canvas.getContext("2d").drawImage(img, 0, 0, outW, outH);
-          const isPng = /png/i.test(file.type || "");
-          resolve({ url: canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.82), w: outW, h: outH });
+          const type = /png/i.test(file.type || "") ? "image/png" : "image/jpeg";
+          const dataUrl = canvas.toDataURL(type, 0.82);
+          canvas.toBlob((blob) => {
+            const ext = type === "image/png" ? "png" : "jpg";
+            resolve({
+              url: dataUrl, w: outW, h: outH,
+              file: blob ? new File([blob], `image.${ext}`, { type }) : file,
+            });
+          }, type, 0.82);
         } else {
-          resolve({ url: reader.result, w: nw, h: nh });
+          resolve({ url: reader.result, w: nw, h: nh, file });
         }
       };
       img.onerror = reject;
@@ -1039,9 +1175,25 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     reader.readAsDataURL(file);
   }), []);
 
+  // Upload in the background and swap the object's inline bytes for the storage URL.
+  // If the upload never lands the inline copy stays — the board still works, and the
+  // user is told it may not reach their other devices, because inline bytes are what
+  // push a board past the size a page can hold.
+  const uploadImageFor = useCallback((objId, file) => {
+    if (!file) return;
+    uploadImageBounded(file).then((url) => {
+      if (!url) throw new Error("no URL returned");
+      setObjects((prev) => prev.map((o) => (o.id === objId ? { ...o, src: url } : o)));
+    }).catch((err) => {
+      onSaveIssue?.({
+        message: `Couldn't upload that image (${err?.message || "upload failed"}). It's on the board, but it may not show up on your phone.`,
+      });
+    });
+  }, [onSaveIssue]);
+
   // Drop an image onto the canvas as an auto-sized box (reuses text-box rendering,
   // so it's selectable/movable/resizable like anything else).
-  const insertImageObject = useCallback(({ url, w, h }, worldX, worldY) => {
+  const insertImageObject = useCallback(({ url, w, h, file }, worldX, worldY) => {
     const maxW = 460;
     const dispW = Math.min(w || 300, maxW);
     const dispH = Math.max(1, Math.round(dispW * ((h || 200) / (w || 300))));
@@ -1058,7 +1210,8 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     pushHistory(objectsRef.current);
     setObjects(prev => [...prev, obj]);
     setSelectedIds([obj.id]);
-  }, [viewport, containerSize, pushHistory]);
+    uploadImageFor(obj.id, file);
+  }, [viewport, containerSize, pushHistory, uploadImageFor]);
 
   // Paste an image from the system clipboard onto the canvas (unless a text box is
   // being edited, which has its own inline-image paste).
@@ -1070,6 +1223,19 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
       if (tag === "input" || tag === "textarea" || t?.isContentEditable) return;
       const dt = e.clipboardData;
       if (!dt) return;
+      // Objects copied from another whiteboard arrive as our signed payload.
+      try {
+        const raw = dt.getData ? dt.getData("text/plain") : "";
+        if (raw && raw.startsWith(WB_CLIPBOARD_PREFIX)) {
+          const parsed = JSON.parse(raw.slice(WB_CLIPBOARD_PREFIX.length));
+          if (Array.isArray(parsed) && parsed.length) {
+            e.preventDefault();
+            clipboardRef.current = parsed;
+            pasteClipboard();
+            return;
+          }
+        }
+      } catch { /* not our payload — carry on to the image path */ }
       // Prefer the DataTransferItemList (Chrome/Firefox), fall back to .files (Safari).
       let file = null;
       for (const it of Array.from(dt.items || [])) {
@@ -1083,7 +1249,7 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [processImageFile, insertImageObject]);
+  }, [processImageFile, insertImageObject, pasteClipboard]);
 
   // Drag-and-drop image files onto the canvas.
   useEffect(() => {
@@ -1129,7 +1295,13 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
   const resetCrop = () => updateSelectedImage({ crop: { l: 0, t: 0, r: 0, b: 0 } });
   const onReplaceFile = (e) => {
     const f = e.target.files?.[0];
-    if (f && selectedImage) processImageFile(f).then(({ url }) => updateSelectedImage({ src: url })).catch(() => {});
+    if (f && selectedImage) {
+      const targetId = selectedImage.id;
+      processImageFile(f).then(({ url, file }) => {
+        updateSelectedImage({ src: url });
+        uploadImageFor(targetId, file);
+      }).catch(() => {});
+    }
     if (e.target) e.target.value = "";
   };
 
@@ -1401,6 +1573,10 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                   textObject={focusedText}
                   isEditing={editingTextId === focusedTextId}
                   editingTextRef={editingTextRef}
+                  onFinishEdit={() => {
+                    const el = editingTextRef.current;
+                    if (el && editingTextId === focusedTextId) finishTextEdit(focusedTextId, el.innerHTML);
+                  }}
                   isMobile={isMobile}
                   onUpdate={(patch) => {
                     pushHistory(objects);
@@ -1527,8 +1703,8 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                   break;
                 case "copy": copySelection(); break;
                 case "cut": copySelection(); deleteSelection(); break;
-                case "paste": pasteClipboard(); break;
-                case "pasteAt": pasteClipboard(ctxMenu.worldX, ctxMenu.worldY); break;
+                case "paste": pasteAnywhere(); break;
+                case "pasteAt": pasteAnywhere(ctxMenu.worldX, ctxMenu.worldY); break;
                 case "duplicate": duplicateSelection(); break;
                 case "delete": deleteSelection(); break;
                 case "bringToFront": bringToFront(); break;
@@ -2006,7 +2182,12 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
               suppressContentEditableWarning
               autoFocus
               onInput={(e) => { editingHtmlRef.current = e.currentTarget.innerHTML; }}
-              onBlur={(e) => finishTextEdit(o.id, e.currentTarget.innerHTML)}
+              onBlur={(e) => {
+                // Typing in the ribbon's hex color field shouldn't end the edit —
+                // the ribbon hands focus back (or blurs us for real) afterwards.
+                if (e.relatedTarget?.closest?.("[data-keep-text-edit]")) return;
+                finishTextEdit(o.id, e.currentTarget.innerHTML);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") { e.currentTarget.blur(); }
                 // Cmd/Ctrl + Enter to commit (Enter alone allows new paragraphs)
@@ -2041,8 +2222,9 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                 }
               }}
               onPaste={(e) => {
-                // If the clipboard holds an image, embed it inline at the caret as a
-                // data URL instead of letting the browser drop it.
+                // If the clipboard holds an image, place it inline at the caret. It
+                // shows immediately from the data URL, then the src is swapped for the
+                // uploaded one — the bytes must not stay in the saved text.
                 const items = e.clipboardData?.items;
                 if (!items) return;
                 const imgItem = Array.from(items).find(it => it.type.startsWith("image/"));
@@ -2050,10 +2232,20 @@ export default function Whiteboard({ page, onSave, headerSlot }) {
                 const file = imgItem.getAsFile();
                 if (!file) return;
                 e.preventDefault();
+                const host = e.currentTarget;
+                const token = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
                 const reader = new FileReader();
                 reader.onload = () => {
-                  const html = `<img src="${reader.result}" style="max-width:100%;height:auto;display:inline-block;border-radius:4px;" />`;
+                  const html = `<img data-wb-pending="${token}" src="${reader.result}" style="max-width:100%;height:auto;display:inline-block;border-radius:4px;" />`;
                   document.execCommand("insertHTML", false, html);
+                  editingHtmlRef.current = host.innerHTML;
+                  uploadImageBounded(file).then((url) => {
+                    const node = url && host.querySelector(`img[data-wb-pending="${token}"]`);
+                    if (!node) return;
+                    node.setAttribute("src", url);
+                    node.removeAttribute("data-wb-pending");
+                    editingHtmlRef.current = host.innerHTML;
+                  }).catch(() => {});
                 };
                 reader.readAsDataURL(file);
               }}

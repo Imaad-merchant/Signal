@@ -1,4 +1,29 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
+import ColorPicker from "../color/ColorPicker";
+
+// Submenu panel that slides up (and, if needed, left) so it stays on screen —
+// the color palette is tall enough to run off the bottom when the menu sits low.
+function SubMenuPanel({ children }) {
+  const ref = useRef(null);
+  const [shift, setShift] = useState({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dy = Math.min(0, window.innerHeight - 8 - r.bottom);
+    const dx = r.right > window.innerWidth - 8 ? -(r.width + el.parentElement.getBoundingClientRect().width + 8) : 0;
+    setShift({ x: dx, y: dy });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      style={{ transform: `translate(${shift.x}px, ${shift.y}px)` }}
+      className="absolute left-full top-0 ml-1 bg-[#2d2e30] border border-white/[0.1] rounded-lg shadow-2xl py-1 min-w-[160px]"
+    >
+      {children}
+    </div>
+  );
+}
 
 // ─── Whiteboard Context Menu ──────────────────────────────────────
 export default function WhiteboardContextMenu({ menu, onClose, onAction }) {
@@ -45,11 +70,7 @@ export default function WhiteboardContextMenu({ menu, onClose, onAction }) {
         <span className="flex-1 text-left">{label}</span>
         <span className="text-gray-600">›</span>
       </button>
-      {subOpen === subKey && (
-        <div className="absolute left-full top-0 ml-1 bg-[#2d2e30] border border-white/[0.1] rounded-lg shadow-2xl py-1 min-w-[160px]">
-          {children}
-        </div>
-      )}
+      {subOpen === subKey && <SubMenuPanel>{children}</SubMenuPanel>}
     </div>
   );
 
@@ -81,16 +102,14 @@ export default function WhiteboardContextMenu({ menu, onClose, onAction }) {
           <MenuItem label="Ungroup" shortcut="⌘⇧G" onClick={() => onAction("ungroup")} />
           <Sep />
           <SubMenuTrigger label="Color" subKey="color">
-            <div className="grid grid-cols-5 gap-1 p-2">
-              {["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"].map(c => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onAction("setColor", c); onClose(); }}
-                  className="h-5 w-5 rounded-full hover:scale-110 transition-transform"
-                  style={{ backgroundColor: c }}
-                />
-              ))}
+            <div className="p-2">
+              <ColorPicker
+                kind="draw"
+                wheel={false}
+                value={target.color || null}
+                onPick={(c) => onAction("setColor", c)}
+                onClose={onClose}
+              />
             </div>
           </SubMenuTrigger>
           <SubMenuTrigger label="Stroke width" subKey="stroke">

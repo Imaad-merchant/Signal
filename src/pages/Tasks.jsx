@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw } from "lucide-react";
+import { Plus, Search, ArrowLeft, Loader2, Folder, History, StickyNote, ChevronDown, ChevronUp, PanelLeftClose, PanelLeftOpen, Calendar as CalendarIcon, Trash2, RotateCcw, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,6 +16,8 @@ import MemoriesView from "../components/tasks/MemoriesView";
 const Whiteboard = lazy(() => import("../components/tasks/Whiteboard"));
 import NotionPageView from "../components/tasks/NotionPageView";
 import DocumentView from "../components/tasks/DocumentView";
+import { handleTextareaTab } from "../components/tasks/tabInTextarea";
+import { saveFailMessage } from "../components/tasks/pageStorage";
 import DashboardView from "../components/tasks/DashboardView";
 import TemplatePicker from "../components/tasks/TemplatePicker";
 import { ICON_MAP } from "../components/tasks/NotionSidebar";
@@ -244,23 +246,12 @@ export default function Tasks() {
     return localStorage.getItem("pulse_notion_sidebar") !== "false";
   });
 
-  // AI Organizer state
-  const [aiAutoOrganize, setAiAutoOrganize] = useState(() => localStorage.getItem("pulse_ai_auto_organize") === "true");
-  const [aiOrganizing, setAiOrganizing] = useState(false);
-  const [aiUndoStack, setAiUndoStack] = useState([]); // stack of { actions: [{pageId, prevParentId}], createdFolderIds: [] }
-  const aiAutoTimer = useRef(null);
-  const aiLastRunHash = useRef("");
-  const [aiBanner, setAiBanner] = useState(null); // { reasoning, count }
 
   useEffect(() => {
     // Don't persist the mobile overlay's open/closed state over the desktop preference.
     if (window.innerWidth < 768) return;
     localStorage.setItem("pulse_notion_sidebar", String(sidebarOpen));
   }, [sidebarOpen]);
-
-  useEffect(() => {
-    localStorage.setItem("pulse_ai_auto_organize", String(aiAutoOrganize));
-  }, [aiAutoOrganize]);
 
   const refreshPages = () => queryClient.invalidateQueries({ queryKey: ["pages"] });
 
@@ -301,6 +292,9 @@ export default function Tasks() {
     setView("page");
   };
 
+  // { pageId, patch, message } when the server rejected a page write.
+  const [saveIssue, setSaveIssue] = useState(null);
+
   // Wrapped in useCallback so the reference is stable across renders — otherwise
   // a fresh closure each render resets Whiteboard's 600ms save debounce and thrashes saves.
   const handleUpdatePage = useCallback(async (patch) => {
@@ -320,8 +314,33 @@ export default function Tasks() {
     queryClient.setQueryData(["pages", user?.email], (old = []) =>
       old.map(p => p.id === pageId ? { ...p, ...patch, updated_date: new Date().toISOString() } : p)
     );
-    return base44.entities.Page.update(pageId, patch).catch((e) => console.error(e));
+    return base44.entities.Page.update(pageId, patch)
+      .then(() => setSaveIssue((prev) => (prev && prev.pageId === pageId ? null : prev)))
+      .catch((e) => {
+        // This rejection used to be swallowed. Combined with the optimistic cache
+        // update above, the editing device kept rendering content the server never
+        // accepted — so the same page on a phone was missing the image and every edit
+        // made after it. Surface it, and keep the patch so it can be retried.
+        console.error(e);
+        setSaveIssue({ pageId, patch, message: saveFailMessage(e) });
+      });
   }, [queryClient, user?.email]);
+
+  // Re-send the patch the server rejected. Only offered when we still hold one.
+  const retrySaveIssue = useCallback(() => {
+    const issue = saveIssue;
+    if (!issue?.patch) return;
+    setSaveIssue(null);
+    updatePageById(issue.pageId, issue.patch);
+  }, [saveIssue, updatePageById]);
+
+  // An editor reporting that it refused to even attempt a save. Stable reference:
+  // an inline arrow here would change identity every render and retrigger the
+  // editors' autosave effects.
+  const reportSaveIssue = useCallback((issue) => {
+    if (!selectedPageId) return;
+    setSaveIssue({ pageId: selectedPageId, patch: null, ...issue });
+  }, [selectedPageId]);
 
   // Generic version for sidebar actions (rename, move, change icon)
   const handleUpdatePageById = async (pageId, patch) => {
@@ -449,96 +468,6 @@ export default function Tasks() {
 
   const selectedPage = pages.find(p => p.id === selectedPageId);
 
-  // ─── AI Organizer ─────────────────────────────────────────────────
-  const runAIOrganize = useCallback(async () => {
-    if (aiOrganizing || activePages.length < 2) return;
-    setAiOrganizing(true);
-    try {
-      const res = await base44.functions.invoke("organizePages", { pages: activePages });
-      const result = res.data || {};
-      const actions = result.actions || [];
-      if (actions.length === 0) {
-        setAiBanner({ reasoning: result.reasoning || "Nothing to reorganize", count: 0 });
-        setTimeout(() => setAiBanner(null), 3500);
-        return;
-      }
-
-      // Process create_folder actions first; map tempId → real id
-      const tempToReal = {};
-      const createdFolderIds = [];
-      for (const act of actions) {
-        if (act.action === "create_folder" && act.tempId) {
-          const newFolder = await base44.entities.Page.create({
-            title: act.title || "New Folder",
-            icon: act.icon || "folder",
-            parent_id: null,
-            section: "private",
-            status: "not_started",
-            content: "",
-          });
-          tempToReal[act.tempId] = newFolder.id;
-          createdFolderIds.push(newFolder.id);
-        }
-      }
-
-      // Capture previous parents for undo, then apply set_parent
-      const reverseActions = [];
-      for (const act of actions) {
-        if (act.action === "set_parent" && act.pageId) {
-          const page = activePages.find(p => p.id === act.pageId);
-          if (!page) continue;
-          const newParentId = act.newParentId && tempToReal[act.newParentId] ? tempToReal[act.newParentId] : (act.newParentId || null);
-          if (page.parent_id === newParentId) continue;
-          reverseActions.push({ pageId: page.id, prevParentId: page.parent_id || null });
-          await base44.entities.Page.update(page.id, { parent_id: newParentId });
-        }
-      }
-
-      if (reverseActions.length > 0 || createdFolderIds.length > 0) {
-        setAiUndoStack(prev => [...prev, { actions: reverseActions, createdFolderIds }].slice(-10));
-      }
-
-      refreshPages();
-      setAiBanner({ reasoning: result.reasoning || "Pages reorganized", count: reverseActions.length + createdFolderIds.length });
-      setTimeout(() => setAiBanner(null), 5000);
-    } catch (err) {
-      console.error("AI organize failed:", err);
-      setAiBanner({ reasoning: "AI organize failed", count: 0 });
-      setTimeout(() => setAiBanner(null), 3000);
-    } finally {
-      setAiOrganizing(false);
-    }
-  }, [activePages, aiOrganizing]);
-
-  const undoAIOrganize = useCallback(async () => {
-    if (aiUndoStack.length === 0) return;
-    const last = aiUndoStack[aiUndoStack.length - 1];
-    setAiUndoStack(prev => prev.slice(0, -1));
-    // Revert parent assignments
-    for (const { pageId, prevParentId } of last.actions) {
-      try { await base44.entities.Page.update(pageId, { parent_id: prevParentId }); } catch {}
-    }
-    // Delete folders the AI created
-    for (const folderId of last.createdFolderIds) {
-      try { await base44.entities.Page.delete(folderId); } catch {}
-    }
-    refreshPages();
-    setAiBanner({ reasoning: "Undid last AI organization", count: last.actions.length });
-    setTimeout(() => setAiBanner(null), 3000);
-  }, [aiUndoStack]);
-
-  // Auto-organize debouncer when toggle is on
-  useEffect(() => {
-    if (!aiAutoOrganize || activePages.length < 2) return;
-    const hash = activePages.map(p => `${p.id}:${p.title}:${p.parent_id || ""}`).sort().join("|");
-    if (hash === aiLastRunHash.current) return;
-    if (aiAutoTimer.current) clearTimeout(aiAutoTimer.current);
-    aiAutoTimer.current = setTimeout(() => {
-      aiLastRunHash.current = hash;
-      runAIOrganize();
-    }, 8000); // wait 8s of no changes before auto-organize
-    return () => { if (aiAutoTimer.current) clearTimeout(aiAutoTimer.current); };
-  }, [aiAutoOrganize, activePages, runAIOrganize]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["tasks"] });
 
@@ -700,6 +629,8 @@ export default function Tasks() {
               onChange={handleNotepadChange}
               placeholder="Jot something down..."
               rows={4}
+              onKeyDown={handleTextareaTab}
+              style={{ tabSize: 4 }}
               className="w-full bg-[#1e1f20] border border-white/5 rounded-md px-3 py-2 text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/10 resize-y min-h-[80px]"
             />
           </div>
@@ -810,12 +741,6 @@ export default function Tasks() {
           onCreatePage={handleCreatePage}
           onDeletePage={handleDeletePage}
           onUpdatePage={handleUpdatePageById}
-          aiAutoOrganize={aiAutoOrganize}
-          onToggleAutoOrganize={setAiAutoOrganize}
-          onOrganizeNow={runAIOrganize}
-          onUndoAI={undoAIOrganize}
-          canUndoAI={aiUndoStack.length > 0}
-          aiOrganizing={aiOrganizing}
         />
         </div>
       )}
@@ -850,15 +775,6 @@ export default function Tasks() {
             <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-[11.5px] text-purple-300">
               <Loader2 className="h-3 w-3 animate-spin" />
               <span>AI is visualizing your notes...</span>
-            </div>
-          )}
-          {aiBanner && (
-            <div className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-purple-500/10 border border-purple-500/20 text-[11.5px] text-purple-300">
-              {aiOrganizing && <Loader2 className="h-3 w-3 animate-spin" />}
-              <span className="truncate max-w-md">{aiBanner.reasoning}</span>
-              {aiBanner.count > 0 && (
-                <span className="bg-purple-500/20 px-1.5 py-0.5 rounded text-[10px]">{aiBanner.count} change{aiBanner.count !== 1 ? "s" : ""}</span>
-              )}
             </div>
           )}
         </div>
@@ -896,11 +812,28 @@ export default function Tasks() {
                 </span>
               </div>
             );
+            // Shown only for the page that actually failed to save, so the user finds
+            // out here rather than on another device that's missing the content.
+            const saveBanner = saveIssue && saveIssue.pageId === selectedPage.id ? (
+              <div className="flex items-start gap-2 px-4 py-2 border-b border-amber-500/20 bg-amber-500/[0.08] shrink-0">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-400 mt-[2px] shrink-0" />
+                <span className="flex-1 text-[12px] leading-snug text-amber-200/90">{saveIssue.message}</span>
+                {saveIssue.patch ? (
+                  <button
+                    onClick={retrySaveIssue}
+                    className="text-[11px] font-medium text-amber-200 hover:text-white px-2 py-0.5 rounded border border-amber-500/30 hover:bg-amber-500/20 shrink-0"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            ) : null;
 
             if (pageType === "notion") {
               return (
                 <>
                   {header}
+                  {saveBanner}
                   <div className="flex-1 overflow-y-auto">
                     <NotionPageView key={selectedPage.id} page={selectedPage} onSave={updatePageById} onDelete={() => handleDeletePage(selectedPage)} />
                   </div>
@@ -911,6 +844,7 @@ export default function Tasks() {
               return (
                 <>
                   {header}
+                  {saveBanner}
                   <DocumentView
                     key={selectedPage.id}
                     page={selectedPage}
@@ -934,7 +868,7 @@ export default function Tasks() {
             // Default: whiteboard
             return (
               <Suspense key={selectedPage.id} fallback={<div className="flex h-full items-center justify-center text-sm text-gray-500">Loading whiteboard…</div>}>
-                <Whiteboard page={selectedPage} onSave={updatePageById} headerSlot={header} />
+                <Whiteboard page={selectedPage} onSave={updatePageById} onSaveIssue={reportSaveIssue} headerSlot={<>{header}{saveBanner}</>} />
               </Suspense>
             );
           })() : (

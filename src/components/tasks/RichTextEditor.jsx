@@ -1,4 +1,29 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { isDataImageUri, dataUriToFile } from "./pageStorage";
+
+// Firebase retries a failing upload for about two minutes before rejecting, so give
+// every upload a deadline rather than letting the editor wait on it.
+const UPLOAD_TIMEOUT_MS = 30000;
+async function withDeadline(promise) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("upload timed out")), UPLOAD_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function readAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 import { useEditor, EditorContent } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Underline } from "@tiptap/extension-underline";
@@ -19,6 +44,8 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { ResizableImage } from "./ResizableImage";
+import ColorPicker from "./color/ColorPicker";
+import { DEFAULT_TEXT_COLOR } from "./color/palette";
 import {
   Undo2, Redo2, Bold, Italic, Underline as UIcon, Strikethrough, Code,
   List, ListOrdered, CheckSquare, Quote, Code2, Minus, Link as LinkIcon,
@@ -47,6 +74,64 @@ const FontSize = Extension.create({
     return {
       setFontSize: (size) => ({ chain }) => chain().setMark("textStyle", { fontSize: size }).run(),
       unsetFontSize: () => ({ chain }) => chain().setMark("textStyle", { fontSize: null }).removeEmptyTextStyle().run(),
+    };
+  },
+});
+
+
+// Tab indents instead of moving focus out of the editor. Lists and tables bind
+// Tab themselves (sink/lift item, next cell); this runs after them (priority 50)
+// as the fallback: inside a list item that couldn't sink we just swallow the
+// key, anywhere else we insert a tab character (rendered at tab-size 4 — the
+// editor is white-space: break-spaces, and content is parsed with
+// preserveWhitespace: "full", so it survives save/reload). With a range selected,
+// each selected block is indented rather than replaced.
+const TabIndent = Extension.create({
+  name: "tabIndent",
+  priority: 50,
+  addKeyboardShortcuts() {
+    const inList = () => this.editor.isActive("listItem") || this.editor.isActive("taskItem");
+    return {
+      Tab: () => {
+        if (inList()) return true;
+        const { state } = this.editor;
+        const { from, to, empty } = state.selection;
+        if (state.selection.node) return true; // image/table node selected: don't replace it
+        return this.editor.commands.command(({ tr }) => {
+          if (empty) { tr.insertText("\t", from, from); return true; }
+          const starts = [];
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (node.isTextblock) { starts.push(pos + 1); return false; }
+            return true;
+          });
+          starts.reverse().forEach((pos) => tr.insertText("\t", pos, pos));
+          return true;
+        });
+      },
+      "Shift-Tab": () => {
+        if (inList()) return true;
+        const { state } = this.editor;
+        const { from, to, empty } = state.selection;
+        if (state.selection.node) return true;
+        return this.editor.commands.command(({ tr }) => {
+          if (empty) {
+            const $from = state.selection.$from;
+            const before = state.doc.textBetween(Math.max($from.start(), from - 1), from, "\0");
+            if (before === "\t") tr.delete(from - 1, from);
+            return true;
+          }
+          const starts = [];
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (node.isTextblock) {
+              if (node.textContent.startsWith("\t")) starts.push(pos + 1);
+              return false;
+            }
+            return true;
+          });
+          starts.reverse().forEach((pos) => tr.delete(pos, pos + 1));
+          return true;
+        });
+      },
     };
   },
 });
@@ -99,10 +184,8 @@ const WikiLink = Extension.create({
   },
 });
 
-const TEXT_COLORS = ["#e5e7eb", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316"];
-const HIGHLIGHT_COLORS = ["#fef08a", "#bef264", "#fda4af", "#a5f3fc", "#c4b5fd", "#fdba74"];
 
-function Dropdown({ trigger, children, width = "min-w-[160px]" }) {
+function Dropdown({ trigger, children, width = "min-w-[160px]", panelClass = "max-h-72 overflow-y-auto" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -123,7 +206,7 @@ function Dropdown({ trigger, children, width = "min-w-[160px]" }) {
         <ChevronDown className="h-2.5 w-2.5" />
       </button>
       {open && (
-        <div className={`absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 ${width} z-50 max-h-72 overflow-y-auto`}>
+        <div className={`absolute top-full left-0 mt-1 bg-[#2d2e30] border border-white/[0.12] rounded-lg shadow-2xl py-1 ${width} z-50 ${panelClass}`}>
           {typeof children === "function" ? children(() => setOpen(false)) : children}
         </div>
       )}
@@ -153,27 +236,63 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
   useEffect(() => { uploadRef.current = uploadImage; }, [uploadImage]);
   const fileInputRef = useRef(null);
 
+  // An image copied from a web page arrives as HTML with the bytes inline in the src,
+  // not as a clipboard file, so it slips past the upload path above. Lift any such
+  // image out to storage after the paste lands — inline bytes can push the document
+  // past the size limit on a page, which makes the save fail outright.
+  const sweepDataImages = useCallback(async (view) => {
+    const targets = [];
+    view.state.doc.descendants((node) => {
+      if (node.type.name === "image" && isDataImageUri(node.attrs?.src)) targets.push(node.attrs.src);
+    });
+    const uploaded = new Map();
+    for (const src of new Set(targets)) {
+      let url = null;
+      try {
+        url = uploadRef.current ? await withDeadline(uploadRef.current(dataUriToFile(src, "pasted-image"))) : null;
+      } catch { url = null; }
+      if (url) uploaded.set(src, url);
+    }
+    if (!uploaded.size) return;
+    // Re-locate each node: the user may have kept typing while the upload ran.
+    for (const [src, url] of uploaded) {
+      let pos = null;
+      view.state.doc.descendants((node, at) => {
+        if (pos == null && node.type.name === "image" && node.attrs?.src === src) pos = at;
+      });
+      if (pos == null) continue;
+      const node = view.state.doc.nodeAt(pos);
+      if (!node) continue;
+      view.dispatch(view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, src: url }));
+    }
+  }, []);
+
   // Upload image files to storage, then insert them at `pos` (or the caret).
   // Paste/drop handlers below claim the event synchronously and call this async.
   const uploadAndInsert = useCallback(async (view, files, pos) => {
     const imgs = Array.from(files || []).filter((f) => f.type && f.type.startsWith("image/"));
+    let inserted = 0;
     for (const file of imgs) {
       if (file.size > 20 * 1024 * 1024) { window.alert(`"${file.name}" is over 20MB — too large to embed.`); continue; }
-      let url = null;
-      try {
-        url = uploadRef.current ? await uploadRef.current(file) : URL.createObjectURL(file);
-      } catch (err) {
-        window.alert(`Couldn't upload "${file.name}": ${err?.message || "failed"}`);
-        continue;
-      }
-      if (!url) continue;
       const schema = view.state.schema;
       if (!schema.nodes.image) continue;
-      const node = schema.nodes.image.create({ src: url });
+      // Place the image from its local bytes right away, then let the sweep below
+      // swap in the uploaded URL. Waiting on the upload first meant a slow or failing
+      // one inserted nothing at all.
+      let src = null;
+      try {
+        src = await readAsDataURL(file);
+      } catch {
+        src = URL.createObjectURL(file);
+      }
+      if (!src) continue;
+      const node = schema.nodes.image.create({ src });
       const at = typeof pos === "number" ? Math.min(pos, view.state.doc.content.size) : view.state.selection.from;
       view.dispatch(view.state.tr.insert(at, node).scrollIntoView());
+      inserted++;
     }
-  }, []);
+    if (inserted) sweepDataImages(view);
+  }, [sweepDataImages]);
 
   const [margins, setMargins] = useState(loadMargins);
 
@@ -186,6 +305,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
       Color,
       FontFamily,
       FontSize,
+      TabIndent,
       Highlight.configure({ multicolor: true }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Link.configure({ openOnClick: false, HTMLAttributes: { class: "text-blue-400 underline" } }),
@@ -213,6 +333,12 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           event.preventDefault();
           uploadAndInsert(view, files, null);
           return true;
+        }
+        const html = event.clipboardData?.getData("text/html") || "";
+        if (/<img\b[^>]*?src="data:image\//i.test(html)) {
+          // Let ProseMirror insert it normally, then swap the inline bytes for a
+          // storage URL once the paste is in the document.
+          setTimeout(() => sweepDataImages(view), 0);
         }
         return false;
       },
@@ -382,43 +508,34 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
         <div className="w-px h-5 bg-white/[0.08] mx-1.5" />
 
         {/* Text color */}
-        <Dropdown trigger={<div className="flex flex-col items-center"><span className="text-[9px] font-bold leading-none text-gray-300">A</span><div className="h-1 w-3 rounded-sm" style={{ backgroundColor: editor.getAttributes("textStyle").color || "#e5e7eb" }} /></div>}>
+        <Dropdown panelClass="" trigger={<div className="flex flex-col items-center"><span className="text-[9px] font-bold leading-none text-gray-300">A</span><div className="h-1 w-3 rounded-sm" style={{ backgroundColor: editor.getAttributes("textStyle").color || DEFAULT_TEXT_COLOR }} /></div>}>
           {(close) => (
             <div className="p-2">
-              <div className="grid grid-cols-5 gap-1.5">
-                {TEXT_COLORS.map(c => (
-                  <button
-                    key={c}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => { editor.chain().focus().setColor(c).run(); close(); }}
-                    className="h-5 w-5 rounded-full hover:scale-110 transition-transform"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { editor.chain().focus().unsetColor().run(); close(); }} className="block w-full mt-2 text-[10px] text-gray-500 hover:text-gray-300">Remove color</button>
+              <ColorPicker
+                kind="text"
+                value={editor.getAttributes("textStyle").color || null}
+                onPick={(c) => editor.chain().focus().setColor(c).run()}
+                onClear={() => editor.chain().focus().unsetColor().run()}
+                clearLabel="Remove"
+                onClose={close}
+              />
             </div>
           )}
         </Dropdown>
 
         {/* Highlight */}
-        <Dropdown trigger={<Highlighter className="h-3.5 w-3.5 text-gray-300" />}>
+        <Dropdown panelClass="" trigger={<div className="flex flex-col items-center"><Highlighter className="h-3.5 w-3.5 text-gray-300" /><div className="h-1 w-3 rounded-sm" style={{ backgroundColor: editor.getAttributes("highlight").color || "transparent", border: editor.getAttributes("highlight").color ? "none" : "1px solid rgba(255,255,255,0.25)" }} /></div>}>
           {(close) => (
             <div className="p-2">
-              <div className="grid grid-cols-3 gap-1.5">
-                {HIGHLIGHT_COLORS.map(c => (
-                  <button
-                    key={c}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => { editor.chain().focus().toggleHighlight({ color: c }).run(); close(); }}
-                    className="h-5 w-12 rounded hover:scale-105 transition-transform"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-              <button onMouseDown={(e) => e.preventDefault()} onClick={() => { editor.chain().focus().unsetHighlight().run(); close(); }} className="block w-full mt-2 text-[10px] text-gray-500 hover:text-gray-300">Remove highlight</button>
+              <ColorPicker
+                kind="highlight"
+                shape="square"
+                value={editor.getAttributes("highlight").color || null}
+                onPick={(c) => editor.chain().focus().setHighlight({ color: c }).run()}
+                onClear={() => editor.chain().focus().unsetHighlight().run()}
+                clearLabel="None"
+                onClose={close}
+              />
             </div>
           )}
         </Dropdown>
@@ -539,7 +656,10 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           let x = e.clientX, y = e.clientY;
           if (x + 220 > window.innerWidth) x = window.innerWidth - 230;
           if (y + 420 > window.innerHeight) y = window.innerHeight - 430;
-          setCtxMenu({ x, y });
+          // Snapshot the selection NOW. Clicking a menu item moves focus out of the
+          // editor and collapses the DOM selection, so by the time Copy runs there is
+          // nothing left for execCommand to copy — which is why it silently did nothing.
+          setCtxMenu({ x, y, ...snapshotSelection(editor) });
         }}
       >
         <div className="flex items-start">
@@ -552,7 +672,7 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
               onClick={(e) => { if (e.target === e.currentTarget) editor.chain().focus("end").run(); }}
             >
           <style>{`
-            .ProseMirror { outline: none; }
+            .ProseMirror { outline: none; tab-size: 4; -moz-tab-size: 4; }
             .ProseMirror p.is-editor-empty:first-child::before {
               content: attr(data-placeholder);
               float: left;
@@ -617,8 +737,18 @@ export default function RichTextEditor({ value, onChange, placeholder = "Start t
           className="w-56 bg-[#2a2b2d] border border-white/[0.1] rounded-xl shadow-2xl py-1"
           onClick={(e) => e.stopPropagation()}
         >
-          <MenuItem onClick={() => { document.execCommand("cut"); setCtxMenu(null); }} label="Cut" shortcut="⌘X" />
-          <MenuItem onClick={() => { document.execCommand("copy"); setCtxMenu(null); }} label="Copy" shortcut="⌘C" />
+          <MenuItem
+            onClick={async () => {
+              await writeToClipboard(ctxMenu.text, ctxMenu.html);
+              if (ctxMenu.from !== ctxMenu.to) editor.chain().focus().deleteRange({ from: ctxMenu.from, to: ctxMenu.to }).run();
+              setCtxMenu(null);
+            }}
+            label="Cut" shortcut="⌘X" disabled={!ctxMenu.text}
+          />
+          <MenuItem
+            onClick={async () => { await writeToClipboard(ctxMenu.text, ctxMenu.html); setCtxMenu(null); }}
+            label="Copy" shortcut="⌘C" disabled={!ctxMenu.text}
+          />
           <MenuItem onClick={async () => {
             try {
               const text = await navigator.clipboard.readText();
@@ -738,12 +868,66 @@ function AIMenuItem({ icon, label, desc, onClick }) {
   );
 }
 
-function MenuItem({ onClick, label, shortcut, active, danger }) {
+// Read what is selected right now, as both plain text and HTML, plus the
+// ProseMirror range it came from. Taken at right-click time: opening a menu and
+// clicking an item blurs the editor and collapses the selection, so anything
+// read later is empty.
+function snapshotSelection(editor) {
+  let text = "";
+  let html = "";
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed) {
+      text = sel.toString();
+      const holder = document.createElement("div");
+      holder.appendChild(sel.getRangeAt(0).cloneContents());
+      html = holder.innerHTML;
+    }
+  } catch { /* fall through to an empty snapshot */ }
+  const range = editor && editor.state ? editor.state.selection : null;
+  return { text, html, from: range ? range.from : 0, to: range ? range.to : 0 };
+}
+
+// Write to the system clipboard, keeping formatting when the browser allows it.
+// Falls back to plain text, then to execCommand for older browsers.
+async function writeToClipboard(text, html) {
+  if (!text) return false;
+  try {
+    if (html && typeof ClipboardItem !== "undefined" && navigator.clipboard && navigator.clipboard.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([text], { type: "text/plain" }),
+        }),
+      ]);
+      return true;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* clipboard blocked — try the legacy path */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;left:-9999px;top:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function MenuItem({ onClick, label, shortcut, active, danger, disabled }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-xs transition-colors ${danger ? "text-rose-400 hover:bg-rose-500/15" : active ? "text-blue-200 bg-blue-500/15" : "text-gray-200 hover:bg-white/[0.06]"}`}
+      disabled={disabled}
+      className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-xs transition-colors disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent ${danger ? "text-rose-400 hover:bg-rose-500/15" : active ? "text-blue-200 bg-blue-500/15" : "text-gray-200 hover:bg-white/[0.06]"}`}
     >
       <span className="flex-1 text-left">{label}</span>
       {shortcut && <span className="text-[10px] text-gray-600">{shortcut}</span>}
