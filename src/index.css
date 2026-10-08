@@ -82,6 +82,13 @@
     @apply border-border outline-ring/50;
   }
 
+  /* No browser double-tap or pinch zoom anywhere — panning/scrolling only.
+     In base so `touch-none` (whiteboard, memories graph) still overrides it
+     for surfaces that run their own pinch-zoom. */
+  *, *::before, *::after {
+    touch-action: pan-x pan-y;
+  }
+
   body {
     @apply bg-background text-foreground;
   }
