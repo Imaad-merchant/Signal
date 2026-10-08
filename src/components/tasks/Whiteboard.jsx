@@ -20,7 +20,8 @@ import {
   fillOpacityOf,
   strokeOpacityOf,
 } from "./whiteboard/geometry";
-import Toolbar from "./whiteboard/Toolbar";
+import Toolbar, { ActiveToolIcon } from "./whiteboard/Toolbar";
+import FloatingDock from "./whiteboard/FloatingDock";
 import SelectionBar from "./whiteboard/SelectionBar";
 import TextRibbon from "./whiteboard/TextRibbon";
 import DrawDefaultsBar from "./whiteboard/DrawDefaultsBar";
@@ -83,6 +84,8 @@ const sanitizeTextHtml = (html) => {
 export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   const containerRef = useRef(null);
   const isMobile = useIsMobile();
+  // Phones: contextual formatting is opt-in (Format toggle) so it doesn't cover the board.
+  const [formatOpen, setFormatOpen] = useState(false);
   const [containerSize, setContainerSize] = useState({ w: 800, h: 600 });
 
   // Viewport: x, y are screen offset; zoom is scale factor
@@ -1505,6 +1508,90 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     if (changed) setObjects(grown);
   }, [objects, editingTextId, drawingObject, draggingSelection, measureTextContent]);
 
+  // Contextual row: text ribbon / selection bar / draw defaults.
+  const contextualBar = (() => {
+    const focusedTextId = editingTextId || (selectedIds.length === 1 ? selectedIds[0] : null);
+    const focusedText = focusedTextId ? objects.find(o => o.id === focusedTextId && o.type === "text") : null;
+    if (focusedText) {
+      return (
+        <TextRibbon
+          textObject={focusedText}
+          isEditing={editingTextId === focusedTextId}
+          editingTextRef={editingTextRef}
+          onFinishEdit={() => {
+            const el = editingTextRef.current;
+            if (el && editingTextId === focusedTextId) finishTextEdit(focusedTextId, el.innerHTML);
+          }}
+          isMobile={isMobile}
+          onUpdate={(patch) => {
+            pushHistory(objects);
+            setObjects(prev => prev.map(o => o.id === focusedTextId ? { ...o, ...patch } : o));
+          }}
+        />
+      );
+    }
+    // Selection action bar when 1+ non-text objects are selected
+    if (selectedIds.length > 0) {
+      const first = objects.find(o => o.id === selectedIds[0]);
+      const single = selectedIds.length === 1 ? first : null;
+      const singleBounds = single ? objectBounds(single) : null;
+      return (
+        <SelectionBar
+          count={selectedIds.length}
+          selected={objects.filter(o => selectedIds.includes(o.id))}
+          locked={!!first?.locked}
+          fill={first?.fill ?? "transparent"}
+          opacity={first?.opacity ?? 1}
+          fillOpacity={first?.fillOpacity ?? first?.opacity ?? 1}
+          strokeOpacity={first?.strokeOpacity ?? first?.opacity ?? 1}
+          strokeStyle={first?.strokeStyle ?? "solid"}
+          cornerRadius={first?.cornerRadius}
+          arrowHeads={first?.arrowHeads ?? "end"}
+          singleType={single?.type ?? null}
+          singleBounds={singleBounds}
+          singleRotation={single ? Math.round(single.rotation || 0) : 0}
+          onSetFill={(c) => setSelectionProp({ fill: c })}
+          onSetOpacity={(v) => setSelectionProp({ opacity: v })}
+          onSetFillOpacity={(v) => setSelectionProp({ fillOpacity: v })}
+          onSetStrokeOpacity={(v) => setSelectionProp({ strokeOpacity: v })}
+          onSetStrokeStyle={(v) => setSelectionProp({ strokeStyle: v })}
+          onSetCornerRadius={(v) => setSelectionProp({ cornerRadius: v })}
+          onSetArrowHeads={(v) => setSelectionProp({ arrowHeads: v })}
+          onSetGeometry={setSelectionGeometry}
+          onAlign={alignSelection}
+          onDistribute={distributeSelection}
+          onBringToFront={bringToFront}
+          onBringForward={bringForward}
+          onSendBackward={sendBackward}
+          onSendToBack={sendToBack}
+          onGroup={groupSelection}
+          onUngroup={ungroupSelection}
+          onToggleLock={toggleLock}
+          onDuplicate={duplicateSelection}
+          onDelete={deleteSelection}
+          onExportPNG={exportPNG}
+          onExportSVG={exportSVG}
+        />
+      );
+    }
+    // Draw tool active with nothing selected → defaults bar
+    if (["pen", "text", "rect", "ellipse", "arrow", "line", "triangle", "diamond", "roundedRect", "star"].includes(tool)) {
+      return (
+        <DrawDefaultsBar
+          tool={tool}
+          color={color}
+          setColor={setColor}
+          strokeWidth={strokeWidth}
+          setStrokeWidth={setStrokeWidth}
+          fontSize={fontSize}
+          setFontSize={setFontSize}
+          isMobile={isMobile}
+        />
+      );
+    }
+    return null;
+  })();
+
   return (
     <div className="relative h-full flex flex-col bg-[#1a1b1c]">
       {headerSlot}
@@ -1544,8 +1631,10 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
           backgroundPosition: `${viewport.x}px ${viewport.y}px`,
         } : { backgroundColor: "#1a1b1c" }}
       >
-        {/* Top toolbar: persistent tools + contextual formatting, side by side */}
-        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex flex-row flex-wrap items-start justify-center gap-1.5 max-w-[calc(100vw-1.5rem)]">
+        {/* Floating tool dock (TradingView-style): drag by the grip, collapse with
+            the chevron. Contextual rows hang under it; on phones they stay tucked
+            behind the Format toggle so the board isn't covered. */}
+        <FloatingDock collapsedIcon={<ActiveToolIcon tool={tool} />}>
           <Toolbar
             tool={tool}
             setTool={setTool}
@@ -1561,94 +1650,13 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
             onSetZoom={setZoomLevel}
             onZoomFit={fitToContent}
             isMobile={isMobile}
+            formatAvailable={isMobile && !!contextualBar}
+            formatOpen={formatOpen}
+            onToggleFormat={() => setFormatOpen(o => !o)}
           />
-
-          {/* Row 2 — contextual: text ribbon / selection bar / draw defaults */}
-          {(() => {
-            const focusedTextId = editingTextId || (selectedIds.length === 1 ? selectedIds[0] : null);
-            const focusedText = focusedTextId ? objects.find(o => o.id === focusedTextId && o.type === "text") : null;
-            if (focusedText) {
-              return (
-                <TextRibbon
-                  textObject={focusedText}
-                  isEditing={editingTextId === focusedTextId}
-                  editingTextRef={editingTextRef}
-                  onFinishEdit={() => {
-                    const el = editingTextRef.current;
-                    if (el && editingTextId === focusedTextId) finishTextEdit(focusedTextId, el.innerHTML);
-                  }}
-                  isMobile={isMobile}
-                  onUpdate={(patch) => {
-                    pushHistory(objects);
-                    setObjects(prev => prev.map(o => o.id === focusedTextId ? { ...o, ...patch } : o));
-                  }}
-                />
-              );
-            }
-            // Selection action bar when 1+ non-text objects are selected
-            if (selectedIds.length > 0) {
-              const first = objects.find(o => o.id === selectedIds[0]);
-              const single = selectedIds.length === 1 ? first : null;
-              const singleBounds = single ? objectBounds(single) : null;
-              return (
-                <SelectionBar
-                  count={selectedIds.length}
-                  selected={objects.filter(o => selectedIds.includes(o.id))}
-                  locked={!!first?.locked}
-                  fill={first?.fill ?? "transparent"}
-                  opacity={first?.opacity ?? 1}
-                  fillOpacity={first?.fillOpacity ?? first?.opacity ?? 1}
-                  strokeOpacity={first?.strokeOpacity ?? first?.opacity ?? 1}
-                  strokeStyle={first?.strokeStyle ?? "solid"}
-                  cornerRadius={first?.cornerRadius}
-                  arrowHeads={first?.arrowHeads ?? "end"}
-                  singleType={single?.type ?? null}
-                  singleBounds={singleBounds}
-                  singleRotation={single ? Math.round(single.rotation || 0) : 0}
-                  onSetFill={(c) => setSelectionProp({ fill: c })}
-                  onSetOpacity={(v) => setSelectionProp({ opacity: v })}
-                  onSetFillOpacity={(v) => setSelectionProp({ fillOpacity: v })}
-                  onSetStrokeOpacity={(v) => setSelectionProp({ strokeOpacity: v })}
-                  onSetStrokeStyle={(v) => setSelectionProp({ strokeStyle: v })}
-                  onSetCornerRadius={(v) => setSelectionProp({ cornerRadius: v })}
-                  onSetArrowHeads={(v) => setSelectionProp({ arrowHeads: v })}
-                  onSetGeometry={setSelectionGeometry}
-                  onAlign={alignSelection}
-                  onDistribute={distributeSelection}
-                  onBringToFront={bringToFront}
-                  onBringForward={bringForward}
-                  onSendBackward={sendBackward}
-                  onSendToBack={sendToBack}
-                  onGroup={groupSelection}
-                  onUngroup={ungroupSelection}
-                  onToggleLock={toggleLock}
-                  onDuplicate={duplicateSelection}
-                  onDelete={deleteSelection}
-                  onExportPNG={exportPNG}
-                  onExportSVG={exportSVG}
-                />
-              );
-            }
-            // Draw tool active with nothing selected → defaults bar
-            if (["pen", "text", "rect", "ellipse", "arrow", "line", "triangle", "diamond", "roundedRect", "star"].includes(tool)) {
-              return (
-                <DrawDefaultsBar
-                  tool={tool}
-                  color={color}
-                  setColor={setColor}
-                  strokeWidth={strokeWidth}
-                  setStrokeWidth={setStrokeWidth}
-                  fontSize={fontSize}
-                  setFontSize={setFontSize}
-                  isMobile={isMobile}
-                />
-              );
-            }
-            return null;
-          })()}
-
+          {(!isMobile || formatOpen) && contextualBar}
           {/* Image controls — flip / corner radius / crop / replace */}
-          {selectedImage && tool === "select" && (
+          {selectedImage && tool === "select" && (!isMobile || formatOpen) && (
             <div
               className="flex items-center gap-1 bg-[#2a2b2d]/95 backdrop-blur border border-white/[0.08] rounded-lg px-1.5 py-1 shadow-2xl"
               onPointerDown={(e) => e.stopPropagation()}
@@ -1688,7 +1696,7 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
               <input ref={replaceInputRef} type="file" accept="image/*" className="hidden" onChange={onReplaceFile} />
             </div>
           )}
-        </div>
+        </FloatingDock>
 
         {/* Whiteboard right-click context menu */}
         {ctxMenu && (
