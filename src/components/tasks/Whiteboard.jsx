@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { Pencil, ZoomIn, ZoomOut, Maximize2, RotateCw, FlipHorizontal, FlipVertical, Crop, ImagePlus, Check } from "lucide-react";
 import DOMPurify from "dompurify";
 import AIPromptDialog from "./AIPromptDialog";
@@ -121,6 +122,9 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   const loadedRef = useRef(false);
   const skipSaveRef = useRef(false); // suppress the save triggered by loading a page
   const editingTextRef = useRef(null);
+  // Touch tap tracking for tap-to-edit text (phones don't reliably send dblclick).
+  const tapRef = useRef(null); // { id, wasSelected, x, y, t } for the current press
+  const lastTextTapRef = useRef({ id: null, t: 0 }); // previous completed tap on a text box
   // Mirror of the editing box's HTML, updated on every keystroke. A plain string
   // ref (not the DOM node) so it survives unmount/teardown when the flush reads it.
   const editingHtmlRef = useRef(null);
@@ -660,6 +664,29 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     setHistoryVersion(v => v + 1);
   }, [objects]);
 
+  // Enter text editing and focus the box synchronously, inside the user's tap:
+  // iOS only raises the keyboard for a focus() made during the gesture, and the
+  // effect below runs too late for that.
+  const beginTextEdit = (id, extra = null) => {
+    flushSync(() => {
+      extra?.();
+      setDraggingSelection(null);
+      setSelectedIds([id]);
+      setEditingTextId(id);
+    });
+    const el = editingTextRef.current;
+    if (!el) return;
+    el.focus();
+    try {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch { /* ignore */ }
+  };
+
   // Focus the text-edit box as soon as it mounts (React's autoFocus only applies
   // to form controls, not a contentEditable div) and put the caret at the end, so
   // typing — and Tab — go into the box rather than the page.
@@ -788,6 +815,9 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
         } else {
           expanded.push(hit.id);
         }
+        tapRef.current = hit.type === "text" && e.pointerType !== "mouse"
+          ? { id: hit.id, wasSelected: selectedIds.length === 1 && selectedIds[0] === hit.id, x: e.clientX, y: e.clientY, t: Date.now() }
+          : null;
         const newSelection = e.shiftKey ? [...new Set([...selectedIds, ...expanded])] : expanded;
         setSelectedIds(newSelection);
         const dragIds = selectedIds.includes(hit.id) && !e.shiftKey ? selectedIds : expanded;
@@ -823,6 +853,10 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     }
 
     if (tool === "text") {
+      // Touch: suppress the compatibility mousedown that follows this tap — it
+      // lands just outside the new box (whose corner is the tap point), steals
+      // focus, and the still-empty box is discarded on blur.
+      if (e.pointerType !== "mouse") e.preventDefault();
       pushHistory(objects);
       // Start a drag-create for the text box (like rect)
       setDrawingObject({ id: uid(), type: "text", x, y, w: 0, h: 0, text: "", color, fontSize });
@@ -937,6 +971,24 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     if (panning) { setPanning(false); lastPointer.current = null; return; }
     if (draggingSelection) {
       dragHistoryRef.current = false;
+      // Touch: tapping a text box that's already selected — or double-tapping
+      // one — opens it for editing (the mouse path is onDoubleClick).
+      const tap = tapRef.current;
+      tapRef.current = null;
+      if (tap && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 10 && Date.now() - tap.t < 500) {
+        const prev = lastTextTapRef.current;
+        const doubleTap = prev.id === tap.id && tap.t - prev.t < 400;
+        lastTextTapRef.current = { id: tap.id, t: tap.t };
+        if (tap.wasSelected || doubleTap) {
+          const snap = draggingSelection.originals;
+          // Undo any snap-to-grid nudge the tap's jitter may have caused.
+          beginTextEdit(tap.id, () => setObjects(prevObjs => prevObjs.map(o => {
+            const orig = snap.find(s => s.id === o.id);
+            return orig ? orig.snapshot : o;
+          })));
+          return;
+        }
+      }
       setDraggingSelection(null);
       return;
     }
@@ -984,10 +1036,8 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
           if (obj.h < 0) obj = { ...obj, y: obj.y + obj.h, h: -obj.h };
         }
         if (snapToGrid) obj = snapObj(obj);
-        setObjects(prev => [...prev, obj]);
-        setEditingTextId(obj.id);
-        setSelectedIds([obj.id]);
-        setTool("select");
+        const created = obj;
+        beginTextEdit(created.id, () => { setObjects(prev => [...prev, created]); setTool("select"); });
         return;
       }
       if (obj.type === "line" || obj.type === "arrow") {
@@ -2006,6 +2056,15 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
                   >
                     <div
                       xmlns="http://www.w3.org/1999/xhtml"
+                      onClick={(e) => {
+                        // A link in a text box shouldn't navigate away on a plain
+                        // tap/click — that's for selecting and editing the box.
+                        // ⌘/Ctrl-click still opens it in a new tab.
+                        const a = e.target.closest?.("a[href]");
+                        if (!a) return;
+                        e.preventDefault();
+                        if (e.metaKey || e.ctrlKey) window.open(a.href, "_blank", "noopener,noreferrer");
+                      }}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         if (tool === "select") {
@@ -2069,11 +2128,15 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
             const p = rotatePt(wx, wy, oc.x, oc.y, rot);
             return { left: p.x * z + viewport.x, top: p.y * z + viewport.y };
           };
+          // On a short text box the 28px top/bottom-middle touch targets cover the
+          // text itself, so a tap meant to edit starts a resize instead. Drop them
+          // until the box is tall enough on screen for them to sit clear.
+          const shortText = o.type === "text" && b.h * z < 72;
           const handles = [
             { k: "nw", x: b.x, y: b.y }, { k: "n", x: b.x + b.w / 2, y: b.y }, { k: "ne", x: b.x + b.w, y: b.y },
             { k: "e", x: b.x + b.w, y: b.y + b.h / 2 }, { k: "se", x: b.x + b.w, y: b.y + b.h },
             { k: "s", x: b.x + b.w / 2, y: b.y + b.h }, { k: "sw", x: b.x, y: b.y + b.h }, { k: "w", x: b.x, y: b.y + b.h / 2 },
-          ];
+          ].filter(hd => !(shortText && (hd.k === "n" || hd.k === "s")));
           const cScr = { left: oc.x * z + viewport.x, top: oc.y * z + viewport.y };
           const topMid = w2s(b.x + b.w / 2, b.y);
           const rdx = topMid.left - cScr.left, rdy = topMid.top - cScr.top;
@@ -2262,6 +2325,10 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
               dangerouslySetInnerHTML={{ __html: sanitizeTextHtml(o.text) }}
               className="absolute rounded outline-none overflow-auto ring-2 ring-blue-400/60"
               style={{
+                // The board is select-none; Safari won't place a caret or edit a
+                // contentEditable under user-select:none, so opt back in here.
+                userSelect: "text",
+                WebkitUserSelect: "text",
                 left: sx,
                 top: sy,
                 // Match the static foreignObject render exactly so the box doesn't
