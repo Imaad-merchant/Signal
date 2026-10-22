@@ -5,6 +5,7 @@ import ImportTasksDialog from "../components/dashboard/ImportTasksDialog";
 import { useNavigate } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import SetupChecklist from "../components/SetupChecklist";
+import PushSettings from "../components/donna/PushSettings";
 
 
 
@@ -31,21 +32,9 @@ function Row({ label, description, children }) {
   );
 }
 
-function Toggle({ checked, onChange }) {
-  return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${checked ? "bg-blue-600" : "bg-white/10"}`}
-    >
-      <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`} />
-    </button>
-  );
-}
-
 export default function Settings() {
   const navigate = useNavigate();
   const [weekStart, setWeekStart] = useState(() => localStorage.getItem("pulse_week_start") || "Sunday");
-  const [notifications, setNotifications] = useState(() => localStorage.getItem("pulse_notifications") !== "false");
   const [saved, setSaved] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -327,7 +316,6 @@ export default function Settings() {
 
   const handleSave = () => {
     localStorage.setItem("pulse_week_start", weekStart);
-    localStorage.setItem("pulse_notifications", notifications);
     window.dispatchEvent(new Event("focus"));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -458,9 +446,7 @@ export default function Settings() {
 
       {/* Notifications */}
       <Section title="Notifications">
-        <Row label="Task Reminders" description="Get reminded about upcoming tasks">
-          <Toggle checked={notifications} onChange={setNotifications} />
-        </Row>
+        <PushSettings />
       </Section>
 
       {/* About */}

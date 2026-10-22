@@ -137,14 +137,34 @@ function briefingCopy(slot) {
     : { title: "Good morning", body: "Your briefing's ready — tap to see what's on today.", tag: "signal-morning" };
 }
 
+// Lock-screen copy with the real agenda: "2 due today · 1 overdue" and the
+// first couple of titles, so the notification is useful without opening the app.
+function briefingPushCopy(slot, agenda) {
+  const base = briefingCopy(slot);
+  if (!agenda) return base;
+  const { overdue, dueToday, commitments } = agenda;
+  const counts = [
+    dueToday.length && `${dueToday.length} due today`,
+    overdue.length && `${overdue.length} overdue`,
+    commitments.length && `${commitments.length} open commitment${commitments.length === 1 ? "" : "s"}`,
+  ].filter(Boolean);
+  if (!counts.length) {
+    return { ...base, body: slot === "evening" ? "Nothing left open today — nice. Tap to log your day." : "Nothing due today — you're all clear." };
+  }
+  const names = [...overdue, ...dueToday].map((t) => t.title).filter(Boolean).slice(0, 2);
+  const tail = names.length ? ` — ${names.join(", ")}${overdue.length + dueToday.length > names.length ? "…" : ""}` : "";
+  return { ...base, body: `${counts.join(" · ")}${tail}` };
+}
+
 // Send a Web Push to every stored subscription. Prunes expired ones.
 async function sendBriefingPush(db, slot) {
-  const pub = process.env.VAPID_PUBLIC_KEY;
+  const pub = process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY;
   const priv = process.env.VAPID_PRIVATE_KEY;
   if (!pub || !priv) return 0;
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:signal@example.com", pub, priv);
 
-  const copy = briefingCopy(slot);
+  const agenda = await gatherAgenda(db).catch(() => null);
+  const copy = briefingPushCopy(slot, agenda);
   const payload = JSON.stringify({ ...copy, url: "/Donna" });
   const snap = await db.collection("push_subscriptions").get();
   let sent = 0;

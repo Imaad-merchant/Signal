@@ -73,6 +73,9 @@ export default async function handler(req, res) {
     }
     if (route === "command") return await command(auth, body, res);
     if (route === "push-subscribe") return await pushSubscribe(auth, body, res);
+    if (route === "push-unsubscribe") return await pushUnsubscribe(auth, body, res);
+    if (route === "push-status") return await pushStatus(auth, res);
+    if (route === "push-test") return await pushTest(auth, res);
     if (route === "send-email") return await sendEmail(body, res);
     if (route === "seed") return await seed(body, res);
     if (route === "google-connect") return await googleConnect(auth, res);
@@ -1075,12 +1078,64 @@ async function pushSubscribe(auth, body, res) {
   if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
   const db = getAdminDb();
   // Deterministic id from the endpoint so re-subscribing updates in place.
-  const id = Buffer.from(sub.endpoint).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 200);
+  const id = pushDocId(sub.endpoint);
   await db.collection("push_subscriptions").doc(id).set(
     { userId: auth.uid, subscription: sub, updated_date: new Date().toISOString() },
     { merge: true }
   );
   return res.status(200).json({ subscribed: true });
+}
+
+// ---- Web Push (lock-screen notifications) ----
+// The public key is served here so the app doesn't need it baked in at build
+// time; only VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY have to be set on the server.
+function pushKeys() {
+  const pub = process.env.VAPID_PUBLIC_KEY || process.env.VITE_VAPID_PUBLIC_KEY || "";
+  const priv = process.env.VAPID_PRIVATE_KEY || "";
+  return { pub, priv, ready: !!(pub && priv) };
+}
+
+const pushDocId = (endpoint) => Buffer.from(endpoint).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 200);
+
+async function pushStatus(auth, res) {
+  const { pub, ready } = pushKeys();
+  let devices = 0;
+  if (isAdminConfigured()) {
+    const snap = await getAdminDb().collection("push_subscriptions").where("userId", "==", auth.uid).get();
+    devices = snap.size;
+  }
+  return res.status(200).json({ ready, publicKey: pub || null, devices });
+}
+
+async function pushUnsubscribe(auth, body, res) {
+  const endpoint = body.endpoint;
+  if (!endpoint) return res.status(400).json({ error: "endpoint required" });
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
+  const ref = getAdminDb().collection("push_subscriptions").doc(pushDocId(endpoint));
+  const doc = await ref.get();
+  if (doc.exists && doc.data().userId === auth.uid) await ref.delete();
+  return res.status(200).json({ unsubscribed: true });
+}
+
+// Send a test notification to every device this user has turned notifications on for.
+async function pushTest(auth, res) {
+  const { pub, priv, ready } = pushKeys();
+  if (!ready) return res.status(503).json({ error: "Push keys aren't set on the server (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)." });
+  if (!isAdminConfigured()) return res.status(503).json({ error: "Server not configured" });
+  const { default: webpush } = await import("web-push");
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || "mailto:signal@example.com", pub, priv);
+  const snap = await getAdminDb().collection("push_subscriptions").where("userId", "==", auth.uid).get();
+  if (snap.empty) return res.status(200).json({ sent: 0, error: "No devices have notifications turned on yet." });
+  const payload = JSON.stringify({ title: "Signal", body: "Notifications are working ✓", url: "/Settings", tag: "signal-test" });
+  let sent = 0, failed = 0;
+  for (const doc of snap.docs) {
+    try { await webpush.sendNotification(doc.data().subscription, payload); sent++; }
+    catch (err) {
+      failed++;
+      if (err && (err.statusCode === 404 || err.statusCode === 410)) await doc.ref.delete().catch(() => {});
+    }
+  }
+  return res.status(200).json({ sent, failed });
 }
 
 // ---- route: send-email (the user reviewed the draft and pressed Send) ----
