@@ -125,6 +125,7 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   // Touch tap tracking for tap-to-edit text (phones don't reliably send dblclick).
   const tapRef = useRef(null); // { id, wasSelected, x, y, t } for the current press
   const lastTextTapRef = useRef({ id: null, t: 0 }); // previous completed tap on a text box
+  const tapSelectRef = useRef(null); // touch press on an unselected object: pan, or select if it's a tap
   // Mirror of the editing box's HTML, updated on every keystroke. A plain string
   // ref (not the DOM node) so it survives unmount/teardown when the flush reads it.
   const editingHtmlRef = useRef(null);
@@ -774,7 +775,11 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
     // Right-click handled by onContextMenu, not here
     if (e.button === 2) return;
 
-    // Track pointers for pinch-zoom
+    // Track pointers for pinch-zoom. A primary pointer starts a fresh gesture, so
+    // drop any entry whose pointerup never reached us (app backgrounded mid-touch,
+    // target removed during the gesture…). A stale entry would make every later
+    // one-finger drag count as a two-finger pinch and zoom instead of pan.
+    if (e.isPrimary) { pointers.current.clear(); pinchRef.current = null; }
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
       // Second finger down → start a pinch, cancelling any single-finger action.
@@ -814,6 +819,17 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
           expanded.push(...memberIds);
         } else {
           expanded.push(hit.id);
+        }
+        // Touch: a drag that starts on an object that isn't selected pans the
+        // board — on a dense board a thumb drag almost always means "look
+        // elsewhere". A tap (no movement) still selects it; drag it once selected
+        // to move it.
+        if (e.pointerType === "touch" && !e.shiftKey && !expanded.some(id => selectedIds.includes(id))) {
+          tapSelectRef.current = { ids: expanded, id: hit.id, isText: hit.type === "text", x: e.clientX, y: e.clientY, t: Date.now() };
+          setPanning(true);
+          lastPointer.current = { x: e.clientX, y: e.clientY };
+          try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* pointer already gone */ }
+          return;
         }
         tapRef.current = hit.type === "text" && e.pointerType !== "mouse"
           ? { id: hit.id, wasSelected: selectedIds.length === 1 && selectedIds[0] === hit.id, x: e.clientX, y: e.clientY, t: Date.now() }
@@ -968,7 +984,17 @@ export default function Whiteboard({ page, onSave, headerSlot, onSaveIssue }) {
   const handlePointerUp = (e) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinchRef.current = null;
-    if (panning) { setPanning(false); lastPointer.current = null; return; }
+    if (panning) {
+      setPanning(false); lastPointer.current = null;
+      // A touch that landed on an unselected object and didn't move is a tap: select it.
+      const ts = tapSelectRef.current;
+      tapSelectRef.current = null;
+      if (ts && Math.hypot(e.clientX - ts.x, e.clientY - ts.y) < 10) {
+        setSelectedIds(ts.ids);
+        if (ts.isText) lastTextTapRef.current = { id: ts.id, t: ts.t };
+      }
+      return;
+    }
     if (draggingSelection) {
       dragHistoryRef.current = false;
       // Touch: tapping a text box that's already selected — or double-tapping
